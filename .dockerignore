@@ -1,0 +1,37 @@
+# Version control
+.git
+.gitignore
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+*.egg-info/
+
+# Virtual environments
+.venv/
+env/
+venv/
+ENV/
+
+# Secrets
+.env
+*.pem
+*.key
+
+# Tests, samples, and other non-runtime content
+# (NOTE: do not exclude *.md globally - .claude/agents/*.md prompts are
+# copied into the image and read at runtime by app/services/orchestrator.py)
+tests/
+sample_docs/
+README.md
+
+# Docker / editor / OS artifacts
+.docker/
+.dockerignore
+Dockerfile
+docker-compose.yml
+.vscode/
+.idea/
+.DS_Store
