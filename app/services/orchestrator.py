@@ -109,11 +109,18 @@ _PRIMARY_FALLBACK_MAP = {
 }
 
 
+def _clean_markdown_emphasis(text: str) -> str:
+    """Strip bold/italic '*' wrapping. pymupdf4llm renders headings and
+    table headers as e.g. '**Cabling & Ports**', which would otherwise fail
+    exact comparisons against plain heading/header names."""
+    return text.strip("*").strip()
+
+
 def _split_sections(text: str) -> dict[str, list[str]]:
     sections: dict[str, list[str]] = {"_preamble": []}
     current = "_preamble"
     for line in text.splitlines():
-        heading_candidate = _HEADING_PREFIX_RE.sub("", line.strip())
+        heading_candidate = _clean_markdown_emphasis(_HEADING_PREFIX_RE.sub("", line.strip()))
         if heading_candidate.lower() in _KNOWN_HEADINGS:
             current = heading_candidate.lower()
             sections.setdefault(current, [])
@@ -145,7 +152,10 @@ def _parse_table_rows(lines: list[str]) -> list[list[str]]:
     for line in lines:
         if "|" not in line:
             continue
-        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        cells = [
+            _clean_markdown_emphasis(cell.strip())
+            for cell in line.strip().strip("|").split("|")
+        ]
         if not cells or all(re.fullmatch(r"-+", c) for c in cells):
             continue
         if [c.lower() for c in cells] in (["port", "type", "notes"], ["led", "meaning"]):
@@ -158,7 +168,7 @@ def _detect_device_name(text: str) -> str:
     for line in text.splitlines():
         stripped = line.strip()
         if stripped:
-            title = _HEADING_PREFIX_RE.sub("", stripped)
+            title = _clean_markdown_emphasis(_HEADING_PREFIX_RE.sub("", stripped))
             return _TITLE_SUFFIX_RE.sub("", title).strip()
     return "Unknown Device"
 
