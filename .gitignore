@@ -14,7 +14,9 @@ ENV/
 *.key
 
 # Data / Uploads / Tests
-sample_docs/
+# (NOTE: do not exclude sample_docs/ - its .md/.pdf fixtures are committed
+# assets required by the test suite, the Docker build, and the /api/v1/samples
+# demo endpoint, not scratch upload data)
 .pytest_cache/
 .coverage
 
