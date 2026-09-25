@@ -20,11 +20,14 @@ ENV/
 *.pem
 *.key
 
-# Tests, samples, and other non-runtime content
+# Tests and other non-runtime content
 # (NOTE: do not exclude *.md globally - .claude/agents/*.md prompts are
 # copied into the image and read at runtime by app/services/orchestrator.py)
+# (NOTE: do not exclude sample_docs/ - its PDFs are copied into the image
+# and served at runtime by the GET /api/v1/samples demo endpoint)
 tests/
-sample_docs/
+sample_docs/*.md
+sample_docs/generate_samples.py
 README.md
 
 # Docker / editor / OS artifacts

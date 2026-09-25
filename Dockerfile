@@ -23,6 +23,7 @@ WORKDIR /app
 COPY --from=builder /root/.local /home/appuser/.local
 COPY app ./app
 COPY .claude ./.claude
+COPY sample_docs ./sample_docs
 
 ENV PATH=/home/appuser/.local/bin:$PATH \
     PYTHONUNBUFFERED=1 \

@@ -2,15 +2,28 @@
 
 from __future__ import annotations
 
+import base64
+from pathlib import Path
+
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from app.schemas import BattlecardResponse
 from app.services.orchestrator import extract_device_spec, synthesize_battlecard
 from app.tools.pdf_parser import extract_text_from_pdf
 
-app = FastAPI(title="QSG Synthesizer", version="0.1.0")
+BASE_DIR = Path(__file__).resolve().parent.parent
+STATIC_DIR = BASE_DIR / "app" / "static"
+SAMPLE_DOCS_DIR = BASE_DIR / "sample_docs"
+
+app = FastAPI(
+    title="QSG Synthesizer",
+    description="Automated Hardware Spec & Quick Start Guide Comparison Engine",
+    version="0.1.0",
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -20,10 +33,36 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+
+@app.get("/", include_in_schema=False)
+def serve_dashboard() -> FileResponse:
+    return FileResponse(STATIC_DIR / "index.html")
+
 
 @app.get("/healthz")
 def healthz() -> dict:
     return {"status": "healthy"}
+
+
+@app.get("/api/v1/samples")
+def get_samples() -> dict:
+    """Base64-encoded sample QSG PDFs, for the dashboard's 1-click demo."""
+
+    def _encode(filename: str) -> dict:
+        path = SAMPLE_DOCS_DIR / filename
+        if not path.exists():
+            raise HTTPException(status_code=404, detail=f"Sample '{filename}' not found.")
+        return {
+            "filename": filename,
+            "content_base64": base64.b64encode(path.read_bytes()).decode("ascii"),
+        }
+
+    return {
+        "device_a": _encode("device_a_qsg.pdf"),
+        "device_b": _encode("device_b_qsg.pdf"),
+    }
 
 
 class CompareTextRequest(BaseModel):

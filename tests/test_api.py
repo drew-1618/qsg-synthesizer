@@ -15,6 +15,23 @@ def test_healthz():
     assert response.json() == {"status": "healthy"}
 
 
+def test_root_serves_dashboard_html():
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+    assert "<html" in response.text.lower()
+
+
+def test_get_samples_returns_base64_encoded_pdfs():
+    response = client.get("/api/v1/samples")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["device_a"]["filename"] == "device_a_qsg.pdf"
+    assert data["device_b"]["filename"] == "device_b_qsg.pdf"
+    assert len(data["device_a"]["content_base64"]) > 0
+    assert len(data["device_b"]["content_base64"]) > 0
+
+
 class TestCompareText:
     def _post(self):
         device_a_text = (SAMPLE_DOCS_DIR / "device_a_qsg.md").read_text(encoding="utf-8")
