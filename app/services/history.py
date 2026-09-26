@@ -73,3 +73,23 @@ def get_comparison(history_id: str) -> Optional[HistoryRecord]:
     if not path.exists():
         return None
     return HistoryRecord.model_validate_json(path.read_text(encoding="utf-8"))
+
+
+def delete_comparison(history_id: str) -> bool:
+    if not _ID_PATTERN.match(history_id):
+        return False
+    path = HISTORY_DIR / f"{history_id}.json"
+    if not path.exists():
+        return False
+    path.unlink()
+    return True
+
+
+def clear_history() -> int:
+    if not HISTORY_DIR.exists():
+        return 0
+    deleted = 0
+    for path in HISTORY_DIR.glob("*.json"):
+        path.unlink()
+        deleted += 1
+    return deleted

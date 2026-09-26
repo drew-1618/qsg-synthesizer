@@ -153,3 +153,15 @@ def export_history_pdf(history_id: str) -> Response:
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="battlecard-{history_id}.pdf"'},
     )
+
+
+@app.delete("/api/v1/history/{history_id}", status_code=204, response_class=Response)
+def delete_history_item(history_id: str) -> Response:
+    if not history.delete_comparison(history_id):
+        raise HTTPException(status_code=404, detail=f"History item '{history_id}' not found.")
+    return Response(status_code=204)
+
+
+@app.delete("/api/v1/history")
+def clear_all_history() -> dict:
+    return {"deleted": history.clear_history()}

@@ -111,10 +111,16 @@
     <section class="bg-white rounded-xl border border-slate-200 p-6">
       <div class="flex items-center justify-between mb-3">
         <p class="text-xs font-semibold uppercase tracking-wide text-slate-400">Recent Comparisons</p>
-        <button id="refresh-history-btn" type="button"
-                class="text-xs text-indigo-600 hover:text-indigo-800 font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 rounded">
-          Refresh
-        </button>
+        <div class="flex items-center gap-3">
+          <button id="clear-history-btn" type="button"
+                  class="text-xs text-red-500 hover:text-red-700 font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400 rounded">
+            Clear All
+          </button>
+          <button id="refresh-history-btn" type="button"
+                  class="text-xs text-indigo-600 hover:text-indigo-800 font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 rounded">
+            Refresh
+          </button>
+        </div>
       </div>
       <ul id="history-list" class="divide-y divide-slate-100 text-sm"></ul>
       <p id="history-empty" class="hidden text-sm text-slate-400">No comparisons yet &mdash; synthesize one to see it here.</p>
@@ -424,13 +430,14 @@
         }
         empty.classList.add("hidden");
         list.innerHTML = items
-          .map(
-            (item) => `
-            <li>
+          .map((item) => {
+            const label = `${escapeHtml(item.device_a_name)} vs ${escapeHtml(item.device_b_name)}`;
+            return `
+            <li class="flex items-center gap-1">
               <button type="button" data-history-id="${item.id}"
-                      class="history-item w-full text-left py-2.5 px-2 -mx-2 rounded-md flex items-center justify-between gap-3 hover:bg-slate-50 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400">
+                      class="history-item flex-1 min-w-0 text-left py-2.5 px-2 -mx-2 rounded-md flex items-center justify-between gap-3 hover:bg-slate-50 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400">
                 <span class="min-w-0">
-                  <span class="block font-medium text-slate-700 truncate">${escapeHtml(item.device_a_name)} vs ${escapeHtml(item.device_b_name)}</span>
+                  <span class="block font-medium text-slate-700 truncate">${label}</span>
                   <span class="block text-xs text-slate-400">${formatTimestamp(item.created_at)}</span>
                 </span>
                 <span class="flex items-center gap-1.5 shrink-0 text-xs font-semibold text-slate-500">
@@ -439,11 +446,21 @@
                   ${item.installation_friction_score_device_b}/10
                 </span>
               </button>
-            </li>`
-          )
+              <button type="button" data-delete-id="${item.id}" aria-label="Delete comparison: ${label}"
+                      class="delete-history-item shrink-0 w-7 h-7 inline-flex items-center justify-center rounded-full text-slate-400 hover:text-red-600 hover:bg-red-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400">
+                &times;
+              </button>
+            </li>`;
+          })
           .join("");
         document.querySelectorAll(".history-item").forEach((btn) =>
           btn.addEventListener("click", () => loadHistoryItem(btn.dataset.historyId))
+        );
+        document.querySelectorAll(".delete-history-item").forEach((btn) =>
+          btn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            deleteHistoryItem(btn.dataset.deleteId);
+          })
         );
         return items;
       } catch {
@@ -466,6 +483,30 @@
         showError(err.message || "Could not load that comparison.");
       }
     }
+
+    async function deleteHistoryItem(id) {
+      if (!window.confirm("Delete this comparison from history?")) return;
+      try {
+        const res = await fetch(`/api/v1/history/${id}`, { method: "DELETE" });
+        if (!res.ok && res.status !== 404) throw new Error("Could not delete that comparison.");
+        if (id === currentHistoryId) setExportLinks(null);
+        await loadHistory();
+      } catch (err) {
+        showError(err.message || "Could not delete that comparison.");
+      }
+    }
+
+    document.getElementById("clear-history-btn").addEventListener("click", async () => {
+      if (!window.confirm("Clear all comparison history? This cannot be undone.")) return;
+      try {
+        const res = await fetch("/api/v1/history", { method: "DELETE" });
+        if (!res.ok) throw new Error("Could not clear history.");
+        setExportLinks(null);
+        await loadHistory();
+      } catch (err) {
+        showError(err.message || "Could not clear history.");
+      }
+    });
 
     document.getElementById("refresh-history-btn").addEventListener("click", loadHistory);
     loadHistory();

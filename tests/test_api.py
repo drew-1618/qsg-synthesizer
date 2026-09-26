@@ -234,3 +234,25 @@ class TestHistory:
     def test_export_unknown_history_id_returns_404(self):
         response = client.get("/api/v1/history/" + "0" * 32 + "/export.md")
         assert response.status_code == 404
+
+    def test_delete_removes_item_from_list(self):
+        self._post_comparison()
+        history_id = client.get("/api/v1/history").json()[0]["id"]
+
+        response = client.delete(f"/api/v1/history/{history_id}")
+        assert response.status_code == 204
+        assert client.get("/api/v1/history").json() == []
+
+    def test_delete_unknown_id_returns_404(self):
+        response = client.delete("/api/v1/history/" + "0" * 32)
+        assert response.status_code == 404
+
+    def test_clear_all_removes_every_item(self):
+        self._post_comparison()
+        self._post_comparison()
+        assert len(client.get("/api/v1/history").json()) == 2
+
+        response = client.delete("/api/v1/history")
+        assert response.status_code == 200
+        assert response.json() == {"deleted": 2}
+        assert client.get("/api/v1/history").json() == []
