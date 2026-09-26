@@ -27,6 +27,10 @@ can be exported as Markdown or PDF.
 - Python 3.11+
 - An `ANTHROPIC_API_KEY` (optional — enables the real `qsg_extractor` LLM
   call; the app runs fully without one via the heuristic fallback)
+- `APP_USERNAME` / `APP_PASSWORD` (optional — set both to gate the dashboard
+  and API behind HTTP Basic Auth; `/healthz` always stays open for health
+  checks. Neither is set by default, so local dev and the test suite run
+  open.)
 
 ## Running locally
 

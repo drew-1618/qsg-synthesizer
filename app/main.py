@@ -6,7 +6,7 @@ import base64
 from pathlib import Path
 from typing import List
 
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from app.schemas import BattlecardResponse, HistoryRecord, HistorySummary
 from app.services import export as export_service
 from app.services import history
+from app.services.auth import require_auth
 from app.services.orchestrator import extract_device_spec, synthesize_battlecard
 from app.services.rate_limiter import RateLimiter
 from app.tools.pdf_parser import extract_text_from_pdf
@@ -47,10 +48,9 @@ app.add_middleware(
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
-
-@app.get("/", include_in_schema=False)
-def serve_dashboard() -> FileResponse:
-    return FileResponse(STATIC_DIR / "index.html")
+# /healthz is intentionally left off this router: Docker's HEALTHCHECK and
+# the CI job curl it without credentials, and it exposes nothing sensitive.
+router = APIRouter(dependencies=[Depends(require_auth)])
 
 
 @app.get("/healthz")
@@ -58,7 +58,12 @@ def healthz() -> dict:
     return {"status": "healthy"}
 
 
-@app.get("/api/v1/samples")
+@router.get("/", include_in_schema=False)
+def serve_dashboard() -> FileResponse:
+    return FileResponse(STATIC_DIR / "index.html")
+
+
+@router.get("/api/v1/samples")
 def get_samples() -> dict:
     """Base64-encoded sample QSG PDFs, for the dashboard's 1-click demo."""
 
@@ -84,7 +89,7 @@ class CompareTextRequest(BaseModel):
     device_b_name: str = "device_b"
 
 
-@app.post(
+@router.post(
     "/api/v1/compare-text",
     response_model=BattlecardResponse,
     dependencies=[Depends(compare_rate_limiter)],
@@ -111,7 +116,7 @@ def _read_pdf_upload(upload: UploadFile) -> str:
     return extract_text_from_pdf(contents)
 
 
-@app.post(
+@router.post(
     "/api/v1/compare-pdfs",
     response_model=BattlecardResponse,
     dependencies=[Depends(compare_rate_limiter)],
@@ -131,7 +136,7 @@ def compare_pdfs(
     return battlecard
 
 
-@app.get("/api/v1/history", response_model=List[HistorySummary])
+@router.get("/api/v1/history", response_model=List[HistorySummary])
 def get_history() -> List[HistorySummary]:
     return history.list_comparisons()
 
@@ -143,12 +148,12 @@ def _get_history_record_or_404(history_id: str) -> HistoryRecord:
     return record
 
 
-@app.get("/api/v1/history/{history_id}", response_model=HistoryRecord)
+@router.get("/api/v1/history/{history_id}", response_model=HistoryRecord)
 def get_history_item(history_id: str) -> HistoryRecord:
     return _get_history_record_or_404(history_id)
 
 
-@app.get(
+@router.get(
     "/api/v1/history/{history_id}/export.md",
     include_in_schema=False,
     dependencies=[Depends(export_rate_limiter)],
@@ -163,7 +168,7 @@ def export_history_markdown(history_id: str) -> Response:
     )
 
 
-@app.get(
+@router.get(
     "/api/v1/history/{history_id}/export.pdf",
     include_in_schema=False,
     dependencies=[Depends(export_rate_limiter)],
@@ -178,13 +183,16 @@ def export_history_pdf(history_id: str) -> Response:
     )
 
 
-@app.delete("/api/v1/history/{history_id}", status_code=204, response_class=Response)
+@router.delete("/api/v1/history/{history_id}", status_code=204, response_class=Response)
 def delete_history_item(history_id: str) -> Response:
     if not history.delete_comparison(history_id):
         raise HTTPException(status_code=404, detail=f"History item '{history_id}' not found.")
     return Response(status_code=204)
 
 
-@app.delete("/api/v1/history")
+@router.delete("/api/v1/history")
 def clear_all_history() -> dict:
     return {"deleted": history.clear_history()}
+
+
+app.include_router(router)
