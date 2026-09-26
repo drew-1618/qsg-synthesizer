@@ -8,11 +8,12 @@ from typing import List
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from app.schemas import BattlecardResponse, HistoryRecord, HistorySummary
+from app.services import export as export_service
 from app.services import history
 from app.services.orchestrator import extract_device_spec, synthesize_battlecard
 from app.tools.pdf_parser import extract_text_from_pdf
@@ -120,9 +121,35 @@ def get_history() -> List[HistorySummary]:
     return history.list_comparisons()
 
 
-@app.get("/api/v1/history/{history_id}", response_model=HistoryRecord)
-def get_history_item(history_id: str) -> HistoryRecord:
+def _get_history_record_or_404(history_id: str) -> HistoryRecord:
     record = history.get_comparison(history_id)
     if record is None:
         raise HTTPException(status_code=404, detail=f"History item '{history_id}' not found.")
     return record
+
+
+@app.get("/api/v1/history/{history_id}", response_model=HistoryRecord)
+def get_history_item(history_id: str) -> HistoryRecord:
+    return _get_history_record_or_404(history_id)
+
+
+@app.get("/api/v1/history/{history_id}/export.md", include_in_schema=False)
+def export_history_markdown(history_id: str) -> Response:
+    record = _get_history_record_or_404(history_id)
+    markdown = export_service.battlecard_to_markdown(record.battlecard)
+    return Response(
+        content=markdown,
+        media_type="text/markdown",
+        headers={"Content-Disposition": f'attachment; filename="battlecard-{history_id}.md"'},
+    )
+
+
+@app.get("/api/v1/history/{history_id}/export.pdf", include_in_schema=False)
+def export_history_pdf(history_id: str) -> Response:
+    record = _get_history_record_or_404(history_id)
+    pdf_bytes = export_service.battlecard_to_pdf_bytes(record.battlecard)
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="battlecard-{history_id}.pdf"'},
+    )

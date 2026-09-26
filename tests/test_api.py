@@ -207,3 +207,30 @@ class TestHistory:
     def test_malformed_history_id_returns_404(self):
         response = client.get("/api/v1/history/../../etc/passwd")
         assert response.status_code == 404
+
+    def test_export_markdown_contains_key_sections(self):
+        self._post_comparison()
+        history_id = client.get("/api/v1/history").json()[0]["id"]
+
+        response = client.get(f"/api/v1/history/{history_id}/export.md")
+        assert response.status_code == 200
+        assert "text/markdown" in response.headers["content-type"]
+        assert "attachment" in response.headers["content-disposition"]
+        body = response.text
+        assert body.startswith("# Battlecard:")
+        assert "Competitive Sales Talk Track" in body
+        assert "Side-by-Side Comparison" in body
+
+    def test_export_pdf_returns_pdf_bytes(self):
+        self._post_comparison()
+        history_id = client.get("/api/v1/history").json()[0]["id"]
+
+        response = client.get(f"/api/v1/history/{history_id}/export.pdf")
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "application/pdf"
+        assert "attachment" in response.headers["content-disposition"]
+        assert response.content[:4] == b"%PDF"
+
+    def test_export_unknown_history_id_returns_404(self):
+        response = client.get("/api/v1/history/" + "0" * 32 + "/export.md")
+        assert response.status_code == 404

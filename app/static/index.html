@@ -123,6 +123,20 @@
     <!-- Results section -->
     <section id="results" class="hidden space-y-8">
 
+      <div class="flex items-center justify-between">
+        <h2 class="text-lg font-bold text-slate-900">Battlecard Results</h2>
+        <div class="flex items-center gap-2">
+          <a id="export-md-btn" href="#"
+             class="text-xs font-medium bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 px-3 py-1.5 rounded-md transition-colors pointer-events-none opacity-40">
+            Export Markdown
+          </a>
+          <a id="export-pdf-btn" href="#"
+             class="text-xs font-medium bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 px-3 py-1.5 rounded-md transition-colors pointer-events-none opacity-40">
+            Export PDF
+          </a>
+        </div>
+      </div>
+
       <!-- Friction scorecards -->
       <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div class="bg-white rounded-xl border border-slate-200 p-6">
@@ -217,6 +231,20 @@
 
   <script>
     const state = { fileA: null, fileB: null };
+    let currentHistoryId = null;
+
+    function setExportLinks(historyId) {
+      currentHistoryId = historyId;
+      const mdBtn = document.getElementById("export-md-btn");
+      const pdfBtn = document.getElementById("export-pdf-btn");
+      const active = Boolean(historyId);
+      mdBtn.href = active ? `/api/v1/history/${historyId}/export.md` : "#";
+      pdfBtn.href = active ? `/api/v1/history/${historyId}/export.pdf` : "#";
+      mdBtn.classList.toggle("pointer-events-none", !active);
+      mdBtn.classList.toggle("opacity-40", !active);
+      pdfBtn.classList.toggle("pointer-events-none", !active);
+      pdfBtn.classList.toggle("opacity-40", !active);
+    }
 
     function escapeHtml(str) {
       const div = document.createElement("div");
@@ -360,8 +388,9 @@
         if (!res.ok) {
           throw new Error(data.detail || "Synthesis failed.");
         }
+        const items = await loadHistory();
+        setExportLinks(items && items[0] ? items[0].id : null);
         renderResults(data);
-        loadHistory();
       } catch (err) {
         showError(err.message || "Something went wrong while synthesizing the battlecard.");
       } finally {
@@ -391,7 +420,7 @@
           list.innerHTML = "";
           empty.textContent = "No comparisons yet — synthesize one to see it here.";
           empty.classList.remove("hidden");
-          return;
+          return items;
         }
         empty.classList.add("hidden");
         list.innerHTML = items
@@ -416,10 +445,12 @@
         document.querySelectorAll(".history-item").forEach((btn) =>
           btn.addEventListener("click", () => loadHistoryItem(btn.dataset.historyId))
         );
+        return items;
       } catch {
         list.innerHTML = "";
         empty.textContent = "Could not load comparison history.";
         empty.classList.remove("hidden");
+        return null;
       }
     }
 
@@ -429,6 +460,7 @@
         const res = await fetch(`/api/v1/history/${id}`);
         const record = await res.json();
         if (!res.ok) throw new Error(record.detail || "Could not load that comparison.");
+        setExportLinks(id);
         renderResults(record.battlecard);
       } catch (err) {
         showError(err.message || "Could not load that comparison.");
