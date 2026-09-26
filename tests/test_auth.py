@@ -59,3 +59,22 @@ def test_wrong_username_is_rejected(monkeypatch):
 
     response = client.get("/api/v1/samples", auth=("someone-else", "hunter2"))
     assert response.status_code == 401
+
+
+def test_static_files_open_by_default_without_configured_credentials(monkeypatch):
+    monkeypatch.delenv("APP_USERNAME", raising=False)
+    monkeypatch.delenv("APP_PASSWORD", raising=False)
+
+    assert client.get("/static/app.js").status_code == 200
+
+
+def test_static_files_require_auth_once_configured(monkeypatch):
+    monkeypatch.setenv("APP_USERNAME", "admin")
+    monkeypatch.setenv("APP_PASSWORD", "hunter2")
+
+    response = client.get("/static/app.js")
+    assert response.status_code == 401
+    assert response.headers["www-authenticate"] == "Basic"
+
+    ok = client.get("/static/app.js", auth=("admin", "hunter2"))
+    assert ok.status_code == 200

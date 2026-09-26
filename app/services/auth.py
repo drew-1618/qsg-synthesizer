@@ -14,7 +14,10 @@ from typing import Optional, Tuple
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
-_security = HTTPBasic(auto_error=False)
+# Shared HTTPBasic scheme: used both as a FastAPI dependency (via require_auth,
+# for normal routes) and called directly against a raw Request (in main.py's
+# static-file middleware, which sits outside FastAPI's dependency injection).
+security = HTTPBasic(auto_error=False)
 
 
 def _configured_credentials() -> Optional[Tuple[str, str]]:
@@ -25,9 +28,7 @@ def _configured_credentials() -> Optional[Tuple[str, str]]:
     return username, password
 
 
-def require_auth(
-    credentials: Optional[HTTPBasicCredentials] = Depends(_security),
-) -> None:
+def verify_credentials(credentials: Optional[HTTPBasicCredentials]) -> None:
     configured = _configured_credentials()
     if configured is None:
         return
@@ -45,3 +46,9 @@ def require_auth(
     password_ok = secrets.compare_digest(credentials.password, expected_password)
     if not (username_ok and password_ok):
         raise unauthorized
+
+
+def require_auth(
+    credentials: Optional[HTTPBasicCredentials] = Depends(security),
+) -> None:
+    verify_credentials(credentials)

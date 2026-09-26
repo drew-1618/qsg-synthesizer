@@ -13,17 +13,18 @@ from fastapi import (
     File,
     HTTPException,
     Query,
+    Request,
     UploadFile,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from app.schemas import BattlecardResponse, HistoryPage, HistoryRecord
 from app.services import export as export_service
 from app.services import history
-from app.services.auth import require_auth
+from app.services.auth import require_auth, security, verify_credentials
 from app.services.orchestrator import extract_device_spec, synthesize_battlecard
 from app.services.rate_limiter import RateLimiter
 from app.tools.pdf_parser import extract_text_from_pdf
@@ -56,6 +57,25 @@ app.add_middleware(
 )
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+
+@app.middleware("http")
+async def guard_static_files(request: Request, call_next):
+    # StaticFiles is mounted directly on `app`, so it never passes through
+    # `router`'s dependencies=[Depends(require_auth)] — gate it here instead,
+    # so a configured Basic Auth also covers the dashboard's JS/CSS.
+    if request.url.path.startswith("/static/"):
+        credentials = await security(request)
+        try:
+            verify_credentials(credentials)
+        except HTTPException as exc:
+            return JSONResponse(
+                status_code=exc.status_code,
+                content={"detail": exc.detail},
+                headers=exc.headers or {},
+            )
+    return await call_next(request)
+
 
 # /healthz is intentionally left off this router: Docker's HEALTHCHECK and
 # the CI job curl it without credentials, and it exposes nothing sensitive.
