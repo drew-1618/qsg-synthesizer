@@ -76,16 +76,30 @@ def _load_all_summaries() -> List[HistorySummary]:
     return summaries
 
 
-def list_comparisons(
-    limit: Optional[int] = None, offset: int = 0
-) -> List[HistorySummary]:
+def _filtered_summaries(query: Optional[str]) -> List[HistorySummary]:
     summaries = _load_all_summaries()
+    if not query:
+        return summaries
+    needle = query.lower()
+    return [
+        s
+        for s in summaries
+        if needle in s.device_a_name.lower() or needle in s.device_b_name.lower()
+    ]
+
+
+def list_comparisons(
+    limit: Optional[int] = None, offset: int = 0, query: Optional[str] = None
+) -> List[HistorySummary]:
+    summaries = _filtered_summaries(query)
     if limit is None:
         return summaries[offset:]
     return summaries[offset : offset + limit]
 
 
-def count_comparisons() -> int:
+def count_comparisons(query: Optional[str] = None) -> int:
+    if query:
+        return len(_filtered_summaries(query))
     if not HISTORY_DIR.exists():
         return 0
     return sum(1 for _ in HISTORY_DIR.glob("*.json"))

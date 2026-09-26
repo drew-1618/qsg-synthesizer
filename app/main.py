@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 from pathlib import Path
+from typing import Optional
 
 from fastapi import (
     APIRouter,
@@ -163,10 +164,11 @@ def compare_pdfs(
 def get_history(
     limit: int = Query(20, ge=1, le=history.MAX_HISTORY_ENTRIES),
     offset: int = Query(0, ge=0),
+    q: Optional[str] = Query(None, max_length=200),
 ) -> HistoryPage:
     return HistoryPage(
-        items=history.list_comparisons(limit=limit, offset=offset),
-        total=history.count_comparisons(),
+        items=history.list_comparisons(limit=limit, offset=offset, query=q),
+        total=history.count_comparisons(query=q),
         limit=limit,
         offset=offset,
     )

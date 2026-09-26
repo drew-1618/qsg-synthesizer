@@ -230,6 +230,18 @@ class TestHistory:
         ids_seen = {item["id"] for item in page1["items"] + page2["items"]}
         assert len(ids_seen) == 3
 
+    def test_search_filters_by_device_name_case_insensitively(self):
+        self._post_comparison()
+        device_a_name = client.get("/api/v1/history").json()["items"][0][
+            "device_a_name"
+        ]
+
+        match = client.get(f"/api/v1/history?q={device_a_name[:4].upper()}")
+        assert match.json()["total"] == 1
+
+        no_match = client.get("/api/v1/history?q=zzz-nonexistent-device")
+        assert no_match.json() == {"items": [], "total": 0, "limit": 20, "offset": 0}
+
     def test_history_item_roundtrips_full_battlecard(self):
         battlecard = self._post_comparison().json()
         history_id = client.get("/api/v1/history").json()["items"][0]["id"]

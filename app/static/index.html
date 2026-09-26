@@ -122,6 +122,8 @@
           </button>
         </div>
       </div>
+      <input id="history-search" type="search" placeholder="Search by device name&hellip;"
+             class="w-full mb-3 text-sm border border-slate-200 rounded-md px-3 py-1.5 placeholder:text-slate-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400" />
       <ul id="history-list" class="divide-y divide-slate-100 text-sm"></ul>
       <p id="history-empty" class="hidden text-sm text-slate-400">No comparisons yet &mdash; synthesize one to see it here.</p>
       <button id="load-more-history-btn" type="button"
@@ -245,6 +247,7 @@
     const HISTORY_PAGE_SIZE = 20;
     let historyOffset = 0;
     let historyItems = [];
+    let historySearch = "";
 
     function setExportLinks(historyId) {
       currentHistoryId = historyId;
@@ -427,7 +430,9 @@ function renderHistoryList() {
       const empty = document.getElementById("history-empty");
       if (historyItems.length === 0) {
         list.innerHTML = "";
-        empty.textContent = "No comparisons yet — synthesize one to see it here.";
+        empty.textContent = historySearch
+          ? "No comparisons match that search."
+          : "No comparisons yet — synthesize one to see it here.";
         empty.classList.remove("hidden");
         return;
       }
@@ -471,8 +476,9 @@ function renderHistoryList() {
       const empty = document.getElementById("history-empty");
       const loadMoreBtn = document.getElementById("load-more-history-btn");
       const offset = append ? historyOffset : 0;
+      const q = historySearch ? `&q=${encodeURIComponent(historySearch)}` : "";
       try {
-        const res = await fetch(`/api/v1/history?limit=${HISTORY_PAGE_SIZE}&offset=${offset}`);
+        const res = await fetch(`/api/v1/history?limit=${HISTORY_PAGE_SIZE}&offset=${offset}${q}`);
         if (!res.ok) throw new Error();
         const page = await res.json();
         historyItems = append ? historyItems.concat(page.items) : page.items;
@@ -528,6 +534,16 @@ function renderHistoryList() {
 
     document.getElementById("refresh-history-btn").addEventListener("click", () => loadHistory());
     document.getElementById("load-more-history-btn").addEventListener("click", () => loadHistory({ append: true }));
+
+    let historySearchDebounce;
+    document.getElementById("history-search").addEventListener("input", (e) => {
+      clearTimeout(historySearchDebounce);
+      historySearchDebounce = setTimeout(() => {
+        historySearch = e.target.value.trim();
+        loadHistory();
+      }, 300);
+    });
+
     loadHistory();
 
     // ---- Copy to clipboard ----
