@@ -85,6 +85,15 @@ if a hook modifies a file, re-stage it and commit again. The hooks invoke `ruff`
 `PATH`, so activate the venv (`source .venv/bin/activate`) before committing, or they'll report
 "Executable not found".
 
+## Dependency vulnerability scanning
+
+```bash
+.venv/bin/pip-audit -r requirements.txt -r requirements-dev.txt
+```
+
+Also runs in CI as its own `security` job, checking every pinned version in both requirements
+files against the OSV/PyPA advisory databases.
+
 ## API
 
 - `GET /` — dashboard (drag-and-drop two QSGs, view the battlecard, browse/export history)
