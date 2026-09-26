@@ -23,6 +23,7 @@ normalization always goes through `app/tools/net_validator.py` and
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 from pathlib import Path
@@ -51,6 +52,8 @@ try:
     import anthropic
 except ImportError:  # pragma: no cover - exercised only when package absent
     anthropic = None  # type: ignore[assignment]
+
+logger = logging.getLogger(__name__)
 
 _AGENTS_DIR = Path(__file__).resolve().parents[2] / ".claude" / "agents"
 _EXTRACTOR_MODEL = "claude-haiku-4-5-20251001"
@@ -275,7 +278,18 @@ def extract_qsg_fields(document_text: str, source_document: str) -> QSGExtractio
         try:
             return _extract_via_anthropic(document_text, source_document)
         except Exception:
-            pass  # never fail hard on a flaky/unreachable API - fall back
+            # never fail hard on a flaky/unreachable API - fall back, but
+            # log it so a persistently failing key doesn't go unnoticed
+            logger.warning(
+                "Anthropic extraction failed for %r; falling back to heuristic parser",
+                source_document,
+                exc_info=True,
+            )
+    else:
+        logger.debug(
+            "No Anthropic API key configured; using heuristic parser for %r",
+            source_document,
+        )
     return _heuristic_extract_qsg(document_text, source_document)
 
 

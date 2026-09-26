@@ -1,8 +1,10 @@
+import logging
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 from app.main import MAX_TEXT_CHARS, MAX_UPLOAD_BYTES, app, compare_rate_limiter
+from app.services import history
 
 SAMPLE_DOCS_DIR = Path(__file__).parent.parent / "sample_docs"
 
@@ -330,3 +332,34 @@ class TestRateLimiting:
         response = self._post_comparison()
         assert response.status_code == 429
         assert "Retry-After" in response.headers
+
+
+class TestUnhandledErrors:
+    def test_unexpected_exception_returns_generic_500_and_is_logged(
+        self, monkeypatch, caplog
+    ):
+        def _boom(*args, **kwargs):
+            raise RuntimeError("disk on fire")
+
+        monkeypatch.setattr(history, "save_comparison", _boom)
+        device_a_text = (SAMPLE_DOCS_DIR / "device_a_qsg.md").read_text(
+            encoding="utf-8"
+        )
+        device_b_text = (SAMPLE_DOCS_DIR / "device_b_qsg.md").read_text(
+            encoding="utf-8"
+        )
+
+        # Real servers hand this off to our registered exception handler, but
+        # TestClient re-raises unhandled server exceptions by default (for
+        # debuggability) unless told not to.
+        lenient_client = TestClient(app, raise_server_exceptions=False)
+        with caplog.at_level(logging.ERROR, logger="app.main"):
+            response = lenient_client.post(
+                "/api/v1/compare-text",
+                json={"device_a_text": device_a_text, "device_b_text": device_b_text},
+            )
+
+        assert response.status_code == 500
+        assert response.json() == {"detail": "Internal server error"}
+        assert "disk on fire" not in response.text
+        assert "Unhandled exception" in caplog.text

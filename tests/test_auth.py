@@ -6,6 +6,8 @@ every route must stay open, since the rest of the suite assumes
 unauthenticated access.
 """
 
+import logging
+
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -28,13 +30,15 @@ def test_healthz_never_requires_auth(monkeypatch):
     assert client.get("/healthz").status_code == 200
 
 
-def test_protected_route_requires_auth_once_configured(monkeypatch):
+def test_protected_route_requires_auth_once_configured(monkeypatch, caplog):
     monkeypatch.setenv("APP_USERNAME", "admin")
     monkeypatch.setenv("APP_PASSWORD", "hunter2")
 
-    response = client.get("/api/v1/samples")
+    with caplog.at_level(logging.WARNING, logger="app.services.auth"):
+        response = client.get("/api/v1/samples")
     assert response.status_code == 401
     assert response.headers["www-authenticate"] == "Basic"
+    assert "no credentials provided" in caplog.text
 
 
 def test_correct_credentials_are_accepted(monkeypatch):

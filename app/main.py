@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import logging
 from pathlib import Path
 from typing import Optional
 
@@ -21,6 +22,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from app.logging_config import configure_logging
 from app.schemas import BattlecardResponse, HistoryPage, HistoryRecord
 from app.services import export as export_service
 from app.services import history
@@ -28,6 +30,9 @@ from app.services.auth import require_auth, security, verify_credentials
 from app.services.orchestrator import extract_device_spec, synthesize_battlecard
 from app.services.rate_limiter import RateLimiter
 from app.tools.pdf_parser import extract_text_from_pdf
+
+configure_logging()
+logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 STATIC_DIR = BASE_DIR / "app" / "static"
@@ -66,8 +71,9 @@ async def guard_static_files(request: Request, call_next):
     # so a configured Basic Auth also covers the dashboard's JS/CSS.
     if request.url.path.startswith("/static/"):
         credentials = await security(request)
+        client_host = request.client.host if request.client else "unknown"
         try:
-            verify_credentials(credentials)
+            verify_credentials(credentials, client_host=client_host)
         except HTTPException as exc:
             return JSONResponse(
                 status_code=exc.status_code,
@@ -75,6 +81,12 @@ async def guard_static_files(request: Request, call_next):
                 headers=exc.headers or {},
             )
     return await call_next(request)
+
+
+@app.exception_handler(Exception)
+async def handle_unexpected_error(request: Request, exc: Exception) -> JSONResponse:
+    logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 
 # /healthz is intentionally left off this router: Docker's HEALTHCHECK and

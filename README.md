@@ -31,6 +31,8 @@ can be exported as Markdown or PDF.
   and API behind HTTP Basic Auth; `/healthz` always stays open for health
   checks. Neither is set by default, so local dev and the test suite run
   open.)
+- `LOG_LEVEL` (optional — defaults to `INFO`; set to `DEBUG` for extra detail
+  like which extraction path, LLM or heuristic, each request took)
 
 ## Running locally
 
@@ -124,3 +126,14 @@ Each `compare-*` call is persisted as its own JSON file under `data/history/` (g
 created on first use) — no database. Records are kept newest-first and auto-pruned beyond the
 50 most recent (`MAX_HISTORY_ENTRIES` in `app/services/history.py`). The dashboard's "Recent
 Comparisons" panel lists, reloads, deletes, and exports from this store.
+
+## Logging
+
+Configured once at startup (`app/logging_config.py`) to stdout, level controlled by `LOG_LEVEL`
+(default `INFO`). Beyond uvicorn's own access log, the app logs:
+
+- a rejected Basic Auth attempt (client IP, and username if one was sent — never the password)
+- a request that hit the rate limiter (client IP, limit)
+- a failed LLM extraction call before falling back to the heuristic parser (with traceback)
+- any other unhandled exception (with traceback), while the client still only ever sees a
+  generic `{"detail": "Internal server error"}` — no internals leak into the response

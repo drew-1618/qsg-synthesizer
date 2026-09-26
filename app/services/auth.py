@@ -7,12 +7,15 @@ and the test suite rely on. Set both before deploying anywhere reachable
 beyond localhost.
 """
 
+import logging
 import os
 import secrets
 from typing import Optional, Tuple
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
+
+logger = logging.getLogger(__name__)
 
 # Shared HTTPBasic scheme: used both as a FastAPI dependency (via require_auth,
 # for normal routes) and called directly against a raw Request (in main.py's
@@ -28,7 +31,9 @@ def _configured_credentials() -> Optional[Tuple[str, str]]:
     return username, password
 
 
-def verify_credentials(credentials: Optional[HTTPBasicCredentials]) -> None:
+def verify_credentials(
+    credentials: Optional[HTTPBasicCredentials], client_host: str = "unknown"
+) -> None:
     configured = _configured_credentials()
     if configured is None:
         return
@@ -39,16 +44,25 @@ def verify_credentials(credentials: Optional[HTTPBasicCredentials]) -> None:
         headers={"WWW-Authenticate": "Basic"},
     )
     if credentials is None:
+        logger.warning("Rejected request from %s: no credentials provided", client_host)
         raise unauthorized
 
     expected_username, expected_password = configured
     username_ok = secrets.compare_digest(credentials.username, expected_username)
     password_ok = secrets.compare_digest(credentials.password, expected_password)
     if not (username_ok and password_ok):
+        logger.warning(
+            "Rejected request from %s: invalid credentials (user=%r)",
+            client_host,
+            credentials.username,
+        )
         raise unauthorized
 
 
 def require_auth(
+    request: Request,
     credentials: Optional[HTTPBasicCredentials] = Depends(security),
 ) -> None:
-    verify_credentials(credentials)
+    verify_credentials(
+        credentials, client_host=request.client.host if request.client else "unknown"
+    )

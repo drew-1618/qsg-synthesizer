@@ -4,6 +4,8 @@ A fake clock is injected so window-expiry behavior is tested deterministically,
 without real sleeps.
 """
 
+import logging
+
 import pytest
 from fastapi import HTTPException
 
@@ -33,16 +35,18 @@ def test_allows_requests_under_the_limit():
         limiter(FakeRequest("1.2.3.4"))  # should not raise
 
 
-def test_blocks_requests_over_the_limit():
+def test_blocks_requests_over_the_limit(caplog):
     clock = FakeClock()
     limiter = RateLimiter(max_requests=2, window_seconds=60, clock=clock)
     limiter(FakeRequest("1.2.3.4"))
     limiter(FakeRequest("1.2.3.4"))
 
-    with pytest.raises(HTTPException) as exc_info:
-        limiter(FakeRequest("1.2.3.4"))
+    with caplog.at_level(logging.WARNING, logger="app.services.rate_limiter"):
+        with pytest.raises(HTTPException) as exc_info:
+            limiter(FakeRequest("1.2.3.4"))
     assert exc_info.value.status_code == 429
     assert "Retry-After" in exc_info.value.headers
+    assert "Rate limit exceeded for 1.2.3.4" in caplog.text
 
 
 def test_limits_are_tracked_per_ip():

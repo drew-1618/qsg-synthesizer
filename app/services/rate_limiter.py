@@ -6,12 +6,15 @@ instance is meant to be shared (as a FastAPI dependency) across the routes
 it protects.
 """
 
+import logging
 import time as _time
 from collections import defaultdict
 from threading import Lock
 from typing import Callable, Dict, List
 
 from fastapi import HTTPException, Request
+
+logger = logging.getLogger(__name__)
 
 
 class RateLimiter:
@@ -37,6 +40,12 @@ class RateLimiter:
                 hits.pop(0)
             if len(hits) >= self.max_requests:
                 retry_after = max(0.0, hits[0] + self.window_seconds - now)
+                logger.warning(
+                    "Rate limit exceeded for %s (%d requests/%.0fs)",
+                    client_ip,
+                    self.max_requests,
+                    self.window_seconds,
+                )
                 raise HTTPException(
                     status_code=429,
                     detail="Rate limit exceeded. Please slow down.",

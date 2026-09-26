@@ -1,4 +1,5 @@
 import json
+import logging
 from unittest.mock import MagicMock, patch
 
 from app.services.orchestrator import _heuristic_extract_qsg, extract_qsg_fields
@@ -45,7 +46,7 @@ class TestExtractViaAnthropic:
             assert "bounded document-extraction subagent" in kwargs["system"]
             assert "some document text" in kwargs["messages"][0]["content"]
 
-    def test_falls_back_to_heuristic_on_api_error(self):
+    def test_falls_back_to_heuristic_on_api_error(self, caplog):
         with (
             patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}),
             patch("app.services.orchestrator.anthropic") as mock_anthropic,
@@ -55,9 +56,12 @@ class TestExtractViaAnthropic:
             mock_anthropic.Anthropic.return_value = mock_client
 
             document_text = "# LegacyLink RG-210\n\nSome QSG content."
-            result = extract_qsg_fields(document_text, "device_b_qsg.md")
+            with caplog.at_level(logging.WARNING, logger="app.services.orchestrator"):
+                result = extract_qsg_fields(document_text, "device_b_qsg.md")
 
             assert result == _heuristic_extract_qsg(document_text, "device_b_qsg.md")
+            assert "Anthropic extraction failed" in caplog.text
+            assert "device_b_qsg.md" in caplog.text
 
     def test_falls_back_to_heuristic_without_api_key(self):
         with patch.dict("os.environ", {}, clear=False):
