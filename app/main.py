@@ -25,6 +25,7 @@ STATIC_DIR = BASE_DIR / "app" / "static"
 SAMPLE_DOCS_DIR = BASE_DIR / "sample_docs"
 
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20MB per PDF
+MAX_TEXT_CHARS = 2_000_000  # cap for compare-text's raw device_*_text fields
 
 # Compare endpoints run the extraction+synthesis pipeline (the expensive
 # path); export endpoints only render an already-saved battlecard, so they
@@ -83,9 +84,17 @@ def get_samples() -> dict:
 
 
 class CompareTextRequest(BaseModel):
-    device_a_text: str = Field(..., description="Raw JSON or Markdown QSG text for Device A")
+    device_a_text: str = Field(
+        ...,
+        max_length=MAX_TEXT_CHARS,
+        description="Raw JSON or Markdown QSG text for Device A",
+    )
     device_a_name: str = "device_a"
-    device_b_text: str = Field(..., description="Raw JSON or Markdown QSG text for Device B")
+    device_b_text: str = Field(
+        ...,
+        max_length=MAX_TEXT_CHARS,
+        description="Raw JSON or Markdown QSG text for Device B",
+    )
     device_b_name: str = "device_b"
 
 

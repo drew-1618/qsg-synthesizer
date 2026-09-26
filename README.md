@@ -68,6 +68,7 @@ extraction path is covered separately with mocks in `tests/test_orchestrator.py`
 - `GET /healthz` — health check
 - `GET /api/v1/samples` — base64-encoded sample PDFs, for the dashboard's demo button
 - `POST /api/v1/compare-text` — JSON body `{device_a_text, device_a_name, device_b_text, device_b_name}`
+  (each text field capped at 2,000,000 characters)
 - `POST /api/v1/compare-pdfs` — multipart upload, two PDF files (`device_a_pdf`, `device_b_pdf`,
   20MB max each)
 - `GET /api/v1/history` — list of past comparisons (id, device names, timestamp, friction scores)

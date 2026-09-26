@@ -2,7 +2,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from app.main import MAX_UPLOAD_BYTES, app, compare_rate_limiter
+from app.main import MAX_TEXT_CHARS, MAX_UPLOAD_BYTES, app, compare_rate_limiter
 
 SAMPLE_DOCS_DIR = Path(__file__).parent.parent / "sample_docs"
 
@@ -87,6 +87,14 @@ class TestCompareText:
         response = client.post(
             "/api/v1/compare-text",
             json={"device_a_text": "some text"},
+        )
+        assert response.status_code == 422
+
+    def test_rejects_oversized_text_field(self):
+        oversized = "x" * (MAX_TEXT_CHARS + 1)
+        response = client.post(
+            "/api/v1/compare-text",
+            json={"device_a_text": oversized, "device_b_text": "some text"},
         )
         assert response.status_code == 422
 
