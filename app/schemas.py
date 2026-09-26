@@ -23,6 +23,7 @@ __all__ = [
     "BattlecardResponse",
     "HistorySummary",
     "HistoryRecord",
+    "HistoryPage",
 ]
 
 
@@ -75,3 +76,10 @@ class HistoryRecord(BaseModel):
     device_a_name: str
     device_b_name: str
     battlecard: BattlecardResponse
+
+
+class HistoryPage(BaseModel):
+    items: List[HistorySummary]
+    total: int
+    limit: int
+    offset: int

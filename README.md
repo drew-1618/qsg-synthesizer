@@ -82,7 +82,9 @@ applies formatting fixes locally.
   (each text field capped at 2,000,000 characters)
 - `POST /api/v1/compare-pdfs` — multipart upload, two PDF files (`device_a_pdf`, `device_b_pdf`,
   20MB max each)
-- `GET /api/v1/history` — list of past comparisons (id, device names, timestamp, friction scores)
+- `GET /api/v1/history?limit=&offset=` — paginated list of past comparisons (id, device names,
+  timestamp, friction scores); `limit` defaults to 20 (max 50), `offset` defaults to 0. Response
+  is `{items, total, limit, offset}`.
 - `GET /api/v1/history/{id}` — full saved battlecard for one comparison
 - `GET /api/v1/history/{id}/export.md` / `.../export.pdf` — download a saved battlecard as
   Markdown or PDF

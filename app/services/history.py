@@ -44,12 +44,12 @@ def save_comparison(battlecard: BattlecardResponse) -> HistoryRecord:
 
 def _prune_oldest() -> None:
     """Keep at most MAX_HISTORY_ENTRIES records, dropping the oldest first."""
-    stale = list_comparisons()[MAX_HISTORY_ENTRIES:]
+    stale = _load_all_summaries()[MAX_HISTORY_ENTRIES:]
     for summary in stale:
         (HISTORY_DIR / f"{summary.id}.json").unlink(missing_ok=True)
 
 
-def list_comparisons() -> List[HistorySummary]:
+def _load_all_summaries() -> List[HistorySummary]:
     if not HISTORY_DIR.exists():
         return []
     summaries = []
@@ -74,6 +74,21 @@ def list_comparisons() -> List[HistorySummary]:
         )
     summaries.sort(key=lambda s: s.created_at, reverse=True)
     return summaries
+
+
+def list_comparisons(
+    limit: Optional[int] = None, offset: int = 0
+) -> List[HistorySummary]:
+    summaries = _load_all_summaries()
+    if limit is None:
+        return summaries[offset:]
+    return summaries[offset : offset + limit]
+
+
+def count_comparisons() -> int:
+    if not HISTORY_DIR.exists():
+        return 0
+    return sum(1 for _ in HISTORY_DIR.glob("*.json"))
 
 
 def get_comparison(history_id: str) -> Optional[HistoryRecord]:

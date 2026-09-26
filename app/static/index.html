@@ -124,6 +124,10 @@
       </div>
       <ul id="history-list" class="divide-y divide-slate-100 text-sm"></ul>
       <p id="history-empty" class="hidden text-sm text-slate-400">No comparisons yet &mdash; synthesize one to see it here.</p>
+      <button id="load-more-history-btn" type="button"
+              class="hidden mt-3 text-xs text-indigo-600 hover:text-indigo-800 font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 rounded">
+        Load more
+      </button>
     </section>
 
     <!-- Results section -->
@@ -238,6 +242,9 @@
   <script>
     const state = { fileA: null, fileB: null };
     let currentHistoryId = null;
+    const HISTORY_PAGE_SIZE = 20;
+    let historyOffset = 0;
+    let historyItems = [];
 
     function setExportLinks(historyId) {
       currentHistoryId = historyId;
@@ -415,24 +422,20 @@
       }
     }
 
-    async function loadHistory() {
+function renderHistoryList() {
       const list = document.getElementById("history-list");
       const empty = document.getElementById("history-empty");
-      try {
-        const res = await fetch("/api/v1/history");
-        if (!res.ok) throw new Error();
-        const items = await res.json();
-        if (items.length === 0) {
-          list.innerHTML = "";
-          empty.textContent = "No comparisons yet — synthesize one to see it here.";
-          empty.classList.remove("hidden");
-          return items;
-        }
-        empty.classList.add("hidden");
-        list.innerHTML = items
-          .map((item) => {
-            const label = `${escapeHtml(item.device_a_name)} vs ${escapeHtml(item.device_b_name)}`;
-            return `
+      if (historyItems.length === 0) {
+        list.innerHTML = "";
+        empty.textContent = "No comparisons yet — synthesize one to see it here.";
+        empty.classList.remove("hidden");
+        return;
+      }
+      empty.classList.add("hidden");
+      list.innerHTML = historyItems
+        .map((item) => {
+          const label = `${escapeHtml(item.device_a_name)} vs ${escapeHtml(item.device_b_name)}`;
+          return `
             <li class="flex items-center gap-1">
               <button type="button" data-history-id="${item.id}"
                       class="history-item flex-1 min-w-0 text-left py-2.5 px-2 -mx-2 rounded-md flex items-center justify-between gap-3 hover:bg-slate-50 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400">
@@ -451,22 +454,37 @@
                 &times;
               </button>
             </li>`;
-          })
-          .join("");
-        document.querySelectorAll(".history-item").forEach((btn) =>
-          btn.addEventListener("click", () => loadHistoryItem(btn.dataset.historyId))
-        );
-        document.querySelectorAll(".delete-history-item").forEach((btn) =>
-          btn.addEventListener("click", (e) => {
-            e.stopPropagation();
-            deleteHistoryItem(btn.dataset.deleteId);
-          })
-        );
-        return items;
+        })
+        .join("");
+      document.querySelectorAll(".history-item").forEach((btn) =>
+        btn.addEventListener("click", () => loadHistoryItem(btn.dataset.historyId))
+      );
+      document.querySelectorAll(".delete-history-item").forEach((btn) =>
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          deleteHistoryItem(btn.dataset.deleteId);
+        })
+      );
+    }
+
+    async function loadHistory({ append = false } = {}) {
+      const empty = document.getElementById("history-empty");
+      const loadMoreBtn = document.getElementById("load-more-history-btn");
+      const offset = append ? historyOffset : 0;
+      try {
+        const res = await fetch(`/api/v1/history?limit=${HISTORY_PAGE_SIZE}&offset=${offset}`);
+        if (!res.ok) throw new Error();
+        const page = await res.json();
+        historyItems = append ? historyItems.concat(page.items) : page.items;
+        historyOffset = offset + page.items.length;
+        renderHistoryList();
+        loadMoreBtn.classList.toggle("hidden", historyOffset >= page.total);
+        return historyItems;
       } catch {
-        list.innerHTML = "";
+        document.getElementById("history-list").innerHTML = "";
         empty.textContent = "Could not load comparison history.";
         empty.classList.remove("hidden");
+        loadMoreBtn.classList.add("hidden");
         return null;
       }
     }
@@ -508,7 +526,8 @@
       }
     });
 
-    document.getElementById("refresh-history-btn").addEventListener("click", loadHistory);
+    document.getElementById("refresh-history-btn").addEventListener("click", () => loadHistory());
+    document.getElementById("load-more-history-btn").addEventListener("click", () => loadHistory({ append: true }));
     loadHistory();
 
     // ---- Copy to clipboard ----

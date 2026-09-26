@@ -197,25 +197,42 @@ class TestHistory:
             json={"device_a_text": device_a_text, "device_b_text": device_b_text},
         )
 
-    def test_empty_history_returns_empty_list(self):
+    def test_empty_history_returns_empty_page(self):
         response = client.get("/api/v1/history")
         assert response.status_code == 200
-        assert response.json() == []
+        assert response.json() == {"items": [], "total": 0, "limit": 20, "offset": 0}
 
     def test_comparison_is_recorded_and_listed(self):
         battlecard = self._post_comparison().json()
 
         response = client.get("/api/v1/history")
         assert response.status_code == 200
-        items = response.json()
+        page = response.json()
+        assert page["total"] == 1
+        items = page["items"]
         assert len(items) == 1
         assert items[0]["installation_friction_score_device_a"] == (
             battlecard["installation_friction_score_device_a"]
         )
 
+    def test_pagination_limit_and_offset(self):
+        for _ in range(3):
+            self._post_comparison()
+
+        page1 = client.get("/api/v1/history?limit=2&offset=0").json()
+        assert len(page1["items"]) == 2
+        assert page1["total"] == 3
+
+        page2 = client.get("/api/v1/history?limit=2&offset=2").json()
+        assert len(page2["items"]) == 1
+        assert page2["total"] == 3
+
+        ids_seen = {item["id"] for item in page1["items"] + page2["items"]}
+        assert len(ids_seen) == 3
+
     def test_history_item_roundtrips_full_battlecard(self):
         battlecard = self._post_comparison().json()
-        history_id = client.get("/api/v1/history").json()[0]["id"]
+        history_id = client.get("/api/v1/history").json()["items"][0]["id"]
 
         response = client.get(f"/api/v1/history/{history_id}")
         assert response.status_code == 200
@@ -231,7 +248,7 @@ class TestHistory:
 
     def test_export_markdown_contains_key_sections(self):
         self._post_comparison()
-        history_id = client.get("/api/v1/history").json()[0]["id"]
+        history_id = client.get("/api/v1/history").json()["items"][0]["id"]
 
         response = client.get(f"/api/v1/history/{history_id}/export.md")
         assert response.status_code == 200
@@ -244,7 +261,7 @@ class TestHistory:
 
     def test_export_pdf_returns_pdf_bytes(self):
         self._post_comparison()
-        history_id = client.get("/api/v1/history").json()[0]["id"]
+        history_id = client.get("/api/v1/history").json()["items"][0]["id"]
 
         response = client.get(f"/api/v1/history/{history_id}/export.pdf")
         assert response.status_code == 200
@@ -258,11 +275,11 @@ class TestHistory:
 
     def test_delete_removes_item_from_list(self):
         self._post_comparison()
-        history_id = client.get("/api/v1/history").json()[0]["id"]
+        history_id = client.get("/api/v1/history").json()["items"][0]["id"]
 
         response = client.delete(f"/api/v1/history/{history_id}")
         assert response.status_code == 204
-        assert client.get("/api/v1/history").json() == []
+        assert client.get("/api/v1/history").json()["items"] == []
 
     def test_delete_unknown_id_returns_404(self):
         response = client.delete("/api/v1/history/" + "0" * 32)
@@ -271,12 +288,12 @@ class TestHistory:
     def test_clear_all_removes_every_item(self):
         self._post_comparison()
         self._post_comparison()
-        assert len(client.get("/api/v1/history").json()) == 2
+        assert client.get("/api/v1/history").json()["total"] == 2
 
         response = client.delete("/api/v1/history")
         assert response.status_code == 200
         assert response.json() == {"deleted": 2}
-        assert client.get("/api/v1/history").json() == []
+        assert client.get("/api/v1/history").json()["items"] == []
 
 
 class TestRateLimiting:

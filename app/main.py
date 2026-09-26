@@ -4,15 +4,22 @@ from __future__ import annotations
 
 import base64
 from pathlib import Path
-from typing import List
 
-from fastapi import APIRouter, Depends, FastAPI, File, HTTPException, UploadFile
+from fastapi import (
+    APIRouter,
+    Depends,
+    FastAPI,
+    File,
+    HTTPException,
+    Query,
+    UploadFile,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app.schemas import BattlecardResponse, HistoryRecord, HistorySummary
+from app.schemas import BattlecardResponse, HistoryPage, HistoryRecord
 from app.services import export as export_service
 from app.services import history
 from app.services.auth import require_auth
@@ -152,9 +159,17 @@ def compare_pdfs(
     return battlecard
 
 
-@router.get("/api/v1/history", response_model=List[HistorySummary])
-def get_history() -> List[HistorySummary]:
-    return history.list_comparisons()
+@router.get("/api/v1/history", response_model=HistoryPage)
+def get_history(
+    limit: int = Query(20, ge=1, le=history.MAX_HISTORY_ENTRIES),
+    offset: int = Query(0, ge=0),
+) -> HistoryPage:
+    return HistoryPage(
+        items=history.list_comparisons(limit=limit, offset=offset),
+        total=history.count_comparisons(),
+        limit=limit,
+        offset=offset,
+    )
 
 
 def _get_history_record_or_404(history_id: str) -> HistoryRecord:
