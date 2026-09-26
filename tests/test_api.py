@@ -34,8 +34,12 @@ def test_get_samples_returns_base64_encoded_pdfs():
 
 class TestCompareText:
     def _post(self):
-        device_a_text = (SAMPLE_DOCS_DIR / "device_a_qsg.md").read_text(encoding="utf-8")
-        device_b_text = (SAMPLE_DOCS_DIR / "device_b_qsg.md").read_text(encoding="utf-8")
+        device_a_text = (SAMPLE_DOCS_DIR / "device_a_qsg.md").read_text(
+            encoding="utf-8"
+        )
+        device_b_text = (SAMPLE_DOCS_DIR / "device_b_qsg.md").read_text(
+            encoding="utf-8"
+        )
         return client.post(
             "/api/v1/compare-text",
             json={
@@ -101,9 +105,10 @@ class TestCompareText:
 
 class TestComparePdfs:
     def _post(self):
-        with open(SAMPLE_DOCS_DIR / "device_a_qsg.pdf", "rb") as a_file, open(
-            SAMPLE_DOCS_DIR / "device_b_qsg.pdf", "rb"
-        ) as b_file:
+        with (
+            open(SAMPLE_DOCS_DIR / "device_a_qsg.pdf", "rb") as a_file,
+            open(SAMPLE_DOCS_DIR / "device_b_qsg.pdf", "rb") as b_file,
+        ):
             return client.post(
                 "/api/v1/compare-pdfs",
                 files={
@@ -129,8 +134,12 @@ class TestComparePdfs:
     def test_matches_compare_text_result_for_same_content(self):
         pdf_data = self._post().json()
 
-        device_a_text = (SAMPLE_DOCS_DIR / "device_a_qsg.md").read_text(encoding="utf-8")
-        device_b_text = (SAMPLE_DOCS_DIR / "device_b_qsg.md").read_text(encoding="utf-8")
+        device_a_text = (SAMPLE_DOCS_DIR / "device_a_qsg.md").read_text(
+            encoding="utf-8"
+        )
+        device_b_text = (SAMPLE_DOCS_DIR / "device_b_qsg.md").read_text(
+            encoding="utf-8"
+        )
         text_data = client.post(
             "/api/v1/compare-text",
             json={"device_a_text": device_a_text, "device_b_text": device_b_text},
@@ -177,8 +186,12 @@ class TestComparePdfs:
 
 class TestHistory:
     def _post_comparison(self):
-        device_a_text = (SAMPLE_DOCS_DIR / "device_a_qsg.md").read_text(encoding="utf-8")
-        device_b_text = (SAMPLE_DOCS_DIR / "device_b_qsg.md").read_text(encoding="utf-8")
+        device_a_text = (SAMPLE_DOCS_DIR / "device_a_qsg.md").read_text(
+            encoding="utf-8"
+        )
+        device_b_text = (SAMPLE_DOCS_DIR / "device_b_qsg.md").read_text(
+            encoding="utf-8"
+        )
         return client.post(
             "/api/v1/compare-text",
             json={"device_a_text": device_a_text, "device_b_text": device_b_text},
@@ -268,8 +281,12 @@ class TestHistory:
 
 class TestRateLimiting:
     def _post_comparison(self):
-        device_a_text = (SAMPLE_DOCS_DIR / "device_a_qsg.md").read_text(encoding="utf-8")
-        device_b_text = (SAMPLE_DOCS_DIR / "device_b_qsg.md").read_text(encoding="utf-8")
+        device_a_text = (SAMPLE_DOCS_DIR / "device_a_qsg.md").read_text(
+            encoding="utf-8"
+        )
+        device_b_text = (SAMPLE_DOCS_DIR / "device_b_qsg.md").read_text(
+            encoding="utf-8"
+        )
         return client.post(
             "/api/v1/compare-text",
             json={"device_a_text": device_a_text, "device_b_text": device_b_text},

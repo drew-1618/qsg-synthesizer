@@ -82,9 +82,7 @@ class TestExtractTextFromPdf:
         assert text.index("Page one content") < text.index("Page two content")
 
     def test_boilerplate_matching_is_case_insensitive(self):
-        pdf_bytes = _build_pdf(
-            [["fcc compliance notice here.", "Real content line."]]
-        )
+        pdf_bytes = _build_pdf([["fcc compliance notice here.", "Real content line."]])
         text = extract_text_from_pdf(pdf_bytes)
         assert "fcc compliance" not in text.lower()
         assert "Real content line." in text

@@ -71,7 +71,9 @@ def get_samples() -> dict:
     def _encode(filename: str) -> dict:
         path = SAMPLE_DOCS_DIR / filename
         if not path.exists():
-            raise HTTPException(status_code=404, detail=f"Sample '{filename}' not found.")
+            raise HTTPException(
+                status_code=404, detail=f"Sample '{filename}' not found."
+            )
         return {
             "filename": filename,
             "content_base64": base64.b64encode(path.read_bytes()).decode("ascii"),
@@ -118,9 +120,10 @@ def _read_pdf_upload(upload: UploadFile) -> str:
         )
     contents = upload.file.read(MAX_UPLOAD_BYTES + 1)
     if len(contents) > MAX_UPLOAD_BYTES:
+        max_mb = MAX_UPLOAD_BYTES // (1024 * 1024)
         raise HTTPException(
             status_code=413,
-            detail=f"'{upload.filename}' exceeds the {MAX_UPLOAD_BYTES // (1024 * 1024)}MB upload limit.",
+            detail=f"'{upload.filename}' exceeds the {max_mb}MB upload limit.",
         )
     return extract_text_from_pdf(contents)
 
@@ -137,8 +140,12 @@ def compare_pdfs(
     device_a_text = _read_pdf_upload(device_a_pdf)
     device_b_text = _read_pdf_upload(device_b_pdf)
 
-    device_a = extract_device_spec(device_a_text, device_a_pdf.filename or "device_a.pdf")
-    device_b = extract_device_spec(device_b_text, device_b_pdf.filename or "device_b.pdf")
+    device_a = extract_device_spec(
+        device_a_text, device_a_pdf.filename or "device_a.pdf"
+    )
+    device_b = extract_device_spec(
+        device_b_text, device_b_pdf.filename or "device_b.pdf"
+    )
 
     battlecard = synthesize_battlecard(device_a, device_b)
     history.save_comparison(battlecard)
@@ -153,7 +160,9 @@ def get_history() -> List[HistorySummary]:
 def _get_history_record_or_404(history_id: str) -> HistoryRecord:
     record = history.get_comparison(history_id)
     if record is None:
-        raise HTTPException(status_code=404, detail=f"History item '{history_id}' not found.")
+        raise HTTPException(
+            status_code=404, detail=f"History item '{history_id}' not found."
+        )
     return record
 
 
@@ -173,7 +182,9 @@ def export_history_markdown(history_id: str) -> Response:
     return Response(
         content=markdown,
         media_type="text/markdown",
-        headers={"Content-Disposition": f'attachment; filename="battlecard-{history_id}.md"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="battlecard-{history_id}.md"'
+        },
     )
 
 
@@ -188,14 +199,18 @@ def export_history_pdf(history_id: str) -> Response:
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="battlecard-{history_id}.pdf"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="battlecard-{history_id}.pdf"'
+        },
     )
 
 
 @router.delete("/api/v1/history/{history_id}", status_code=204, response_class=Response)
 def delete_history_item(history_id: str) -> Response:
     if not history.delete_comparison(history_id):
-        raise HTTPException(status_code=404, detail=f"History item '{history_id}' not found.")
+        raise HTTPException(
+            status_code=404, detail=f"History item '{history_id}' not found."
+        )
     return Response(status_code=204)
 
 

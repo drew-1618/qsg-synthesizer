@@ -25,7 +25,9 @@ def _configured_credentials() -> Optional[Tuple[str, str]]:
     return username, password
 
 
-def require_auth(credentials: Optional[HTTPBasicCredentials] = Depends(_security)) -> None:
+def require_auth(
+    credentials: Optional[HTTPBasicCredentials] = Depends(_security),
+) -> None:
     configured = _configured_credentials()
     if configured is None:
         return

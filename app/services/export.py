@@ -28,8 +28,12 @@ from app.schemas import BattlecardResponse
 
 _styles = getSampleStyleSheet()
 _H1 = ParagraphStyle("ExportTitle", parent=_styles["Title"], fontSize=18, spaceAfter=10)
-_H2 = ParagraphStyle("ExportHeading", parent=_styles["Heading2"], spaceBefore=14, spaceAfter=6)
-_BODY = ParagraphStyle("ExportBody", parent=_styles["BodyText"], fontSize=10, leading=14)
+_H2 = ParagraphStyle(
+    "ExportHeading", parent=_styles["Heading2"], spaceBefore=14, spaceAfter=6
+)
+_BODY = ParagraphStyle(
+    "ExportBody", parent=_styles["BodyText"], fontSize=10, leading=14
+)
 
 _TABLE_STYLE = TableStyle(
     [
@@ -38,7 +42,12 @@ _TABLE_STYLE = TableStyle(
         ("FONTSIZE", (0, 0), (-1, -1), 9),
         ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f8f8f8")]),
+        (
+            "ROWBACKGROUNDS",
+            (0, 1),
+            (-1, -1),
+            [colors.white, colors.HexColor("#f8f8f8")],
+        ),
     ]
 )
 
@@ -52,7 +61,9 @@ _COMPARISON_ROWS = [
 
 def _names(battlecard: BattlecardResponse) -> tuple[str, str]:
     model_name = battlecard.comparison_matrix.get("model_name", {})
-    return model_name.get("device_a", "Device A"), model_name.get("device_b", "Device B")
+    return model_name.get("device_a", "Device A"), model_name.get(
+        "device_b", "Device B"
+    )
 
 
 def _plain_cell(value) -> str:
@@ -81,12 +92,18 @@ def battlecard_to_markdown(battlecard: BattlecardResponse) -> str:
     ]
     for label, key in _COMPARISON_ROWS:
         row = cm.get(key, {})
-        lines.append(f"| {label} | {_plain_cell(row.get('device_a'))} | {_plain_cell(row.get('device_b'))} |")
+        cell_a = _plain_cell(row.get("device_a"))
+        cell_b = _plain_cell(row.get("device_b"))
+        lines.append(f"| {label} | {cell_a} | {cell_b} |")
 
     lines += ["", "## Field-Deployment Risks", "", f"### {name_a}"]
-    lines += [f"- {risk}" for risk in battlecard.key_risks_device_a] or ["- None identified."]
+    lines += [f"- {risk}" for risk in battlecard.key_risks_device_a] or [
+        "- None identified."
+    ]
     lines += ["", f"### {name_b}"]
-    lines += [f"- {risk}" for risk in battlecard.key_risks_device_b] or ["- None identified."]
+    lines += [f"- {risk}" for risk in battlecard.key_risks_device_b] or [
+        "- None identified."
+    ]
     lines.append("")
     return "\n".join(lines)
 
@@ -128,12 +145,18 @@ def battlecard_to_pdf_bytes(battlecard: BattlecardResponse) -> bytes:
     rows = [["Attribute", name_a, name_b]]
     for label, key in _COMPARISON_ROWS:
         row = cm.get(key, {})
-        rows.append([label, _cell_flowable(row.get("device_a")), _cell_flowable(row.get("device_b"))])
+        cell_a = _cell_flowable(row.get("device_a"))
+        cell_b = _cell_flowable(row.get("device_b"))
+        rows.append([label, cell_a, cell_b])
     table = Table(rows, colWidths=[1.4 * inch, 2.8 * inch, 2.8 * inch])
     table.setStyle(_TABLE_STYLE)
     story.append(table)
 
-    for name, risks in [(name_a, battlecard.key_risks_device_a), (name_b, battlecard.key_risks_device_b)]:
+    risk_sections = [
+        (name_a, battlecard.key_risks_device_a),
+        (name_b, battlecard.key_risks_device_b),
+    ]
+    for name, risks in risk_sections:
         story.append(Paragraph(f"Field-Deployment Risks &mdash; {_esc(name)}", _H2))
         if risks:
             story.append(

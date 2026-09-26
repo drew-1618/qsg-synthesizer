@@ -25,9 +25,10 @@ def _fake_anthropic_response(payload: dict) -> MagicMock:
 
 class TestExtractViaAnthropic:
     def test_uses_anthropic_when_key_and_package_present(self):
-        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}), patch(
-            "app.services.orchestrator.anthropic"
-        ) as mock_anthropic:
+        with (
+            patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}),
+            patch("app.services.orchestrator.anthropic") as mock_anthropic,
+        ):
             mock_client = MagicMock()
             mock_client.messages.create.return_value = _fake_anthropic_response(
                 _FAKE_EXTRACTION
@@ -45,9 +46,10 @@ class TestExtractViaAnthropic:
             assert "some document text" in kwargs["messages"][0]["content"]
 
     def test_falls_back_to_heuristic_on_api_error(self):
-        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}), patch(
-            "app.services.orchestrator.anthropic"
-        ) as mock_anthropic:
+        with (
+            patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}),
+            patch("app.services.orchestrator.anthropic") as mock_anthropic,
+        ):
             mock_client = MagicMock()
             mock_client.messages.create.side_effect = RuntimeError("api unreachable")
             mock_anthropic.Anthropic.return_value = mock_client

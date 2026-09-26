@@ -62,6 +62,17 @@ Serves the same app at `http://localhost:8000/`.
 Runs fully offline — no `ANTHROPIC_API_KEY` required (the Anthropic-backed
 extraction path is covered separately with mocks in `tests/test_orchestrator.py`).
 
+## Lint & format
+
+```bash
+.venv/bin/pip install -r requirements-dev.txt
+.venv/bin/ruff check .
+.venv/bin/black --check .
+```
+
+Both run in CI on every push/PR (see `.github/workflows/test.yml`); `black .` (no `--check`)
+applies formatting fixes locally.
+
 ## API
 
 - `GET /` — dashboard (drag-and-drop two QSGs, view the battlecard, browse/export history)

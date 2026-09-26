@@ -43,7 +43,9 @@ _PAGE_WIDTH, _PAGE_HEIGHT = LETTER
 
 _styles = getSampleStyleSheet()
 _H1 = ParagraphStyle("QSGTitle", parent=_styles["Title"], fontSize=16, spaceAfter=12)
-_H2 = ParagraphStyle("QSGHeading", parent=_styles["Heading2"], spaceBefore=10, spaceAfter=6)
+_H2 = ParagraphStyle(
+    "QSGHeading", parent=_styles["Heading2"], spaceBefore=10, spaceAfter=6
+)
 _BODY = ParagraphStyle("QSGBody", parent=_styles["BodyText"], fontSize=9.5, leading=13)
 _BULLET = ParagraphStyle("QSGBullet", parent=_BODY, leftIndent=12)
 
@@ -54,7 +56,12 @@ _TABLE_STYLE = TableStyle(
         ("FONTSIZE", (0, 0), (-1, -1), 9),
         ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f5f5f5")]),
+        (
+            "ROWBACKGROUNDS",
+            (0, 1),
+            (-1, -1),
+            [colors.white, colors.HexColor("#f5f5f5")],
+        ),
     ]
 )
 
@@ -93,7 +100,11 @@ def _two_column_frames() -> list[Frame]:
     height = top - _BOTTOM_MARGIN
     left = Frame(_MARGIN, _BOTTOM_MARGIN, column_width, height, id="col1")
     right = Frame(
-        _MARGIN + column_width + _COLUMN_GAP, _BOTTOM_MARGIN, column_width, height, id="col2"
+        _MARGIN + column_width + _COLUMN_GAP,
+        _BOTTOM_MARGIN,
+        column_width,
+        height,
+        id="col2",
     )
     return [left, right]
 
@@ -309,8 +320,7 @@ DEVICE_B = {
         "credentials as provided by the carrier.",
         "Verify the DSL LED reaches solid green before disconnecting the "
         "console cable.",
-        "Optionally browse to 192.168.1.1 to configure Wi-Fi and LAN "
-        "settings.",
+        "Optionally browse to 192.168.1.1 to configure Wi-Fi and LAN " "settings.",
     ],
     "closing_note": None,
 }

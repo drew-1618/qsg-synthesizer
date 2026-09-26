@@ -31,13 +31,17 @@ from typing import Optional
 from app.models.schemas import (
     CablingPort,
     LEDIndicator,
-    ProvisioningMethod as RawProvisioningMethod,
     QSGExtraction,
+)
+from app.models.schemas import (
+    ProvisioningMethod as RawProvisioningMethod,
 )
 from app.schemas import (
     BattlecardResponse,
     DeviceSpec,
     LEDStatus,
+)
+from app.schemas import (
     ProvisioningMethod as ApiProvisioningMethod,
 )
 from app.tools.led_normalizer import LEDState, normalize_led
@@ -120,7 +124,9 @@ def _split_sections(text: str) -> dict[str, list[str]]:
     sections: dict[str, list[str]] = {"_preamble": []}
     current = "_preamble"
     for line in text.splitlines():
-        heading_candidate = _clean_markdown_emphasis(_HEADING_PREFIX_RE.sub("", line.strip()))
+        heading_candidate = _clean_markdown_emphasis(
+            _HEADING_PREFIX_RE.sub("", line.strip())
+        )
         if heading_candidate.lower() in _KNOWN_HEADINGS:
             current = heading_candidate.lower()
             sections.setdefault(current, [])
@@ -158,7 +164,10 @@ def _parse_table_rows(lines: list[str]) -> list[list[str]]:
         ]
         if not cells or all(re.fullmatch(r"-+", c) for c in cells):
             continue
-        if [c.lower() for c in cells] in (["port", "type", "notes"], ["led", "meaning"]):
+        if [c.lower() for c in cells] in (
+            ["port", "type", "notes"],
+            ["led", "meaning"],
+        ):
             continue
         rows.append(cells)
     return rows
@@ -251,7 +260,9 @@ def _extract_via_anthropic(document_text: str, source_document: str) -> QSGExtra
         ],
     )
     payload = "".join(
-        block.text for block in response.content if getattr(block, "type", None) == "text"
+        block.text
+        for block in response.content
+        if getattr(block, "type", None) == "text"
     )
     return QSGExtraction.model_validate(json.loads(payload))
 
@@ -342,8 +353,14 @@ def _compute_friction_score(spec: DeviceSpec) -> int:
 
 def _build_comparison_matrix(device_a: DeviceSpec, device_b: DeviceSpec) -> dict:
     return {
-        "model_name": {"device_a": device_a.model_name, "device_b": device_b.model_name},
-        "default_ip": {"device_a": device_a.default_ip, "device_b": device_b.default_ip},
+        "model_name": {
+            "device_a": device_a.model_name,
+            "device_b": device_b.model_name,
+        },
+        "default_ip": {
+            "device_a": device_a.default_ip,
+            "device_b": device_b.default_ip,
+        },
         "is_private_ip": {
             "device_a": device_a.is_private_ip,
             "device_b": device_b.is_private_ip,
@@ -386,7 +403,9 @@ def _build_key_risks(spec: DeviceSpec) -> list[str]:
             "field techs may misread device status."
         )
     if not risks:
-        risks.append("No significant field-deployment risks identified from the extracted spec.")
+        risks.append(
+            "No significant field-deployment risks identified from the extracted spec."
+        )
     return risks
 
 
@@ -394,9 +413,19 @@ def _build_sales_talk_track(
     device_a: DeviceSpec, score_a: int, device_b: DeviceSpec, score_b: int
 ) -> str:
     if score_a <= score_b:
-        winner, w_score, loser, l_score = device_a.model_name, score_a, device_b.model_name, score_b
+        winner, w_score, loser, l_score = (
+            device_a.model_name,
+            score_a,
+            device_b.model_name,
+            score_b,
+        )
     else:
-        winner, w_score, loser, l_score = device_b.model_name, score_b, device_a.model_name, score_a
+        winner, w_score, loser, l_score = (
+            device_b.model_name,
+            score_b,
+            device_a.model_name,
+            score_a,
+        )
     return (
         f"{winner} installs with meaningfully less field labor than {loser} "
         f"(Installation Friction Index {w_score} vs. {l_score}). Lead with "
@@ -405,7 +434,9 @@ def _build_sales_talk_track(
     )
 
 
-def synthesize_battlecard(device_a: DeviceSpec, device_b: DeviceSpec) -> BattlecardResponse:
+def synthesize_battlecard(
+    device_a: DeviceSpec, device_b: DeviceSpec
+) -> BattlecardResponse:
     """Deterministically compare two normalized `DeviceSpec` objects into a
     `BattlecardResponse`. Rule-based rather than LLM-routed: `battlecard_analyst`
     produces free-form markdown, which doesn't map onto these typed fields."""

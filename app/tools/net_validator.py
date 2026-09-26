@@ -52,7 +52,7 @@ def parse_subnet(cidr: str) -> SubnetInfo:
 
 
 def classify_ip(ip: str) -> bool:
-    """Return True if `ip` falls within RFC1918 (or otherwise private/reserved) ranges."""
+    """Return True if `ip` falls within RFC1918 (or other private/reserved) ranges."""
     try:
         address = ipaddress.ip_address(ip)
     except ValueError as exc:

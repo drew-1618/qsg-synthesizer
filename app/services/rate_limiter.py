@@ -39,7 +39,7 @@ class RateLimiter:
                 retry_after = max(0.0, hits[0] + self.window_seconds - now)
                 raise HTTPException(
                     status_code=429,
-                    detail="Rate limit exceeded. Please slow down and try again shortly.",
+                    detail="Rate limit exceeded. Please slow down.",
                     headers={"Retry-After": str(int(retry_after) + 1)},
                 )
             hits.append(now)
