@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 from pathlib import Path
+from typing import List
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,7 +12,8 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app.schemas import BattlecardResponse
+from app.schemas import BattlecardResponse, HistoryRecord, HistorySummary
+from app.services import history
 from app.services.orchestrator import extract_device_spec, synthesize_battlecard
 from app.tools.pdf_parser import extract_text_from_pdf
 
@@ -78,7 +80,9 @@ class CompareTextRequest(BaseModel):
 def compare_text(payload: CompareTextRequest) -> BattlecardResponse:
     device_a = extract_device_spec(payload.device_a_text, payload.device_a_name)
     device_b = extract_device_spec(payload.device_b_text, payload.device_b_name)
-    return synthesize_battlecard(device_a, device_b)
+    battlecard = synthesize_battlecard(device_a, device_b)
+    history.save_comparison(battlecard)
+    return battlecard
 
 
 def _read_pdf_upload(upload: UploadFile) -> str:
@@ -106,4 +110,19 @@ def compare_pdfs(
     device_a = extract_device_spec(device_a_text, device_a_pdf.filename or "device_a.pdf")
     device_b = extract_device_spec(device_b_text, device_b_pdf.filename or "device_b.pdf")
 
-    return synthesize_battlecard(device_a, device_b)
+    battlecard = synthesize_battlecard(device_a, device_b)
+    history.save_comparison(battlecard)
+    return battlecard
+
+
+@app.get("/api/v1/history", response_model=List[HistorySummary])
+def get_history() -> List[HistorySummary]:
+    return history.list_comparisons()
+
+
+@app.get("/api/v1/history/{history_id}", response_model=HistoryRecord)
+def get_history_item(history_id: str) -> HistoryRecord:
+    record = history.get_comparison(history_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"History item '{history_id}' not found.")
+    return record

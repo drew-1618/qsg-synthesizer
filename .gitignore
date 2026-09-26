@@ -19,6 +19,7 @@ ENV/
 # demo endpoint, not scratch upload data)
 .pytest_cache/
 .coverage
+data/
 
 # Docker
 .docker/

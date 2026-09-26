@@ -8,6 +8,7 @@ contract the extraction subagent fills in before the deterministic tools in
 
 from __future__ import annotations
 
+from datetime import datetime
 from enum import Enum
 from typing import List, Optional
 
@@ -15,7 +16,14 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.tools.led_normalizer import LEDState
 
-__all__ = ["LEDStatus", "ProvisioningMethod", "DeviceSpec", "BattlecardResponse"]
+__all__ = [
+    "LEDStatus",
+    "ProvisioningMethod",
+    "DeviceSpec",
+    "BattlecardResponse",
+    "HistorySummary",
+    "HistoryRecord",
+]
 
 
 class ProvisioningMethod(str, Enum):
@@ -50,3 +58,20 @@ class BattlecardResponse(BaseModel):
     key_risks_device_a: List[str]
     key_risks_device_b: List[str]
     sales_talk_track: str
+
+
+class HistorySummary(BaseModel):
+    id: str
+    created_at: datetime
+    device_a_name: str
+    device_b_name: str
+    installation_friction_score_device_a: int
+    installation_friction_score_device_b: int
+
+
+class HistoryRecord(BaseModel):
+    id: str
+    created_at: datetime
+    device_a_name: str
+    device_b_name: str
+    battlecard: BattlecardResponse

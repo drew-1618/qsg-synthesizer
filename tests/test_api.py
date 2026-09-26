@@ -165,3 +165,45 @@ class TestComparePdfs:
             },
         )
         assert response.status_code == 413
+
+
+class TestHistory:
+    def _post_comparison(self):
+        device_a_text = (SAMPLE_DOCS_DIR / "device_a_qsg.md").read_text(encoding="utf-8")
+        device_b_text = (SAMPLE_DOCS_DIR / "device_b_qsg.md").read_text(encoding="utf-8")
+        return client.post(
+            "/api/v1/compare-text",
+            json={"device_a_text": device_a_text, "device_b_text": device_b_text},
+        )
+
+    def test_empty_history_returns_empty_list(self):
+        response = client.get("/api/v1/history")
+        assert response.status_code == 200
+        assert response.json() == []
+
+    def test_comparison_is_recorded_and_listed(self):
+        battlecard = self._post_comparison().json()
+
+        response = client.get("/api/v1/history")
+        assert response.status_code == 200
+        items = response.json()
+        assert len(items) == 1
+        assert items[0]["installation_friction_score_device_a"] == (
+            battlecard["installation_friction_score_device_a"]
+        )
+
+    def test_history_item_roundtrips_full_battlecard(self):
+        battlecard = self._post_comparison().json()
+        history_id = client.get("/api/v1/history").json()[0]["id"]
+
+        response = client.get(f"/api/v1/history/{history_id}")
+        assert response.status_code == 200
+        assert response.json()["battlecard"] == battlecard
+
+    def test_unknown_history_id_returns_404(self):
+        response = client.get("/api/v1/history/" + "0" * 32)
+        assert response.status_code == 404
+
+    def test_malformed_history_id_returns_404(self):
+        response = client.get("/api/v1/history/../../etc/passwd")
+        assert response.status_code == 404
