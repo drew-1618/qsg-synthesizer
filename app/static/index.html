@@ -17,6 +17,11 @@
       animation: spin 0.7s linear infinite;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
+    .confirm-pop { animation: confirmPop 0.15s ease-out; }
+    @keyframes confirmPop {
+      from { opacity: 0; transform: scale(0.96); }
+      to { opacity: 1; transform: scale(1); }
+    }
   </style>
 </head>
 <body class="bg-slate-50 text-slate-800 min-h-screen">
@@ -240,6 +245,26 @@
 
     </section>
   </main>
+
+  <!-- Confirmation dialog (replaces window.confirm across the app) -->
+  <div id="confirm-dialog" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div id="confirm-backdrop" class="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"></div>
+    <div role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-message"
+         class="confirm-pop relative bg-white rounded-xl border border-slate-200 shadow-xl w-full max-w-sm p-6">
+      <p id="confirm-title" class="text-base font-semibold text-slate-900">Are you sure?</p>
+      <p id="confirm-message" class="text-sm text-slate-500 mt-1.5"></p>
+      <div class="flex items-center justify-end gap-2 mt-5">
+        <button id="confirm-cancel-btn" type="button"
+                class="text-sm font-medium text-slate-600 hover:bg-slate-100 px-3.5 py-2 rounded-lg transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400">
+          Cancel
+        </button>
+        <button id="confirm-ok-btn" type="button"
+                class="text-sm font-semibold text-white bg-red-600 hover:bg-red-700 px-3.5 py-2 rounded-lg transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400">
+          Confirm
+        </button>
+      </div>
+    </div>
+  </div>
 
   <script src="/static/app.js"></script>
 </body>

@@ -24,6 +24,45 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
+// ---- Confirmation dialog (replaces window.confirm) ----
+function confirmDialog(message, { title = "Are you sure?", confirmLabel = "Confirm" } = {}) {
+  const dialog = document.getElementById("confirm-dialog");
+  const backdrop = document.getElementById("confirm-backdrop");
+  const titleEl = document.getElementById("confirm-title");
+  const messageEl = document.getElementById("confirm-message");
+  const okBtn = document.getElementById("confirm-ok-btn");
+  const cancelBtn = document.getElementById("confirm-cancel-btn");
+
+  titleEl.textContent = title;
+  messageEl.textContent = message;
+  okBtn.textContent = confirmLabel;
+
+  dialog.classList.remove("hidden");
+  cancelBtn.focus();
+
+  return new Promise((resolve) => {
+    const cleanup = (result) => {
+      dialog.classList.add("hidden");
+      okBtn.removeEventListener("click", onOk);
+      cancelBtn.removeEventListener("click", onCancel);
+      backdrop.removeEventListener("click", onCancel);
+      document.removeEventListener("keydown", onKeydown);
+      resolve(result);
+    };
+    const onOk = () => cleanup(true);
+    const onCancel = () => cleanup(false);
+    const onKeydown = (e) => {
+      if (e.key === "Escape") cleanup(false);
+      if (e.key === "Enter") cleanup(true);
+    };
+
+    okBtn.addEventListener("click", onOk);
+    cancelBtn.addEventListener("click", onCancel);
+    backdrop.addEventListener("click", onCancel);
+    document.addEventListener("keydown", onKeydown);
+  });
+}
+
 // ---- Health badge ----
 async function checkHealth() {
   const badge = document.getElementById("health-badge");
@@ -265,7 +304,11 @@ async function loadHistoryItem(id) {
 }
 
 async function deleteHistoryItem(id) {
-  if (!window.confirm("Delete this comparison from history?")) return;
+  const ok = await confirmDialog("Delete this comparison from history?", {
+    title: "Delete comparison?",
+    confirmLabel: "Delete",
+  });
+  if (!ok) return;
   try {
     const res = await fetch(`/api/v1/history/${id}`, { method: "DELETE" });
     if (!res.ok && res.status !== 404) throw new Error("Could not delete that comparison.");
@@ -277,7 +320,11 @@ async function deleteHistoryItem(id) {
 }
 
 document.getElementById("clear-history-btn").addEventListener("click", async () => {
-  if (!window.confirm("Clear all comparison history? This cannot be undone.")) return;
+  const ok = await confirmDialog("Clear all comparison history? This cannot be undone.", {
+    title: "Clear all history?",
+    confirmLabel: "Clear all",
+  });
+  if (!ok) return;
   try {
     const res = await fetch("/api/v1/history", { method: "DELETE" });
     if (!res.ok) throw new Error("Could not clear history.");
