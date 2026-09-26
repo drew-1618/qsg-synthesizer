@@ -250,7 +250,7 @@ function renderHistoryList() {
             </span>
           </button>
           <button type="button" data-delete-id="${item.id}" aria-label="Delete comparison: ${label}"
-                  class="delete-history-item shrink-0 w-7 h-7 inline-flex items-center justify-center rounded-full text-slate-400 hover:text-red-600 hover:bg-red-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400">
+                  class="delete-history-item shrink-0 w-8 h-8 inline-flex items-center justify-center rounded-full text-slate-400 hover:text-red-600 hover:bg-red-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400">
             &times;
           </button>
         </li>`;
