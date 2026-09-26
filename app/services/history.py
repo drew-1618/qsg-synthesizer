@@ -20,6 +20,8 @@ from app.schemas import BattlecardResponse, HistoryRecord, HistorySummary
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 HISTORY_DIR = BASE_DIR / "data" / "history"
 
+MAX_HISTORY_ENTRIES = 50
+
 _ID_PATTERN = re.compile(r"^[0-9a-f]{32}$")
 
 
@@ -36,7 +38,15 @@ def save_comparison(battlecard: BattlecardResponse) -> HistoryRecord:
     (HISTORY_DIR / f"{record.id}.json").write_text(
         record.model_dump_json(), encoding="utf-8"
     )
+    _prune_oldest()
     return record
+
+
+def _prune_oldest() -> None:
+    """Keep at most MAX_HISTORY_ENTRIES records, dropping the oldest first."""
+    stale = list_comparisons()[MAX_HISTORY_ENTRIES:]
+    for summary in stale:
+        (HISTORY_DIR / f"{summary.id}.json").unlink(missing_ok=True)
 
 
 def list_comparisons() -> List[HistorySummary]:
