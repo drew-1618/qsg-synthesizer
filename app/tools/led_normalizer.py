@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
+from typing import Dict, Optional, Tuple
 
 _COLOR_ALIASES = {
     "green": "green",
@@ -53,7 +53,7 @@ class LEDState(str, Enum):
 # Convention followed across telecom QSGs: solid green is nominal, blinking/
 # pulsing amber signals init/boot activity, and red (any pattern) or solid
 # amber signals a fault condition.
-_STATE_TABLE = {
+_STATE_TABLE: Dict[Tuple[Optional[str], Optional[str]], LEDState] = {
     ("green", "solid"): LEDState.ONLINE,
     ("green", "blinking"): LEDState.BOOTING,
     ("green", "pulsing"): LEDState.BOOTING,

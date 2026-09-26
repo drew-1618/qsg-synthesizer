@@ -16,14 +16,17 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install lint tools
-        run: pip install -r requirements-dev.txt
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-dev.txt
 
       - name: Ruff
         run: ruff check .
 
       - name: Black
         run: black --check .
+
+      - name: Mypy
+        run: mypy
 
   security:
     runs-on: ubuntu-latest

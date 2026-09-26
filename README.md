@@ -65,25 +65,27 @@ extraction path is covered separately with mocks in `tests/test_orchestrator.py`
 ## Lint & format
 
 ```bash
-.venv/bin/pip install -r requirements-dev.txt
+.venv/bin/pip install -r requirements.txt -r requirements-dev.txt
 .venv/bin/ruff check .
 .venv/bin/black --check .
+.venv/bin/mypy
 ```
 
-Both run in CI on every push/PR (see `.github/workflows/test.yml`); `black .` (no `--check`)
-applies formatting fixes locally.
+All three run in CI on every push/PR (see `.github/workflows/test.yml`); `black .` (no
+`--check`) applies formatting fixes locally. Mypy needs `requirements.txt` installed too (not
+just the dev tools), since it reads type info from the real runtime dependencies.
 
 To catch the same issues before they're committed, install the git hook once (after
-`pip install -r requirements-dev.txt`):
+`pip install -r requirements.txt -r requirements-dev.txt`):
 
 ```bash
 .venv/bin/pre-commit install
 ```
 
-Every future `git commit` then runs `ruff check --fix` and `black` on the staged Python files;
-if a hook modifies a file, re-stage it and commit again. The hooks invoke `ruff`/`black` from
-`PATH`, so activate the venv (`source .venv/bin/activate`) before committing, or they'll report
-"Executable not found".
+Every future `git commit` then runs `ruff check --fix`, `black`, and `mypy` on the staged
+Python files; if a hook modifies a file, re-stage it and commit again. The hooks invoke
+`ruff`/`black`/`mypy` from `PATH`, so activate the venv (`source .venv/bin/activate`) before
+committing, or they'll report "Executable not found".
 
 ## Dependency vulnerability scanning
 

@@ -9,3 +9,16 @@ target-version = ["py311"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["app"]
+
+# pymupdf/pymupdf4llm ship no stubs/py.typed marker, and following into
+# their transitive deps (pymupdf_layout -> onnxruntime -> numpy) pulls in
+# stub syntax mypy can't parse under python_version=3.11 - treat them as an
+# untyped boundary instead of following imports into them.
+[[tool.mypy.overrides]]
+module = ["pymupdf", "pymupdf4llm"]
+ignore_missing_imports = true
+follow_imports = "skip"

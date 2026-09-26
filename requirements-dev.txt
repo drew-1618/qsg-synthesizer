@@ -2,3 +2,5 @@ black==26.5.1
 ruff==0.16.9
 pre-commit==4.0.1
 pip-audit==2.10.1
+mypy==2.3.1
+types-reportlab==5.0.0.20260911

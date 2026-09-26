@@ -50,7 +50,7 @@ from app.tools.net_validator import InvalidNetworkInput, classify_ip
 try:
     import anthropic
 except ImportError:  # pragma: no cover - exercised only when package absent
-    anthropic = None
+    anthropic = None  # type: ignore[assignment]
 
 _AGENTS_DIR = Path(__file__).resolve().parents[2] / ".claude" / "agents"
 _EXTRACTOR_MODEL = "claude-haiku-4-5-20251001"
@@ -260,7 +260,7 @@ def _extract_via_anthropic(document_text: str, source_document: str) -> QSGExtra
         ],
     )
     payload = "".join(
-        block.text
+        getattr(block, "text", "")
         for block in response.content
         if getattr(block, "type", None) == "text"
     )

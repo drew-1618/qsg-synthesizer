@@ -15,6 +15,7 @@ from reportlab.lib.pagesizes import LETTER
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
 from reportlab.platypus import (
+    Flowable,
     ListFlowable,
     ListItem,
     Paragraph,
@@ -129,7 +130,7 @@ def battlecard_to_pdf_bytes(battlecard: BattlecardResponse) -> bytes:
             text = _esc(str(value)) if value not in (None, "") else "Unknown"
         return Paragraph(text, _BODY)
 
-    story = [
+    story: list[Flowable] = [
         Paragraph(f"Battlecard: {_esc(name_a)} vs {_esc(name_b)}", _H1),
         Paragraph(
             f"Installation Friction Index &mdash; {_esc(name_a)}: "
@@ -161,7 +162,7 @@ def battlecard_to_pdf_bytes(battlecard: BattlecardResponse) -> bytes:
         if risks:
             story.append(
                 ListFlowable(
-                    [ListItem(Paragraph(_esc(r), _BODY)) for r in risks],
+                    [ListItem(Paragraph(_esc(r), _BODY)) for r in risks],  # type: ignore[misc]
                     bulletType="bullet",
                 )
             )
