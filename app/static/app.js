@@ -63,26 +63,6 @@ function confirmDialog(message, { title = "Are you sure?", confirmLabel = "Confi
   });
 }
 
-// ---- Health badge ----
-async function checkHealth() {
-  const badge = document.getElementById("health-badge");
-  let healthy = false;
-  try {
-    const res = await fetch("/healthz");
-    healthy = res.ok;
-  } catch {
-    healthy = false;
-  }
-  badge.className = `inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full whitespace-nowrap ${
-    healthy ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
-  }`;
-  badge.innerHTML = `
-    <span class="w-1.5 h-1.5 rounded-full ${healthy ? "bg-green-500" : "bg-red-500"}"></span>
-    ${healthy ? "API Healthy" : "API Unreachable"}
-  `;
-}
-checkHealth();
-
 // ---- Error banner ----
 function showError(message) {
   const banner = document.getElementById("error-banner");
@@ -178,7 +158,7 @@ document.getElementById("load-samples-btn").addEventListener("click", async () =
 // ---- Synthesize ----
 function setLoading(isLoading) {
   document.getElementById("synthesize-spinner").classList.toggle("hidden", !isLoading);
-  document.getElementById("synthesize-label").textContent = isLoading ? "Synthesizing..." : "Synthesize Battlecard";
+  document.getElementById("synthesize-label").textContent = isLoading ? "Synthesizing..." : "Synthesize";
   document.getElementById("synthesize-btn").disabled = isLoading;
 }
 
@@ -203,7 +183,7 @@ async function synthesize() {
     setExportLinks(items && items[0] ? items[0].id : null);
     renderResults(data);
   } catch (err) {
-    showError(err.message || "Something went wrong while synthesizing the battlecard.");
+    showError(err.message || "Something went wrong while synthesizing the comparison.");
   } finally {
     setLoading(false);
   }
