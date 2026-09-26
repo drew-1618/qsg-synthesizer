@@ -73,6 +73,18 @@ extraction path is covered separately with mocks in `tests/test_orchestrator.py`
 Both run in CI on every push/PR (see `.github/workflows/test.yml`); `black .` (no `--check`)
 applies formatting fixes locally.
 
+To catch the same issues before they're committed, install the git hook once (after
+`pip install -r requirements-dev.txt`):
+
+```bash
+.venv/bin/pre-commit install
+```
+
+Every future `git commit` then runs `ruff check --fix` and `black` on the staged Python files;
+if a hook modifies a file, re-stage it and commit again. The hooks invoke `ruff`/`black` from
+`PATH`, so activate the venv (`source .venv/bin/activate`) before committing, or they'll report
+"Executable not found".
+
 ## API
 
 - `GET /` — dashboard (drag-and-drop two QSGs, view the battlecard, browse/export history)
