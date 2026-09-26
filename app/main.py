@@ -6,7 +6,7 @@ import base64
 from pathlib import Path
 from typing import List
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -16,6 +16,7 @@ from app.schemas import BattlecardResponse, HistoryRecord, HistorySummary
 from app.services import export as export_service
 from app.services import history
 from app.services.orchestrator import extract_device_spec, synthesize_battlecard
+from app.services.rate_limiter import RateLimiter
 from app.tools.pdf_parser import extract_text_from_pdf
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -23,6 +24,12 @@ STATIC_DIR = BASE_DIR / "app" / "static"
 SAMPLE_DOCS_DIR = BASE_DIR / "sample_docs"
 
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20MB per PDF
+
+# Compare endpoints run the extraction+synthesis pipeline (the expensive
+# path); export endpoints only render an already-saved battlecard, so they
+# get a looser limit.
+compare_rate_limiter = RateLimiter(max_requests=10, window_seconds=60)
+export_rate_limiter = RateLimiter(max_requests=20, window_seconds=60)
 
 app = FastAPI(
     title="QSG Synthesizer",
@@ -77,7 +84,11 @@ class CompareTextRequest(BaseModel):
     device_b_name: str = "device_b"
 
 
-@app.post("/api/v1/compare-text", response_model=BattlecardResponse)
+@app.post(
+    "/api/v1/compare-text",
+    response_model=BattlecardResponse,
+    dependencies=[Depends(compare_rate_limiter)],
+)
 def compare_text(payload: CompareTextRequest) -> BattlecardResponse:
     device_a = extract_device_spec(payload.device_a_text, payload.device_a_name)
     device_b = extract_device_spec(payload.device_b_text, payload.device_b_name)
@@ -100,7 +111,11 @@ def _read_pdf_upload(upload: UploadFile) -> str:
     return extract_text_from_pdf(contents)
 
 
-@app.post("/api/v1/compare-pdfs", response_model=BattlecardResponse)
+@app.post(
+    "/api/v1/compare-pdfs",
+    response_model=BattlecardResponse,
+    dependencies=[Depends(compare_rate_limiter)],
+)
 def compare_pdfs(
     device_a_pdf: UploadFile = File(...),
     device_b_pdf: UploadFile = File(...),
@@ -133,7 +148,11 @@ def get_history_item(history_id: str) -> HistoryRecord:
     return _get_history_record_or_404(history_id)
 
 
-@app.get("/api/v1/history/{history_id}/export.md", include_in_schema=False)
+@app.get(
+    "/api/v1/history/{history_id}/export.md",
+    include_in_schema=False,
+    dependencies=[Depends(export_rate_limiter)],
+)
 def export_history_markdown(history_id: str) -> Response:
     record = _get_history_record_or_404(history_id)
     markdown = export_service.battlecard_to_markdown(record.battlecard)
@@ -144,7 +163,11 @@ def export_history_markdown(history_id: str) -> Response:
     )
 
 
-@app.get("/api/v1/history/{history_id}/export.pdf", include_in_schema=False)
+@app.get(
+    "/api/v1/history/{history_id}/export.pdf",
+    include_in_schema=False,
+    dependencies=[Depends(export_rate_limiter)],
+)
 def export_history_pdf(history_id: str) -> Response:
     record = _get_history_record_or_404(history_id)
     pdf_bytes = export_service.battlecard_to_pdf_bytes(record.battlecard)

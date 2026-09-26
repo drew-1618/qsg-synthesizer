@@ -2,7 +2,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from app.main import MAX_UPLOAD_BYTES, app
+from app.main import MAX_UPLOAD_BYTES, app, compare_rate_limiter
 
 SAMPLE_DOCS_DIR = Path(__file__).parent.parent / "sample_docs"
 
@@ -256,3 +256,23 @@ class TestHistory:
         assert response.status_code == 200
         assert response.json() == {"deleted": 2}
         assert client.get("/api/v1/history").json() == []
+
+
+class TestRateLimiting:
+    def _post_comparison(self):
+        device_a_text = (SAMPLE_DOCS_DIR / "device_a_qsg.md").read_text(encoding="utf-8")
+        device_b_text = (SAMPLE_DOCS_DIR / "device_b_qsg.md").read_text(encoding="utf-8")
+        return client.post(
+            "/api/v1/compare-text",
+            json={"device_a_text": device_a_text, "device_b_text": device_b_text},
+        )
+
+    def test_exceeding_the_limit_returns_429_with_retry_after(self, monkeypatch):
+        monkeypatch.setattr(compare_rate_limiter, "max_requests", 2)
+
+        assert self._post_comparison().status_code == 200
+        assert self._post_comparison().status_code == 200
+
+        response = self._post_comparison()
+        assert response.status_code == 429
+        assert "Retry-After" in response.headers
