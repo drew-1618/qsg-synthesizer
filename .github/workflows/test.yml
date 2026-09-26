@@ -21,3 +21,32 @@ jobs:
 
       - name: Run tests
         run: pytest -q
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t qsg-synthesizer:ci .
+
+      - name: Boot container and wait for healthz
+        run: |
+          docker run -d --name qsg-synthesizer -p 8000:8000 qsg-synthesizer:ci
+          for i in $(seq 1 15); do
+            if curl -fs http://localhost:8000/healthz; then
+              echo "Container is healthy"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Container did not become healthy in time"
+          exit 1
+
+      - name: Dump container logs
+        if: always()
+        run: docker logs qsg-synthesizer
+
+      - name: Stop container
+        if: always()
+        run: docker rm -f qsg-synthesizer
