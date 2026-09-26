@@ -19,6 +19,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 STATIC_DIR = BASE_DIR / "app" / "static"
 SAMPLE_DOCS_DIR = BASE_DIR / "sample_docs"
 
+MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20MB per PDF
+
 app = FastAPI(
     title="QSG Synthesizer",
     description="Automated Hardware Spec & Quick Start Guide Comparison Engine",
@@ -28,7 +30,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -84,7 +86,13 @@ def _read_pdf_upload(upload: UploadFile) -> str:
         raise HTTPException(
             status_code=400, detail=f"'{upload.filename}' is not a PDF file."
         )
-    return extract_text_from_pdf(upload.file.read())
+    contents = upload.file.read(MAX_UPLOAD_BYTES + 1)
+    if len(contents) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"'{upload.filename}' exceeds the {MAX_UPLOAD_BYTES // (1024 * 1024)}MB upload limit.",
+        )
+    return extract_text_from_pdf(contents)
 
 
 @app.post("/api/v1/compare-pdfs", response_model=BattlecardResponse)

@@ -2,7 +2,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from app.main import app
+from app.main import MAX_UPLOAD_BYTES, app
 
 SAMPLE_DOCS_DIR = Path(__file__).parent.parent / "sample_docs"
 
@@ -150,3 +150,18 @@ class TestComparePdfs:
             },
         )
         assert response.status_code == 400
+
+    def test_rejects_oversized_pdf_upload(self):
+        oversized = b"%PDF-1.4\n" + b"0" * (MAX_UPLOAD_BYTES + 1)
+        response = client.post(
+            "/api/v1/compare-pdfs",
+            files={
+                "device_a_pdf": ("device_a_qsg.pdf", oversized, "application/pdf"),
+                "device_b_pdf": (
+                    "device_b_qsg.pdf",
+                    open(SAMPLE_DOCS_DIR / "device_b_qsg.pdf", "rb"),
+                    "application/pdf",
+                ),
+            },
+        )
+        assert response.status_code == 413
