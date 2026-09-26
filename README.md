@@ -4,7 +4,8 @@ A FastAPI service that ingests two telecom hardware Quick Start Guides (QSGs) or
 spec sheets — PDF or plain text/Markdown — and produces a comparative
 usability battlecard: an Installation Friction Index (1-10), a normalized
 side-by-side spec comparison, field-deployment risks, and a competitive sales
-talk track.
+talk track. Every synthesized battlecard is saved to a browsable history and
+can be exported as Markdown or PDF.
 
 ## Architecture
 
@@ -59,10 +60,26 @@ extraction path is covered separately with mocks in `tests/test_orchestrator.py`
 
 ## API
 
-- `GET /` — dashboard (drag-and-drop two QSGs, view the battlecard)
+- `GET /` — dashboard (drag-and-drop two QSGs, view the battlecard, browse/export history)
 - `GET /healthz` — health check
 - `GET /api/v1/samples` — base64-encoded sample PDFs, for the dashboard's demo button
 - `POST /api/v1/compare-text` — JSON body `{device_a_text, device_a_name, device_b_text, device_b_name}`
-- `POST /api/v1/compare-pdfs` — multipart upload, two PDF files (`device_a_pdf`, `device_b_pdf`)
+- `POST /api/v1/compare-pdfs` — multipart upload, two PDF files (`device_a_pdf`, `device_b_pdf`,
+  20MB max each)
+- `GET /api/v1/history` — list of past comparisons (id, device names, timestamp, friction scores)
+- `GET /api/v1/history/{id}` — full saved battlecard for one comparison
+- `GET /api/v1/history/{id}/export.md` / `.../export.pdf` — download a saved battlecard as
+  Markdown or PDF
+- `DELETE /api/v1/history/{id}` — remove one comparison from history
+- `DELETE /api/v1/history` — clear all comparison history
 
-Both `compare-*` endpoints return a `BattlecardResponse` (see `app/schemas.py`).
+Both `compare-*` endpoints return a `BattlecardResponse` (see `app/schemas.py`), save it to
+history, and are rate-limited to 10 requests/minute per IP (`/export.*` is limited to
+20/minute); exceeding the limit returns `429` with a `Retry-After` header.
+
+## Comparison history
+
+Each `compare-*` call is persisted as its own JSON file under `data/history/` (git-ignored,
+created on first use) — no database. Records are kept newest-first and auto-pruned beyond the
+50 most recent (`MAX_HISTORY_ENTRIES` in `app/services/history.py`). The dashboard's "Recent
+Comparisons" panel lists, reloads, deletes, and exports from this store.
