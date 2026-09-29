@@ -3,6 +3,9 @@ import logging
 from unittest.mock import MagicMock, patch
 
 from app.services.orchestrator import (
+    NO_ADVANTAGES_MESSAGE,
+    NO_RISKS_MESSAGE,
+    _build_key_risks,
     _heuristic_extract_qsg,
     extract_device_spec,
     extract_qsg_fields,
@@ -163,12 +166,16 @@ class TestKeyAdvantages:
         device_b = extract_device_spec("# Device B\n\nNo extra sections.", "b.md")
         battlecard = synthesize_battlecard(device_a, device_b)
 
-        assert battlecard.key_advantages_device_a == [
-            "No differentiating capabilities identified from the extracted spec."
-        ]
-        assert battlecard.key_advantages_device_b == [
-            "No differentiating capabilities identified from the extracted spec."
-        ]
+        assert battlecard.key_advantages_device_a == [NO_ADVANTAGES_MESSAGE]
+        assert battlecard.key_advantages_device_b == [NO_ADVANTAGES_MESSAGE]
+
+
+class TestKeyRisksFallback:
+    def test_falls_back_to_no_risks_message_when_nothing_flagged(self):
+        device = extract_device_spec(
+            "# Device\n\nAuto-provisions via TR-069. No console required.", "d.md"
+        )
+        assert _build_key_risks(device) == [NO_RISKS_MESSAGE]
 
 
 _LED_ORDER_TEXT = """# Device

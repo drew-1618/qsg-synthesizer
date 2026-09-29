@@ -31,6 +31,14 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
+// Must match app/services/orchestrator.py's NO_RISKS_MESSAGE /
+// NO_ADVANTAGES_MESSAGE exactly — used to render the "nothing found"
+// fallback as a neutral line instead of a highlighted risk/advantage.
+const NO_RISKS_MESSAGE =
+  "No significant field-deployment risks identified from the extracted spec.";
+const NO_ADVANTAGES_MESSAGE =
+  "No differentiating capabilities identified from the extracted spec.";
+
 // Wraps the first case-insensitive match of `query` in `text` with <mark>.
 // Operates on already-escaped strings so highlighting can never inject
 // markup beyond the <mark> tag itself.
@@ -502,8 +510,13 @@ function renderResults(data) {
   document.getElementById("advantage-name-b").textContent = nameB;
   const renderAdvantages = (advantages) =>
     advantages
-      .map(
-        (advantage) => `
+      .map((advantage) =>
+        advantage === NO_ADVANTAGES_MESSAGE
+          ? `
+        <li class="flex items-start gap-2 text-slate-500 bg-slate-50 rounded-md px-3 py-2">
+          <span>${escapeHtml(advantage)}</span>
+        </li>`
+          : `
         <li class="flex items-start gap-2 text-emerald-800 bg-emerald-50 rounded-md px-3 py-2">
           <span aria-hidden="true">&#10003;</span>
           <span>${escapeHtml(advantage)}</span>
@@ -517,8 +530,13 @@ function renderResults(data) {
   document.getElementById("risk-name-b").textContent = nameB;
   const renderRisks = (risks) =>
     risks
-      .map(
-        (risk) => `
+      .map((risk) =>
+        risk === NO_RISKS_MESSAGE
+          ? `
+        <li class="flex items-start gap-2 text-slate-500 bg-slate-50 rounded-md px-3 py-2">
+          <span>${escapeHtml(risk)}</span>
+        </li>`
+          : `
         <li class="flex items-start gap-2 text-amber-800 bg-amber-50 rounded-md px-3 py-2">
           <span aria-hidden="true">&#9888;</span>
           <span>${escapeHtml(risk)}</span>

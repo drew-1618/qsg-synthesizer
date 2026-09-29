@@ -395,6 +395,15 @@ def extract_device_spec(document_text: str, source_document: str) -> DeviceSpec:
 
 _REMOTE_PROVISIONING_METHODS = {ApiProvisioningMethod.TR069, ApiProvisioningMethod.DHCP}
 
+# Exact text app.js matches on to render these as a neutral "nothing found"
+# line instead of a highlighted risk/advantage — keep the two in sync.
+NO_RISKS_MESSAGE = (
+    "No significant field-deployment risks identified from the extracted spec."
+)
+NO_ADVANTAGES_MESSAGE = (
+    "No differentiating capabilities identified from the extracted spec."
+)
+
 
 def _compute_friction_score(spec: DeviceSpec) -> int:
     score = 1
@@ -474,9 +483,7 @@ def _build_key_risks(spec: DeviceSpec) -> list[str]:
             "field techs may misread device status."
         )
     if not risks:
-        risks.append(
-            "No significant field-deployment risks identified from the extracted spec."
-        )
+        risks.append(NO_RISKS_MESSAGE)
     return risks
 
 
@@ -525,13 +532,9 @@ def _build_key_advantages(
     advantages_b.extend(f"Unique capability: {c}" for c in caps_b_only)
 
     if not advantages_a:
-        advantages_a.append(
-            "No differentiating capabilities identified from the extracted spec."
-        )
+        advantages_a.append(NO_ADVANTAGES_MESSAGE)
     if not advantages_b:
-        advantages_b.append(
-            "No differentiating capabilities identified from the extracted spec."
-        )
+        advantages_b.append(NO_ADVANTAGES_MESSAGE)
     return advantages_a, advantages_b
 
 
