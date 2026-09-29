@@ -50,7 +50,6 @@ class DeviceSpec(BaseModel):
     required_tools: List[str] = Field(default_factory=list)
     led_states: List[LEDStatus] = Field(default_factory=list)
     ports: List[str] = Field(default_factory=list)
-    port_count: int = 0
     wifi_standard: Optional[str] = None
     wan_speed: Optional[str] = None
     form_factor: Optional[str] = None

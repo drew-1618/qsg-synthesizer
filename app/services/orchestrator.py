@@ -48,7 +48,7 @@ from app.schemas import (
 from app.tools.capability_compare import parse_speed_mbps, rank_wifi_standard
 from app.tools.led_normalizer import LEDState, normalize_led
 from app.tools.net_validator import InvalidNetworkInput, classify_ip
-from app.tools.port_counter import count_ports
+from app.tools.port_counter import expand_port_range
 
 try:
     import anthropic
@@ -356,9 +356,11 @@ def _normalize_to_device_spec(extraction: QSGExtraction) -> DeviceSpec:
             )
         )
 
-    ports = [
-        f"{port.port_name} ({port.port_type})" for port in extraction.cabling_ports
-    ]
+    ports = []
+    for port in extraction.cabling_ports:
+        label, count = expand_port_range(port.port_name)
+        name = f"{count}x {label}" if count > 1 else port.port_name
+        ports.append(f"{name} ({port.port_type})")
 
     return DeviceSpec(
         model_name=extraction.device_name,
@@ -370,7 +372,6 @@ def _normalize_to_device_spec(extraction: QSGExtraction) -> DeviceSpec:
         required_tools=extraction.required_tools,
         led_states=led_states,
         ports=ports,
-        port_count=count_ports(ports),
         wifi_standard=extraction.wifi_standard,
         wan_speed=extraction.wan_speed,
         form_factor=extraction.form_factor,
@@ -425,10 +426,6 @@ def _build_comparison_matrix(device_a: DeviceSpec, device_b: DeviceSpec) -> dict
             "device_b": device_b.required_tools,
         },
         "ports": {"device_a": device_a.ports, "device_b": device_b.ports},
-        "port_count": {
-            "device_a": device_a.port_count,
-            "device_b": device_b.port_count,
-        },
         "wifi_standard": {
             "device_a": device_a.wifi_standard,
             "device_b": device_b.wifi_standard,
@@ -484,20 +481,12 @@ def _build_key_advantages(
     device_a: DeviceSpec, device_b: DeviceSpec
 ) -> tuple[list[str], list[str]]:
     """Deterministically surface competitive pros/cons a sales engineer can
-    lead with — port counts, Wi-Fi generation, WAN throughput, and any
-    capability one device has that the other doesn't. Never ranks
-    form_factor, since there's no objectively "better" value there."""
+    lead with — Wi-Fi generation, WAN throughput, and any capability one
+    device has that the other doesn't. Never ranks physical port counts or
+    form_factor, since neither has an objectively "better" value across
+    different port/form types."""
     advantages_a: list[str] = []
     advantages_b: list[str] = []
-
-    if device_a.port_count > device_b.port_count:
-        advantages_a.append(
-            f"More physical ports ({device_a.port_count} vs. {device_b.port_count})."
-        )
-    elif device_b.port_count > device_a.port_count:
-        advantages_b.append(
-            f"More physical ports ({device_b.port_count} vs. {device_a.port_count})."
-        )
 
     rank_a = rank_wifi_standard(device_a.wifi_standard)
     rank_b = rank_wifi_standard(device_b.wifi_standard)

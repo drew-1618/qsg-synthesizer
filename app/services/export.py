@@ -57,7 +57,6 @@ _COMPARISON_ROWS = [
     ("Provisioning Method", "provisioning_method"),
     ("Required Tools", "required_tools"),
     ("Physical Ports", "ports"),
-    ("Port Count", "port_count"),
     ("Wi-Fi Standard", "wifi_standard"),
     ("WAN Speed", "wan_speed"),
     ("Form Factor", "form_factor"),

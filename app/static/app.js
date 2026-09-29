@@ -450,7 +450,6 @@ function renderResults(data) {
     ["Provisioning Method", provisioningBadge(cm.provisioning_method.device_a), provisioningBadge(cm.provisioning_method.device_b)],
     ["Required Tools", listOrDash(cm.required_tools.device_a), listOrDash(cm.required_tools.device_b)],
     ["Physical Ports", listOrDash(cm.ports.device_a), listOrDash(cm.ports.device_b)],
-    ["Port Count", cm.port_count.device_a, cm.port_count.device_b],
     ["Wi-Fi Standard", textOrDash(cm.wifi_standard.device_a), textOrDash(cm.wifi_standard.device_b)],
     ["WAN Speed", textOrDash(cm.wan_speed.device_a), textOrDash(cm.wan_speed.device_b)],
     ["Form Factor", textOrDash(cm.form_factor.device_a), textOrDash(cm.form_factor.device_b)],

@@ -8,7 +8,7 @@ from app.tools.net_validator import (
     parse_subnet,
     validate_gateway,
 )
-from app.tools.port_counter import count_ports
+from app.tools.port_counter import expand_port_range
 
 
 class TestParseSubnet:
@@ -106,18 +106,18 @@ class TestNormalizeLed:
         assert result.state == LEDState.ONLINE
 
 
-class TestCountPorts:
-    def test_single_ports_count_as_one_each(self):
-        assert count_ports(["PON (SC/APC fiber)", "Power (DC barrel, 12V)"]) == 2
+class TestExpandPortRange:
+    def test_single_port_name_is_unchanged_with_count_one(self):
+        assert expand_port_range("PON") == ("PON", 1)
 
     def test_expands_dashed_range_notation(self):
-        assert count_ports(["LAN1–LAN4 (RJ45 Gigabit Ethernet)"]) == 4
+        assert expand_port_range("LAN1–LAN4") == ("LAN", 4)
 
-    def test_ignores_unrelated_numbers(self):
-        assert count_ports(["Console (RS-232 (RJ45-to-DB9))"]) == 1
+    def test_expands_shorthand_range_notation(self):
+        assert expand_port_range("LAN1-4") == ("LAN", 4)
 
-    def test_empty_list_is_zero(self):
-        assert count_ports([]) == 0
+    def test_leaves_unrelated_numbers_alone(self):
+        assert expand_port_range("RS-232") == ("RS-232", 1)
 
 
 class TestRankWifiStandard:

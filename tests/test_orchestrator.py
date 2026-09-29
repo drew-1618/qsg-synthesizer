@@ -141,7 +141,7 @@ class TestHeuristicCapabilityExtraction:
 
 
 class TestKeyAdvantages:
-    def test_flags_more_ports_newer_wifi_faster_wan_and_unique_capabilities(self):
+    def test_flags_newer_wifi_faster_wan_and_unique_capabilities(self):
         device_a = extract_device_spec(_DEVICE_A_TEXT, "a.md")
         device_b = extract_device_spec(_DEVICE_B_TEXT, "b.md")
         battlecard = synthesize_battlecard(device_a, device_b)
@@ -149,7 +149,6 @@ class TestKeyAdvantages:
         advantages_a = " ".join(battlecard.key_advantages_device_a)
         advantages_b = " ".join(battlecard.key_advantages_device_b)
 
-        assert "More physical ports" in advantages_a
         assert "Newer Wi-Fi standard" in advantages_a
         assert "Faster WAN throughput" in advantages_a
         assert "Unique capability: USB 3.0 port for external storage" in advantages_a

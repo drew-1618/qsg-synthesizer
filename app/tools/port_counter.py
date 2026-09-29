@@ -1,33 +1,27 @@
-"""Deterministic counting of physical ports from extracted port-name strings.
+"""Deterministic port-range parsing for physical port descriptions.
 
-Port names loosely follow "LAN1-LAN4" range notation for multi-port banks or
-a single name like "PON"/"Console" for one port. Counting is a fixed regex
-over text qsg_extractor already extracted, never an LLM guess.
+Port names loosely follow "LAN1-LAN4" range notation for a bank of
+identical ports, or a single name like "PON"/"Console" for one port.
+Expanding a range into a label + count is a fixed regex over text
+qsg_extractor already extracted, never an LLM guess.
 """
 
 from __future__ import annotations
 
 import re
-from typing import List
+from typing import Tuple
 
-__all__ = ["count_ports"]
+__all__ = ["expand_port_range"]
 
-# Matches "LAN1-LAN4", "LAN1-4", and "port 1 to 4" alike: a number, a
-# separator (dash or "to"), an optional repeated non-numeric prefix (e.g.
-# the repeated "LAN"), then the closing number.
-_RANGE_RE = re.compile(r"(\d+)\s*(?:[-–—]|\bto\b)\s*[A-Za-z]*\s*(\d+)")
+_RANGE_RE = re.compile(r"^([A-Za-z]+)\s*(\d+)\s*(?:[-–—]|\bto\b)\s*[A-Za-z]*\s*(\d+)$")
 
 
-def count_ports(port_names: List[str]) -> int:
-    """Sum the number of physical ports across a list of port descriptions,
-    expanding "N-M" range notation (e.g. "LAN1-LAN4" -> 4) and counting
-    anything else as a single port."""
-    total = 0
-    for name in port_names:
-        match = _RANGE_RE.search(name)
-        if match:
-            start, end = int(match.group(1)), int(match.group(2))
-            total += max(end - start + 1, 1)
-        else:
-            total += 1
-    return total
+def expand_port_range(port_name: str) -> Tuple[str, int]:
+    """Expand "LAN1-LAN4"-style range notation into (label, count), e.g.
+    ("LAN", 4). A port name with no range notation returns (port_name, 1)
+    unchanged."""
+    match = _RANGE_RE.match(port_name.strip())
+    if not match:
+        return port_name, 1
+    prefix, start, end = match.group(1), int(match.group(2)), int(match.group(3))
+    return prefix, max(end - start + 1, 1)
