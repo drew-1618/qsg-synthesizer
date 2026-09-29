@@ -129,8 +129,11 @@ Comparisons" panel lists, reloads, deletes, and exports from this store.
 
 ## Logging
 
-Configured once at startup (`app/logging_config.py`) to stdout, level controlled by `LOG_LEVEL`
-(default `INFO`). Beyond uvicorn's own access log, the app logs:
+Configured once at startup (`app/logging_config.py`) to stdout as one JSON object per line
+(`{"timestamp", "level", "logger", "message"}`, plus `"exception"` when a traceback is
+attached), level controlled by `LOG_LEVEL` (default `INFO`) — easy to pipe into a log
+aggregator without a reformatting step. Uvicorn's own access log is unaffected and stays in
+its normal plain-text form. Beyond that access log, the app logs:
 
 - a rejected Basic Auth attempt (client IP, and username if one was sent — never the password)
 - a request that hit the rate limiter (client IP, limit)
