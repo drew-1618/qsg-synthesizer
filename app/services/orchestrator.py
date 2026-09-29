@@ -352,6 +352,8 @@ def _normalize_to_device_spec(extraction: QSGExtraction) -> DeviceSpec:
             LEDStatus(
                 state=normalized.state,
                 color=normalized.color,
+                pattern=normalized.pattern,
+                frequency_hz=normalized.frequency_hz,
                 description=led.raw_description,
             )
         )

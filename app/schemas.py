@@ -37,6 +37,8 @@ class ProvisioningMethod(str, Enum):
 class LEDStatus(BaseModel):
     state: LEDState
     color: Optional[str] = None
+    pattern: Optional[str] = None
+    frequency_hz: Optional[float] = None
     description: str
 
 

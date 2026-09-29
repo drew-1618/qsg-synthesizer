@@ -193,3 +193,11 @@ class TestLedStateSorting:
             LEDState.FAULT,
             LEDState.UNKNOWN,
         ]
+
+    def test_carries_pattern_and_frequency_for_display(self):
+        device = extract_device_spec(_LED_ORDER_TEXT, "device.md")
+        booting = next(
+            led for led in device.led_states if led.state == LEDState.BOOTING
+        )
+        assert booting.pattern == "blinking"
+        assert booting.frequency_hz == 2.0

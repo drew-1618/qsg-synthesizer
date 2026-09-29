@@ -23,6 +23,27 @@
       from { opacity: 0; transform: scale(0.96); }
       to { opacity: 1; transform: scale(1); }
     }
+    .led-dot {
+      display: inline-block;
+      width: 0.6rem;
+      height: 0.6rem;
+      margin-top: 0.3rem;
+      border-radius: 9999px;
+      flex-shrink: 0;
+      box-shadow: 0 0 0 1px rgba(0,0,0,0.06);
+    }
+    @media (prefers-reduced-motion: no-preference) {
+      .led-dot--blinking { animation: ledBlink 1.4s steps(1, end) infinite; }
+      .led-dot--pulsing { animation: ledPulse 1.6s ease-in-out infinite; }
+    }
+    @keyframes ledBlink {
+      0%, 49% { opacity: 1; }
+      50%, 100% { opacity: 0.15; }
+    }
+    @keyframes ledPulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.25; }
+    }
   </style>
 </head>
 <body class="bg-slate-50 text-slate-800 min-h-screen">

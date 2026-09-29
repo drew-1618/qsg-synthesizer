@@ -386,16 +386,31 @@ function frictionColor(score) {
   return "bg-red-500";
 }
 
-const LED_STYLES = {
-  BOOTING: "bg-amber-100 text-amber-800",
-  ONLINE: "bg-green-100 text-green-800",
-  FAULT: "bg-red-100 text-red-800",
-  UNKNOWN: "bg-slate-100 text-slate-600",
+// Fixed lookup only — never interpolates led.color/led.pattern text directly,
+// so no untrusted string ever reaches the style attribute.
+const LED_COLOR_HEX = {
+  green: "#22c55e",
+  amber: "#f59e0b",
+  red: "#ef4444",
+  blue: "#3b82f6",
+  white: "#e2e8f0",
+  off: "#cbd5e1",
 };
+// Capped well below real-device rates (LEDs are commonly documented up to
+// ~2-4Hz) so a fast blink stays readable at dot size instead of flickering.
+const MIN_BLINK_SECONDS = 0.6;
+const MAX_BLINK_SECONDS = 3;
 
-function ledPill(state) {
-  const cls = LED_STYLES[state] || LED_STYLES.UNKNOWN;
-  return `<span class="inline-block text-xs font-semibold px-2 py-0.5 rounded-full ${cls}">${escapeHtml(state)}</span>`;
+function ledDot(led) {
+  const hex = LED_COLOR_HEX[led.color] || "#94a3b8";
+  const patternClass =
+    led.pattern === "blinking" ? "led-dot--blinking" : led.pattern === "pulsing" ? "led-dot--pulsing" : "";
+  let style = `background-color:${hex}`;
+  if (patternClass && led.frequency_hz > 0) {
+    const seconds = Math.min(MAX_BLINK_SECONDS, Math.max(MIN_BLINK_SECONDS, 1 / led.frequency_hz));
+    style += `;animation-duration:${seconds}s`;
+  }
+  return `<span class="led-dot ${patternClass}" style="${style}" aria-hidden="true"></span>`;
 }
 
 function ipBadge(isPrivate) {
@@ -474,7 +489,7 @@ function renderResults(data) {
       .map(
         (led) => `
         <li class="flex items-start gap-2">
-          ${ledPill(led.state)}
+          ${ledDot(led)}
           <span class="text-slate-600">${escapeHtml(led.description)}</span>
         </li>`
       )
