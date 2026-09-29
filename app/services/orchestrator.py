@@ -46,7 +46,7 @@ from app.schemas import (
     ProvisioningMethod as ApiProvisioningMethod,
 )
 from app.tools.capability_compare import parse_speed_mbps, rank_wifi_standard
-from app.tools.led_normalizer import LEDState, normalize_led
+from app.tools.led_normalizer import LEDState, led_sort_key, normalize_led
 from app.tools.net_validator import InvalidNetworkInput, classify_ip
 from app.tools.port_counter import expand_port_range
 
@@ -355,6 +355,7 @@ def _normalize_to_device_spec(extraction: QSGExtraction) -> DeviceSpec:
                 description=led.raw_description,
             )
         )
+    led_states.sort(key=lambda led: led_sort_key(led.state))
 
     ports = []
     for port in extraction.cabling_ports:

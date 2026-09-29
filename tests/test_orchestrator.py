@@ -8,6 +8,7 @@ from app.services.orchestrator import (
     extract_qsg_fields,
     synthesize_battlecard,
 )
+from app.tools.led_normalizer import LEDState
 
 _FAKE_EXTRACTION = {
     "device_name": "NovaFiber GX400",
@@ -167,4 +168,28 @@ class TestKeyAdvantages:
         ]
         assert battlecard.key_advantages_device_b == [
             "No differentiating capabilities identified from the extracted spec."
+        ]
+
+
+_LED_ORDER_TEXT = """# Device
+
+## LED Indicators
+
+| LED | Meaning |
+|-----|---------|
+| Alert | solid red if optical signal is lost |
+| Power | mysterious purple glow |
+| Power | solid green once fully online |
+| Power | blinking amber 2Hz while booting |
+"""
+
+
+class TestLedStateSorting:
+    def test_orders_online_booting_fault_then_unknown(self):
+        device = extract_device_spec(_LED_ORDER_TEXT, "device.md")
+        assert [led.state for led in device.led_states] == [
+            LEDState.ONLINE,
+            LEDState.BOOTING,
+            LEDState.FAULT,
+            LEDState.UNKNOWN,
         ]

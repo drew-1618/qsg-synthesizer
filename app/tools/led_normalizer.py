@@ -66,6 +66,20 @@ _STATE_TABLE: Dict[Tuple[Optional[str], Optional[str]], LEDState] = {
 }
 
 
+# Display order for a device's LED list: nominal state first, then
+# in-progress, then fault, with anything unclassified pushed to the end.
+_DISPLAY_ORDER = {
+    LEDState.ONLINE: 0,
+    LEDState.BOOTING: 1,
+    LEDState.FAULT: 2,
+    LEDState.UNKNOWN: 3,
+}
+
+
+def led_sort_key(state: LEDState) -> int:
+    return _DISPLAY_ORDER[state]
+
+
 @dataclass(frozen=True)
 class NormalizedLED:
     raw: str
