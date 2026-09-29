@@ -219,6 +219,8 @@ function formatTimestamp(iso) {
 function renderHistoryList() {
   const list = document.getElementById("history-list");
   const empty = document.getElementById("history-empty");
+  const clearAllBtn = document.getElementById("clear-history-btn");
+  clearAllBtn.classList.toggle("hidden", historyItems.length === 0);
   if (historyItems.length === 0) {
     list.innerHTML = "";
     empty.textContent = historySearch
@@ -280,6 +282,7 @@ async function loadHistory({ append = false } = {}) {
     return historyItems;
   } catch {
     document.getElementById("history-list").innerHTML = "";
+    document.getElementById("clear-history-btn").classList.add("hidden");
     empty.textContent = "Could not load comparison history.";
     empty.classList.remove("hidden");
     loadMoreBtn.classList.add("hidden");
