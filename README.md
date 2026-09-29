@@ -3,9 +3,11 @@
 A FastAPI service that ingests two telecom hardware Quick Start Guides (QSGs) or
 spec sheets — PDF or plain text/Markdown — and produces a comparative
 usability battlecard: an Installation Friction Index (1-10), a normalized
-side-by-side spec comparison, field-deployment risks, and a competitive sales
-talk track. Every synthesized battlecard is saved to a browsable history and
-can be exported as Markdown or PDF.
+side-by-side spec comparison (install details, Wi-Fi standard, WAN speed,
+form factor, port counts, and hardware capabilities), field-deployment
+risks, competitive advantages, and a competitive sales talk track. Every
+synthesized battlecard is saved to a browsable history and can be exported
+as Markdown or PDF.
 
 ## Architecture
 

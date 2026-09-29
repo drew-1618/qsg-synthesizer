@@ -50,6 +50,11 @@ class DeviceSpec(BaseModel):
     required_tools: List[str] = Field(default_factory=list)
     led_states: List[LEDStatus] = Field(default_factory=list)
     ports: List[str] = Field(default_factory=list)
+    port_count: int = 0
+    wifi_standard: Optional[str] = None
+    wan_speed: Optional[str] = None
+    form_factor: Optional[str] = None
+    capabilities: List[str] = Field(default_factory=list)
 
 
 class BattlecardResponse(BaseModel):
@@ -58,6 +63,8 @@ class BattlecardResponse(BaseModel):
     installation_friction_score_device_b: int = Field(ge=1, le=10)
     key_risks_device_a: List[str]
     key_risks_device_b: List[str]
+    key_advantages_device_a: List[str]
+    key_advantages_device_b: List[str]
     sales_talk_track: str
 
 

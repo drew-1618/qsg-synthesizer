@@ -170,6 +170,13 @@ def _build_pdf(spec: dict, pdf_path: Path) -> None:
         ]
 
     story += [
+        Paragraph("Key Features", _H2),
+        _bullets(spec["key_features"]),
+        Paragraph("Specifications", _H2),
+        _bullets(spec["specifications"]),
+    ]
+
+    story += [
         NextPageTemplate("OneColumn"),
         PageBreak(),
         Paragraph("Cabling & Ports", _H2),
@@ -232,6 +239,17 @@ DEVICE_A = {
         "No additional tools are required for a standard install. A "
         "smartphone camera is used to scan the setup QR code."
     ),
+    "key_features": [
+        "Wi-Fi 6 (802.11ax) tri-band with mesh support",
+        "Built-in ONT — no separate ONT box needed",
+        "USB 3.0 port for external storage or printer sharing",
+        "Automatic firmware updates with zero-touch rollback",
+    ],
+    "specifications": [
+        "Wi-Fi Standard: 802.11ax (Wi-Fi 6), tri-band",
+        "WAN Speed: Up to 2.5 Gbps (XGS-PON)",
+        "Form Factor: Compact desktop, wall-mountable",
+    ],
     "ports": [
         ("PON", "SC/APC fiber", "Connects to carrier ONT drop cable"),
         ("LAN1–LAN4", "RJ45 Gigabit Ethernet", "Auto-negotiating"),
@@ -295,6 +313,16 @@ DEVICE_B = {
         "terminal emulator (e.g. PuTTY, minicom) for initial configuration",
         "Small flathead screwdriver, to set the DIP switch bank for WAN "
         "mode (PPPoE vs. static IP)",
+    ],
+    "key_features": [
+        "2x FXS ports for analog phone service (VoIP)",
+        "Built-in battery backup connector for lifeline phone service",
+        "Parental controls via MAC address filtering",
+    ],
+    "specifications": [
+        "Wi-Fi Standard: 802.11ac (Wi-Fi 5), dual-band",
+        "WAN Speed: Up to 100 Mbps (ADSL2+/VDSL2)",
+        "Form Factor: Desktop, not wall-mountable",
     ],
     "ports": [
         ("DSL", "RJ11", "Connects to telco NID"),

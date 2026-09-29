@@ -57,6 +57,11 @@ _COMPARISON_ROWS = [
     ("Provisioning Method", "provisioning_method"),
     ("Required Tools", "required_tools"),
     ("Physical Ports", "ports"),
+    ("Port Count", "port_count"),
+    ("Wi-Fi Standard", "wifi_standard"),
+    ("WAN Speed", "wan_speed"),
+    ("Form Factor", "form_factor"),
+    ("Capabilities", "capabilities"),
 ]
 
 
@@ -96,6 +101,15 @@ def battlecard_to_markdown(battlecard: BattlecardResponse) -> str:
         cell_a = _plain_cell(row.get("device_a"))
         cell_b = _plain_cell(row.get("device_b"))
         lines.append(f"| {label} | {cell_a} | {cell_b} |")
+
+    lines += ["", "## Competitive Advantages", "", f"### {name_a}"]
+    lines += [f"- {adv}" for adv in battlecard.key_advantages_device_a] or [
+        "- None identified."
+    ]
+    lines += ["", f"### {name_b}"]
+    lines += [f"- {adv}" for adv in battlecard.key_advantages_device_b] or [
+        "- None identified."
+    ]
 
     lines += ["", "## Field-Deployment Risks", "", f"### {name_a}"]
     lines += [f"- {risk}" for risk in battlecard.key_risks_device_a] or [
@@ -152,6 +166,23 @@ def battlecard_to_pdf_bytes(battlecard: BattlecardResponse) -> bytes:
     table = Table(rows, colWidths=[1.4 * inch, 2.8 * inch, 2.8 * inch])
     table.setStyle(_TABLE_STYLE)
     story.append(table)
+
+    advantage_sections = [
+        (name_a, battlecard.key_advantages_device_a),
+        (name_b, battlecard.key_advantages_device_b),
+    ]
+    for name, advantages in advantage_sections:
+        story.append(Paragraph(f"Competitive Advantages &mdash; {_esc(name)}", _H2))
+        if advantages:
+            story.append(
+                ListFlowable(
+                    [ListItem(Paragraph(_esc(a), _BODY)) for a in advantages],  # type: ignore[misc]
+                    bulletType="bullet",
+                )
+            )
+        else:
+            story.append(Paragraph("None identified.", _BODY))
+        story.append(Spacer(1, 4))
 
     risk_sections = [
         (name_a, battlecard.key_risks_device_a),

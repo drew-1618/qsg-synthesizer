@@ -45,8 +45,10 @@ from app.schemas import (
 from app.schemas import (
     ProvisioningMethod as ApiProvisioningMethod,
 )
+from app.tools.capability_compare import parse_speed_mbps, rank_wifi_standard
 from app.tools.led_normalizer import LEDState, normalize_led
 from app.tools.net_validator import InvalidNetworkInput, classify_ip
+from app.tools.port_counter import count_ports
 
 try:
     import anthropic
@@ -70,6 +72,15 @@ _KNOWN_HEADINGS = {
     "cabling & ports",
     "led indicators",
     "installation steps",
+    "key features",
+    "specifications",
+}
+
+_SPEC_LABEL_TO_FIELD = {
+    "wi-fi standard": "wifi_standard",
+    "wifi standard": "wifi_standard",
+    "wan speed": "wan_speed",
+    "form factor": "form_factor",
 }
 
 _HEADING_PREFIX_RE = re.compile(r"^#+\s*")
@@ -176,6 +187,21 @@ def _parse_table_rows(lines: list[str]) -> list[list[str]]:
     return rows
 
 
+def _parse_specifications(lines: list[str]) -> dict[str, str]:
+    """Parse "Label: value" bullets from a Specifications section into the
+    QSGExtraction field names they map to. Unrecognized labels are ignored
+    rather than guessed at."""
+    specs: dict[str, str] = {}
+    for bullet in _parse_bullets(lines):
+        label, sep, value = bullet.partition(":")
+        if not sep:
+            continue
+        field = _SPEC_LABEL_TO_FIELD.get(label.strip().lower())
+        if field:
+            specs[field] = value.strip()
+    return specs
+
+
 def _detect_device_name(text: str) -> str:
     for line in text.splitlines():
         stripped = line.strip()
@@ -224,6 +250,8 @@ def _heuristic_extract_qsg(text: str, source_document: str) -> QSGExtraction:
         if len(row) >= 2
     ]
 
+    specs = _parse_specifications(sections.get("specifications", []))
+
     return QSGExtraction(
         device_name=_detect_device_name(text),
         source_document=source_document,
@@ -232,6 +260,10 @@ def _heuristic_extract_qsg(text: str, source_document: str) -> QSGExtraction:
         required_tools=_parse_bullets(sections.get("required tools", [])),
         cabling_ports=cabling_ports,
         led_indicators=led_indicators,
+        wifi_standard=specs.get("wifi_standard"),
+        wan_speed=specs.get("wan_speed"),
+        form_factor=specs.get("form_factor"),
+        capabilities=_parse_bullets(sections.get("key features", [])),
     )
 
 
@@ -338,6 +370,11 @@ def _normalize_to_device_spec(extraction: QSGExtraction) -> DeviceSpec:
         required_tools=extraction.required_tools,
         led_states=led_states,
         ports=ports,
+        port_count=count_ports(ports),
+        wifi_standard=extraction.wifi_standard,
+        wan_speed=extraction.wan_speed,
+        form_factor=extraction.form_factor,
+        capabilities=extraction.capabilities,
     )
 
 
@@ -388,6 +425,26 @@ def _build_comparison_matrix(device_a: DeviceSpec, device_b: DeviceSpec) -> dict
             "device_b": device_b.required_tools,
         },
         "ports": {"device_a": device_a.ports, "device_b": device_b.ports},
+        "port_count": {
+            "device_a": device_a.port_count,
+            "device_b": device_b.port_count,
+        },
+        "wifi_standard": {
+            "device_a": device_a.wifi_standard,
+            "device_b": device_b.wifi_standard,
+        },
+        "wan_speed": {
+            "device_a": device_a.wan_speed,
+            "device_b": device_b.wan_speed,
+        },
+        "form_factor": {
+            "device_a": device_a.form_factor,
+            "device_b": device_b.form_factor,
+        },
+        "capabilities": {
+            "device_a": device_a.capabilities,
+            "device_b": device_b.capabilities,
+        },
         "led_states": {
             "device_a": [led.model_dump() for led in device_a.led_states],
             "device_b": [led.model_dump() for led in device_b.led_states],
@@ -423,6 +480,69 @@ def _build_key_risks(spec: DeviceSpec) -> list[str]:
     return risks
 
 
+def _build_key_advantages(
+    device_a: DeviceSpec, device_b: DeviceSpec
+) -> tuple[list[str], list[str]]:
+    """Deterministically surface competitive pros/cons a sales engineer can
+    lead with — port counts, Wi-Fi generation, WAN throughput, and any
+    capability one device has that the other doesn't. Never ranks
+    form_factor, since there's no objectively "better" value there."""
+    advantages_a: list[str] = []
+    advantages_b: list[str] = []
+
+    if device_a.port_count > device_b.port_count:
+        advantages_a.append(
+            f"More physical ports ({device_a.port_count} vs. {device_b.port_count})."
+        )
+    elif device_b.port_count > device_a.port_count:
+        advantages_b.append(
+            f"More physical ports ({device_b.port_count} vs. {device_a.port_count})."
+        )
+
+    rank_a = rank_wifi_standard(device_a.wifi_standard)
+    rank_b = rank_wifi_standard(device_b.wifi_standard)
+    if rank_a is not None and rank_b is not None and rank_a != rank_b:
+        if rank_a > rank_b:
+            advantages_a.append(
+                f"Newer Wi-Fi standard ({device_a.wifi_standard} vs. "
+                f"{device_b.wifi_standard})."
+            )
+        else:
+            advantages_b.append(
+                f"Newer Wi-Fi standard ({device_b.wifi_standard} vs. "
+                f"{device_a.wifi_standard})."
+            )
+
+    speed_a = parse_speed_mbps(device_a.wan_speed)
+    speed_b = parse_speed_mbps(device_b.wan_speed)
+    if speed_a is not None and speed_b is not None and speed_a != speed_b:
+        if speed_a > speed_b:
+            advantages_a.append(
+                f"Faster WAN throughput ({device_a.wan_speed} vs. "
+                f"{device_b.wan_speed})."
+            )
+        else:
+            advantages_b.append(
+                f"Faster WAN throughput ({device_b.wan_speed} vs. "
+                f"{device_a.wan_speed})."
+            )
+
+    caps_a_only = [c for c in device_a.capabilities if c not in device_b.capabilities]
+    caps_b_only = [c for c in device_b.capabilities if c not in device_a.capabilities]
+    advantages_a.extend(f"Unique capability: {c}" for c in caps_a_only)
+    advantages_b.extend(f"Unique capability: {c}" for c in caps_b_only)
+
+    if not advantages_a:
+        advantages_a.append(
+            "No differentiating capabilities identified from the extracted spec."
+        )
+    if not advantages_b:
+        advantages_b.append(
+            "No differentiating capabilities identified from the extracted spec."
+        )
+    return advantages_a, advantages_b
+
+
 def _build_sales_talk_track(
     device_a: DeviceSpec, score_a: int, device_b: DeviceSpec, score_b: int
 ) -> str:
@@ -456,11 +576,14 @@ def synthesize_battlecard(
     produces free-form markdown, which doesn't map onto these typed fields."""
     score_a = _compute_friction_score(device_a)
     score_b = _compute_friction_score(device_b)
+    advantages_a, advantages_b = _build_key_advantages(device_a, device_b)
     return BattlecardResponse(
         comparison_matrix=_build_comparison_matrix(device_a, device_b),
         installation_friction_score_device_a=score_a,
         installation_friction_score_device_b=score_b,
         key_risks_device_a=_build_key_risks(device_a),
         key_risks_device_b=_build_key_risks(device_b),
+        key_advantages_device_a=advantages_a,
+        key_advantages_device_b=advantages_b,
         sales_talk_track=_build_sales_talk_track(device_a, score_a, device_b, score_b),
     )

@@ -38,6 +38,18 @@ interface; the unit does not support remote auto-provisioning.
 
 DHCP and TR-069 are not supported on this model.
 
+## Key Features
+
+- 2x FXS ports for analog phone service (VoIP)
+- Built-in battery backup connector for lifeline phone service
+- Parental controls via MAC address filtering
+
+## Specifications
+
+- Wi-Fi Standard: 802.11ac (Wi-Fi 5), dual-band
+- WAN Speed: Up to 100 Mbps (ADSL2+/VDSL2)
+- Form Factor: Desktop, not wall-mountable
+
 ## Cabling & Ports
 
 | Port | Type | Notes |

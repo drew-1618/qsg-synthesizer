@@ -442,12 +442,19 @@ function renderResults(data) {
   // Comparison table
   document.getElementById("col-header-a").textContent = nameA;
   document.getElementById("col-header-b").textContent = nameB;
+  const textOrDash = (value) =>
+    value ? escapeHtml(value) : `<span class="text-slate-400">Not specified</span>`;
   const rows = [
     ["Default IP", `${escapeHtml(cm.default_ip.device_a || "Unknown")} ${ipBadge(cm.is_private_ip.device_a)}`,
                     `${escapeHtml(cm.default_ip.device_b || "Unknown")} ${ipBadge(cm.is_private_ip.device_b)}`],
     ["Provisioning Method", provisioningBadge(cm.provisioning_method.device_a), provisioningBadge(cm.provisioning_method.device_b)],
     ["Required Tools", listOrDash(cm.required_tools.device_a), listOrDash(cm.required_tools.device_b)],
     ["Physical Ports", listOrDash(cm.ports.device_a), listOrDash(cm.ports.device_b)],
+    ["Port Count", cm.port_count.device_a, cm.port_count.device_b],
+    ["Wi-Fi Standard", textOrDash(cm.wifi_standard.device_a), textOrDash(cm.wifi_standard.device_b)],
+    ["WAN Speed", textOrDash(cm.wan_speed.device_a), textOrDash(cm.wan_speed.device_b)],
+    ["Form Factor", textOrDash(cm.form_factor.device_a), textOrDash(cm.form_factor.device_b)],
+    ["Capabilities", listOrDash(cm.capabilities.device_a), listOrDash(cm.capabilities.device_b)],
   ];
   document.getElementById("comparison-table-body").innerHTML = rows
     .map(
@@ -477,6 +484,21 @@ function renderResults(data) {
   document.getElementById("led-list-b").innerHTML = renderLedList(cm.led_states.device_b);
 
   // Risks
+  document.getElementById("advantage-name-a").textContent = nameA;
+  document.getElementById("advantage-name-b").textContent = nameB;
+  const renderAdvantages = (advantages) =>
+    advantages
+      .map(
+        (advantage) => `
+        <li class="flex items-start gap-2 text-emerald-800 bg-emerald-50 rounded-md px-3 py-2">
+          <span aria-hidden="true">&#10003;</span>
+          <span>${escapeHtml(advantage)}</span>
+        </li>`
+      )
+      .join("");
+  document.getElementById("advantage-list-a").innerHTML = renderAdvantages(data.key_advantages_device_a);
+  document.getElementById("advantage-list-b").innerHTML = renderAdvantages(data.key_advantages_device_b);
+
   document.getElementById("risk-name-a").textContent = nameA;
   document.getElementById("risk-name-b").textContent = nameB;
   const renderRisks = (risks) =>

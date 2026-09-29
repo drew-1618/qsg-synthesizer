@@ -38,6 +38,18 @@ Read the supplied document text and extract only these fields:
   (e.g. `"blinking amber 2Hz"`, `"solid green"`). Do not interpret, classify,
   or normalize the state yourself — that is handled downstream by a
   deterministic tool.
+- `wifi_standard`: the device's Wi-Fi standard/generation as printed (e.g.
+  `"802.11ax (Wi-Fi 6), tri-band"`), or `null` if not stated. Copy as
+  written — do not rank or compare it against anything.
+- `wan_speed`: the device's maximum WAN/uplink throughput as printed (e.g.
+  `"Up to 2.5 Gbps (XGS-PON)"`, `"Up to 100 Mbps (ADSL2+/VDSL2)"`), or
+  `null` if not stated. Copy as written — do not convert units or compare.
+- `form_factor`: the device's physical form factor as printed (e.g.
+  `"Compact desktop, wall-mountable"`), or `null` if not stated.
+- `capabilities`: a list of notable hardware features/capabilities beyond
+  ports and provisioning (e.g. `"USB 3.0 port for external storage"`,
+  `"2x FXS ports for analog phone service (VoIP)"`, `"Mesh Wi-Fi support"`).
+  Omit anything not explicitly stated.
 
 ## Hard constraints
 

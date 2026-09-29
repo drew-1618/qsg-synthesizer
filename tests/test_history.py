@@ -23,6 +23,8 @@ def _make_battlecard(name_a="Device A", name_b="Device B") -> BattlecardResponse
         installation_friction_score_device_b=9,
         key_risks_device_a=[],
         key_risks_device_b=[],
+        key_advantages_device_a=[],
+        key_advantages_device_b=[],
         sales_talk_track="Talk track.",
     )
 

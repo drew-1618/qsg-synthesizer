@@ -2,7 +2,12 @@ import json
 import logging
 from unittest.mock import MagicMock, patch
 
-from app.services.orchestrator import _heuristic_extract_qsg, extract_qsg_fields
+from app.services.orchestrator import (
+    _heuristic_extract_qsg,
+    extract_device_spec,
+    extract_qsg_fields,
+    synthesize_battlecard,
+)
 
 _FAKE_EXTRACTION = {
     "device_name": "NovaFiber GX400",
@@ -71,3 +76,96 @@ class TestExtractViaAnthropic:
             document_text = "# LegacyLink RG-210\n\nSome QSG content."
             result = extract_qsg_fields(document_text, "device_b_qsg.md")
             assert result == _heuristic_extract_qsg(document_text, "device_b_qsg.md")
+
+
+_DEVICE_A_TEXT = """# Device A
+
+## Key Features
+
+- Wi-Fi 6 (802.11ax) tri-band with mesh support
+- USB 3.0 port for external storage
+
+## Specifications
+
+- Wi-Fi Standard: 802.11ax (Wi-Fi 6), tri-band
+- WAN Speed: Up to 2.5 Gbps (XGS-PON)
+- Form Factor: Compact desktop, wall-mountable
+
+## Cabling & Ports
+
+| Port | Type | Notes |
+|------|------|-------|
+| LAN1-LAN4 | RJ45 Gigabit Ethernet | Auto-negotiating |
+"""
+
+_DEVICE_B_TEXT = """# Device B
+
+## Key Features
+
+- 2x FXS ports for analog phone service (VoIP)
+
+## Specifications
+
+- Wi-Fi Standard: 802.11ac (Wi-Fi 5), dual-band
+- WAN Speed: Up to 100 Mbps (ADSL2+/VDSL2)
+- Form Factor: Desktop, not wall-mountable
+
+## Cabling & Ports
+
+| Port | Type | Notes |
+|------|------|-------|
+| LAN1-LAN2 | RJ45 Fast Ethernet | Manual VLAN jumpers |
+"""
+
+
+class TestHeuristicCapabilityExtraction:
+    def test_extracts_key_features_as_capabilities(self):
+        extraction = _heuristic_extract_qsg(_DEVICE_A_TEXT, "a.md")
+        assert extraction.capabilities == [
+            "Wi-Fi 6 (802.11ax) tri-band with mesh support",
+            "USB 3.0 port for external storage",
+        ]
+
+    def test_extracts_specifications_by_label(self):
+        extraction = _heuristic_extract_qsg(_DEVICE_A_TEXT, "a.md")
+        assert extraction.wifi_standard == "802.11ax (Wi-Fi 6), tri-band"
+        assert extraction.wan_speed == "Up to 2.5 Gbps (XGS-PON)"
+        assert extraction.form_factor == "Compact desktop, wall-mountable"
+
+    def test_missing_specifications_section_leaves_fields_none(self):
+        extraction = _heuristic_extract_qsg("# Device\n\nNo extra sections.", "x.md")
+        assert extraction.wifi_standard is None
+        assert extraction.wan_speed is None
+        assert extraction.form_factor is None
+        assert extraction.capabilities == []
+
+
+class TestKeyAdvantages:
+    def test_flags_more_ports_newer_wifi_faster_wan_and_unique_capabilities(self):
+        device_a = extract_device_spec(_DEVICE_A_TEXT, "a.md")
+        device_b = extract_device_spec(_DEVICE_B_TEXT, "b.md")
+        battlecard = synthesize_battlecard(device_a, device_b)
+
+        advantages_a = " ".join(battlecard.key_advantages_device_a)
+        advantages_b = " ".join(battlecard.key_advantages_device_b)
+
+        assert "More physical ports" in advantages_a
+        assert "Newer Wi-Fi standard" in advantages_a
+        assert "Faster WAN throughput" in advantages_a
+        assert "Unique capability: USB 3.0 port for external storage" in advantages_a
+        assert (
+            "Unique capability: 2x FXS ports for analog phone service (VoIP)"
+            in advantages_b
+        )
+
+    def test_falls_back_to_no_differentiation_message(self):
+        device_a = extract_device_spec("# Device A\n\nNo extra sections.", "a.md")
+        device_b = extract_device_spec("# Device B\n\nNo extra sections.", "b.md")
+        battlecard = synthesize_battlecard(device_a, device_b)
+
+        assert battlecard.key_advantages_device_a == [
+            "No differentiating capabilities identified from the extracted spec."
+        ]
+        assert battlecard.key_advantages_device_b == [
+            "No differentiating capabilities identified from the extracted spec."
+        ]

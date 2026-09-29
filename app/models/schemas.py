@@ -42,3 +42,7 @@ class QSGExtraction(BaseModel):
     required_tools: List[str] = Field(default_factory=list)
     cabling_ports: List[CablingPort] = Field(default_factory=list)
     led_indicators: List[LEDIndicator] = Field(default_factory=list)
+    wifi_standard: Optional[str] = None
+    wan_speed: Optional[str] = None
+    form_factor: Optional[str] = None
+    capabilities: List[str] = Field(default_factory=list)

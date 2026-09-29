@@ -1,5 +1,6 @@
 import pytest
 
+from app.tools.capability_compare import parse_speed_mbps, rank_wifi_standard
 from app.tools.led_normalizer import LEDState, normalize_led
 from app.tools.net_validator import (
     InvalidNetworkInput,
@@ -7,6 +8,7 @@ from app.tools.net_validator import (
     parse_subnet,
     validate_gateway,
 )
+from app.tools.port_counter import count_ports
 
 
 class TestParseSubnet:
@@ -102,3 +104,47 @@ class TestNormalizeLed:
     def test_is_case_insensitive(self):
         result = normalize_led("SOLID GREEN")
         assert result.state == LEDState.ONLINE
+
+
+class TestCountPorts:
+    def test_single_ports_count_as_one_each(self):
+        assert count_ports(["PON (SC/APC fiber)", "Power (DC barrel, 12V)"]) == 2
+
+    def test_expands_dashed_range_notation(self):
+        assert count_ports(["LAN1–LAN4 (RJ45 Gigabit Ethernet)"]) == 4
+
+    def test_ignores_unrelated_numbers(self):
+        assert count_ports(["Console (RS-232 (RJ45-to-DB9))"]) == 1
+
+    def test_empty_list_is_zero(self):
+        assert count_ports([]) == 0
+
+
+class TestRankWifiStandard:
+    def test_ranks_by_letter_designation(self):
+        assert rank_wifi_standard("802.11ax (Wi-Fi 6), tri-band") > rank_wifi_standard(
+            "802.11ac (Wi-Fi 5), dual-band"
+        )
+
+    def test_ranks_by_generation_number_when_no_letters_present(self):
+        assert rank_wifi_standard("Wi-Fi 6") > rank_wifi_standard("Wi-Fi 5")
+
+    def test_returns_none_for_unrecognized_text(self):
+        assert rank_wifi_standard("some proprietary radio") is None
+
+    def test_returns_none_for_missing_value(self):
+        assert rank_wifi_standard(None) is None
+
+
+class TestParseSpeedMbps:
+    def test_parses_gbps(self):
+        assert parse_speed_mbps("Up to 2.5 Gbps (XGS-PON)") == 2500.0
+
+    def test_parses_mbps(self):
+        assert parse_speed_mbps("Up to 100 Mbps (ADSL2+/VDSL2)") == 100.0
+
+    def test_returns_none_for_unrecognized_text(self):
+        assert parse_speed_mbps("blazing fast") is None
+
+    def test_returns_none_for_missing_value(self):
+        assert parse_speed_mbps(None) is None

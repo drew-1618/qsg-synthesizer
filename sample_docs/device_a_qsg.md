@@ -33,6 +33,19 @@ The GX400 auto-provisions on power-up:
 
 No console port is present on this model; there is no local CLI access.
 
+## Key Features
+
+- Wi-Fi 6 (802.11ax) tri-band with mesh support
+- Built-in ONT — no separate ONT box needed
+- USB 3.0 port for external storage or printer sharing
+- Automatic firmware updates with zero-touch rollback
+
+## Specifications
+
+- Wi-Fi Standard: 802.11ax (Wi-Fi 6), tri-band
+- WAN Speed: Up to 2.5 Gbps (XGS-PON)
+- Form Factor: Compact desktop, wall-mountable
+
 ## Cabling & Ports
 
 | Port | Type | Notes |
