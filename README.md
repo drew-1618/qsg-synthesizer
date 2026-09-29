@@ -35,6 +35,10 @@ as Markdown or PDF.
   open.)
 - `LOG_LEVEL` (optional — defaults to `INFO`; set to `DEBUG` for extra detail
   like which extraction path, LLM or heuristic, each request took)
+- `HISTORY_DIR` (optional — defaults to `<repo>/data/history`; point a second
+  server instance at a scratch directory instead, e.g. `HISTORY_DIR=/tmp/qsg-scratch-history`,
+  so ad hoc verification runs or scripts never share/clobber a real dev
+  server's on-disk history)
 
 ## Running locally
 

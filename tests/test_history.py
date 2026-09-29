@@ -4,6 +4,8 @@ tests/conftest.py's autouse fixture redirects history.HISTORY_DIR to a
 per-test tmp_path, so these never touch the real repo's data/ directory.
 """
 
+from pathlib import Path
+
 from app.schemas import BattlecardResponse
 from app.services import history
 
@@ -51,3 +53,20 @@ def test_prunes_oldest_entries_beyond_max():
         assert f"Device {i}" not in remaining_names
     for i in range(5, total):
         assert f"Device {i}" in remaining_names
+
+
+class TestResolveHistoryDir:
+    def test_uses_env_override_when_set(self):
+        assert history._resolve_history_dir(
+            Path("/repo"), "/tmp/qsg-scratch-history"
+        ) == Path("/tmp/qsg-scratch-history")
+
+    def test_falls_back_to_base_dir_when_unset(self):
+        assert history._resolve_history_dir(Path("/repo"), None) == Path(
+            "/repo/data/history"
+        )
+
+    def test_falls_back_to_base_dir_when_empty_string(self):
+        assert history._resolve_history_dir(Path("/repo"), "") == Path(
+            "/repo/data/history"
+        )

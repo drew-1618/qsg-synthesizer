@@ -4,11 +4,17 @@ Each synthesized battlecard is written as its own `<id>.json` file under
 `HISTORY_DIR`, keeping this dependency-free (no SQLite/ORM) for a
 low-volume, single-instance tool. Tests monkeypatch `HISTORY_DIR` to a
 temp directory so the real suite never touches this module's default path.
+
+`HISTORY_DIR` defaults to `<repo>/data/history` but can be overridden via the
+`HISTORY_DIR` environment variable — set this when running an ad hoc/throwaway
+server (manual verification, a script, CI) alongside an already-running dev
+server, so the two don't share and clobber the same on-disk history.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import re
 import uuid
 from datetime import datetime, timezone
@@ -17,8 +23,13 @@ from typing import List, Optional
 
 from app.schemas import BattlecardResponse, HistoryRecord, HistorySummary
 
+
+def _resolve_history_dir(base_dir: Path, env_override: Optional[str]) -> Path:
+    return Path(env_override) if env_override else base_dir / "data" / "history"
+
+
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
-HISTORY_DIR = BASE_DIR / "data" / "history"
+HISTORY_DIR = _resolve_history_dir(BASE_DIR, os.environ.get("HISTORY_DIR"))
 
 MAX_HISTORY_ENTRIES = 50
 
