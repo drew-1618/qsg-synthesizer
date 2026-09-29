@@ -165,6 +165,8 @@ function base64ToFile(base64, filename) {
 }
 
 document.getElementById("load-samples-btn").addEventListener("click", async () => {
+  const loadSamplesBtn = document.getElementById("load-samples-btn");
+  loadSamplesBtn.disabled = true;
   clearError();
   try {
     const res = await fetch("/api/v1/samples");
@@ -175,6 +177,8 @@ document.getElementById("load-samples-btn").addEventListener("click", async () =
     await synthesize();
   } catch (err) {
     showError(err.message || "Could not load sample QSGs.");
+  } finally {
+    loadSamplesBtn.disabled = false;
   }
 });
 
@@ -183,6 +187,7 @@ function setLoading(isLoading) {
   document.getElementById("synthesize-spinner").classList.toggle("hidden", !isLoading);
   document.getElementById("synthesize-label").textContent = isLoading ? "Synthesizing..." : "Synthesize";
   document.getElementById("synthesize-btn").disabled = isLoading;
+  document.getElementById("load-samples-btn").disabled = isLoading;
 }
 
 async function synthesize() {
