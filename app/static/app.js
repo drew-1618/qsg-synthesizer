@@ -18,6 +18,13 @@ function setExportLinks(historyId) {
   pdfBtn.classList.toggle("opacity-40", !active);
 }
 
+// The results panel always mirrors a saved history record; once that record
+// is gone (deleted, or wiped by Clear All), hide it rather than leaving a
+// now-unsaved battlecard on screen with only its export links disabled.
+function hideResults() {
+  document.getElementById("results").classList.add("hidden");
+}
+
 function escapeHtml(str) {
   const div = document.createElement("div");
   div.textContent = str ?? "";
@@ -312,7 +319,10 @@ async function deleteHistoryItem(id) {
   try {
     const res = await fetch(`/api/v1/history/${id}`, { method: "DELETE" });
     if (!res.ok && res.status !== 404) throw new Error("Could not delete that comparison.");
-    if (id === currentHistoryId) setExportLinks(null);
+    if (id === currentHistoryId) {
+      setExportLinks(null);
+      hideResults();
+    }
     await loadHistory();
   } catch (err) {
     showError(err.message || "Could not delete that comparison.");
@@ -329,6 +339,7 @@ document.getElementById("clear-history-btn").addEventListener("click", async () 
     const res = await fetch("/api/v1/history", { method: "DELETE" });
     if (!res.ok) throw new Error("Could not clear history.");
     setExportLinks(null);
+    hideResults();
     await loadHistory();
   } catch (err) {
     showError(err.message || "Could not clear history.");
