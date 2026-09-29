@@ -23,3 +23,6 @@ data/
 
 # Docker
 .docker/
+
+# Node (Tailwind CSS build — see package.json)
+node_modules/

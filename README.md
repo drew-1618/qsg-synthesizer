@@ -48,6 +48,24 @@ cp .env.example .env   # optionally set ANTHROPIC_API_KEY
 Open `http://127.0.0.1:8000/` for the dashboard, or `http://127.0.0.1:8000/docs`
 for the OpenAPI docs.
 
+## Frontend build (Tailwind CSS)
+
+The dashboard's styling is compiled ahead of time with the Tailwind CLI rather
+than loaded from `cdn.tailwindcss.com` (that CDN build is JIT-compiled in the
+browser on every page load and Tailwind's own docs say not to use it in
+production). The compiled, minified `app/static/tailwind.css` is committed to
+the repo, so **no Node/npm install is needed just to run the app**. Only
+regenerate it after changing Tailwind classes in `app/static/index.html` or
+`app/static/app.js`:
+
+```bash
+npm install
+npm run build:css
+```
+
+Source input is `app/static/src/input.css`; `package.json` pins the Tailwind
+CLI version used to generate the committed output.
+
 ## Running with Docker
 
 ```bash

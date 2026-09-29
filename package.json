@@ -1,0 +1,13 @@
+{
+  "name": "qsg-synthesizer",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Tailwind CSS build for the QSG Synthesizer dashboard (app/static/index.html)",
+  "scripts": {
+    "build:css": "tailwindcss -i ./app/static/src/input.css -o ./app/static/tailwind.css --minify"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.3.3",
+    "tailwindcss": "^4.3.3"
+  }
+}
