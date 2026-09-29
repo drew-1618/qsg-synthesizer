@@ -24,6 +24,22 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
+// Wraps the first case-insensitive match of `query` in `text` with <mark>.
+// Operates on already-escaped strings so highlighting can never inject
+// markup beyond the <mark> tag itself.
+function highlightMatch(text, query) {
+  const escaped = escapeHtml(text);
+  if (!query) return escaped;
+  const escapedQuery = escapeHtml(query);
+  const idx = escaped.toLowerCase().indexOf(escapedQuery.toLowerCase());
+  if (idx === -1) return escaped;
+  return (
+    escaped.slice(0, idx) +
+    `<mark class="bg-amber-200 text-slate-900 rounded-sm px-0.5">${escaped.slice(idx, idx + escapedQuery.length)}</mark>` +
+    escaped.slice(idx + escapedQuery.length)
+  );
+}
+
 // ---- Confirmation dialog (replaces window.confirm) ----
 function confirmDialog(message, { title = "Are you sure?", confirmLabel = "Confirm" } = {}) {
   const dialog = document.getElementById("confirm-dialog");
@@ -214,13 +230,14 @@ function renderHistoryList() {
   empty.classList.add("hidden");
   list.innerHTML = historyItems
     .map((item) => {
-      const label = `${escapeHtml(item.device_a_name)} vs ${escapeHtml(item.device_b_name)}`;
+      const plainLabel = `${escapeHtml(item.device_a_name)} vs ${escapeHtml(item.device_b_name)}`;
+      const highlightedLabel = `${highlightMatch(item.device_a_name, historySearch)} vs ${highlightMatch(item.device_b_name, historySearch)}`;
       return `
         <li class="flex items-center gap-1">
           <button type="button" data-history-id="${item.id}"
                   class="history-item flex-1 min-w-0 text-left py-2.5 px-2 -mx-2 rounded-md flex items-center justify-between gap-3 hover:bg-slate-50 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400">
             <span class="min-w-0">
-              <span class="block font-medium text-slate-700 truncate">${label}</span>
+              <span class="block font-medium text-slate-700 truncate">${highlightedLabel}</span>
               <span class="block text-xs text-slate-400">${formatTimestamp(item.created_at)}</span>
             </span>
             <span class="flex items-center gap-1.5 shrink-0 text-xs font-semibold text-slate-500">
@@ -229,7 +246,7 @@ function renderHistoryList() {
               ${item.installation_friction_score_device_b}/10
             </span>
           </button>
-          <button type="button" data-delete-id="${item.id}" aria-label="Delete comparison: ${label}"
+          <button type="button" data-delete-id="${item.id}" aria-label="Delete comparison: ${plainLabel}"
                   class="delete-history-item shrink-0 w-8 h-8 inline-flex items-center justify-center rounded-full text-slate-400 hover:text-red-600 hover:bg-red-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400">
             &times;
           </button>
