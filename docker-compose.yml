@@ -1,5 +1,5 @@
 services:
-  sg-synthesizer:
+  qsg-synthesizer:
     build:
       context: .
       dockerfile: Dockerfile
@@ -8,3 +8,8 @@ services:
     env_file:
       - .env
     restart: unless-stopped
+    volumes:
+      - qsg-history:/app/data/history
+
+volumes:
+  qsg-history:

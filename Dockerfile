@@ -29,7 +29,9 @@ ENV PATH=/home/appuser/.local/bin:$PATH \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
-RUN chown -R appuser:appuser /app /home/appuser/.local
+# Created here so a named volume mounted over it inherits appuser ownership
+RUN mkdir -p /app/data/history \
+    && chown -R appuser:appuser /app /home/appuser/.local
 
 USER appuser
 

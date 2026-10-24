@@ -86,7 +86,9 @@ cp .env.example .env   # required - docker-compose.yml expects this file to exis
 docker compose up --build
 ```
 
-Serves the same app at `http://localhost:8000/`.
+Serves the same app at `http://localhost:8000/`. Comparison history is kept in the
+`qsg-history` named volume, so it survives `docker compose down` and rebuilds
+(`docker compose down -v` deletes it).
 
 ## Tests
 
