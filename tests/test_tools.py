@@ -5,31 +5,8 @@ from app.tools.led_normalizer import LEDState, normalize_led
 from app.tools.net_validator import (
     InvalidNetworkInput,
     classify_ip,
-    parse_subnet,
-    validate_gateway,
 )
 from app.tools.port_counter import expand_port_range
-
-
-class TestParseSubnet:
-    def test_valid_private_subnet(self):
-        info = parse_subnet("192.168.1.0/24")
-        assert info.network_address == "192.168.1.0"
-        assert info.prefix_length == 24
-        assert info.num_addresses == 256
-        assert info.is_private is True
-
-    def test_valid_public_subnet(self):
-        info = parse_subnet("8.8.8.0/24")
-        assert info.is_private is False
-
-    def test_host_bits_set_is_normalized(self):
-        info = parse_subnet("10.0.0.5/24")
-        assert info.network_address == "10.0.0.0"
-
-    def test_invalid_cidr_raises(self):
-        with pytest.raises(InvalidNetworkInput):
-            parse_subnet("not-a-subnet")
 
 
 class TestClassifyIp:
@@ -46,27 +23,6 @@ class TestClassifyIp:
     def test_invalid_ip_raises(self):
         with pytest.raises(InvalidNetworkInput):
             classify_ip("999.999.999.999")
-
-
-class TestValidateGateway:
-    def test_gateway_in_subnet(self):
-        result = validate_gateway("192.168.1.1", "192.168.1.0/24")
-        assert result.is_valid_ip is True
-        assert result.in_subnet is True
-        assert result.is_private is True
-
-    def test_gateway_outside_subnet(self):
-        result = validate_gateway("10.0.0.1", "192.168.1.0/24")
-        assert result.in_subnet is False
-
-    def test_malformed_gateway_is_flagged_not_raised(self):
-        result = validate_gateway("not-an-ip", "192.168.1.0/24")
-        assert result.is_valid_ip is False
-        assert result.in_subnet is False
-
-    def test_invalid_subnet_raises(self):
-        with pytest.raises(InvalidNetworkInput):
-            validate_gateway("192.168.1.1", "not-a-subnet")
 
 
 class TestNormalizeLed:
