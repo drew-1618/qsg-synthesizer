@@ -101,14 +101,14 @@
       <div class="flex flex-wrap items-center justify-between gap-3">
         <h2 id="results-heading" tabindex="-1" class="font-heading font-semibold text-xl focus:outline-none">Results</h2>
         <div class="flex items-center gap-2">
-          <a id="export-md-btn" href="#" aria-disabled="true" tabindex="-1"
-             class="text-sm font-medium bg-plate border border-line hover:bg-plate-hover px-3.5 py-2 rounded-control transition-colors pointer-events-none opacity-40">
+          <button id="export-md-btn" type="button" disabled
+                  class="text-sm font-medium bg-plate border border-line hover:bg-plate-hover px-3.5 py-2 rounded-control transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
             Export Markdown
-          </a>
-          <a id="export-pdf-btn" href="#" aria-disabled="true" tabindex="-1"
-             class="text-sm font-medium bg-plate border border-line hover:bg-plate-hover px-3.5 py-2 rounded-control transition-colors pointer-events-none opacity-40">
+          </button>
+          <button id="export-pdf-btn" type="button" disabled
+                  class="text-sm font-medium bg-plate border border-line hover:bg-plate-hover px-3.5 py-2 rounded-control transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
             Export PDF
-          </a>
+          </button>
         </div>
       </div>
 
@@ -195,6 +195,32 @@
         </button>
       </div>
     </div>
+  </dialog>
+
+  <!-- Export dialog: lets the user rename the file before it downloads -->
+  <dialog id="export-dialog" aria-labelledby="export-title"
+          class="confirm-pop m-auto w-full max-w-md p-6 bg-plate text-ink rounded-control border border-line backdrop:bg-scrim">
+    <form id="export-form">
+      <h2 id="export-title" class="font-heading font-semibold text-lg">Export</h2>
+      <label for="export-filename" class="block mt-4 text-sm font-medium">File name</label>
+      <div class="mt-1 flex items-center gap-2">
+        <input id="export-filename" name="filename" type="text" autocomplete="off" spellcheck="false" maxlength="100"
+               class="min-w-0 flex-1 font-mono text-sm bg-panel border border-line rounded-control px-3 py-2" />
+        <span id="export-ext" class="font-mono text-sm text-ink-muted"></span>
+      </div>
+      <p class="mt-2 text-sm text-ink-muted">Leave it empty to use the suggested name.</p>
+      <p id="export-error" role="alert" class="hidden mt-2 text-sm text-danger-text"></p>
+      <div class="flex items-center justify-end gap-2 mt-6">
+        <button id="export-cancel-btn" type="button"
+                class="font-medium px-4 py-2.5 rounded-control border border-line bg-plate hover:bg-plate-hover transition-colors">
+          Cancel
+        </button>
+        <button id="export-download-btn" type="submit"
+                class="font-semibold text-on-action bg-action hover:bg-action-hover disabled:opacity-60 disabled:cursor-not-allowed px-4 py-2.5 rounded-control transition-colors">
+          Download
+        </button>
+      </div>
+    </form>
   </dialog>
 
   <!-- Confirmation dialog (replaces window.confirm across the app) -->

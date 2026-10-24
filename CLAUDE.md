@@ -46,6 +46,10 @@ docker compose up --build                        # requires a .env file (cp .env
    the export endpoints (`app/services/export.py`) render from those saved records.
 
 Things that span multiple files:
+- Export file names: `export.default_export_basename()` builds `battlecard-<a>-vs-<b>-<date>`
+  and `export.sanitize_export_filename()` cleans any user-supplied `?filename=` to ASCII
+  `[A-Za-z0-9._()-]` before it reaches `Content-Disposition`. The UI downloads via `fetch` so
+  errors show inline in `#export-dialog`; keep new export formats going through both helpers.
 - Two schema layers with two provisioning enums: the raw 6-value `RawProvisioningMethod` in
   `app/models/schemas.py` and the 4-value API `ProvisioningMethod` in `app/schemas.py`.
 - `.claude/agents/*.md` are read at runtime, so the Dockerfile copies `.claude/`, and

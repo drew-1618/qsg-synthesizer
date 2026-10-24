@@ -272,19 +272,43 @@ def get_history_item(history_id: str) -> HistoryRecord:
 
 
 @router.get(
+    "/api/v1/history/{history_id}/export-name",
+    include_in_schema=False,
+    dependencies=[Depends(export_rate_limiter)],
+)
+def export_default_name(history_id: str) -> dict:
+    """Default export file name (no extension), used unless the caller renames it."""
+    record = _get_history_record_or_404(history_id)
+    return {
+        "basename": export_service.default_export_basename(
+            record.battlecard, record.created_at
+        )
+    }
+
+
+def _export_headers(record: HistoryRecord, ext: str, requested: Optional[str]) -> dict:
+    filename = export_service.sanitize_export_filename(
+        requested,
+        ext,
+        export_service.default_export_basename(record.battlecard, record.created_at),
+    )
+    return {"Content-Disposition": f'attachment; filename="{filename}"'}
+
+
+@router.get(
     "/api/v1/history/{history_id}/export.md",
     include_in_schema=False,
     dependencies=[Depends(export_rate_limiter)],
 )
-def export_history_markdown(history_id: str) -> Response:
+def export_history_markdown(
+    history_id: str, filename: Optional[str] = Query(None, max_length=200)
+) -> Response:
     record = _get_history_record_or_404(history_id)
     markdown = export_service.battlecard_to_markdown(record.battlecard)
     return Response(
         content=markdown,
         media_type="text/markdown",
-        headers={
-            "Content-Disposition": f'attachment; filename="battlecard-{history_id}.md"'
-        },
+        headers=_export_headers(record, "md", filename),
     )
 
 
@@ -293,15 +317,15 @@ def export_history_markdown(history_id: str) -> Response:
     include_in_schema=False,
     dependencies=[Depends(export_rate_limiter)],
 )
-def export_history_pdf(history_id: str) -> Response:
+def export_history_pdf(
+    history_id: str, filename: Optional[str] = Query(None, max_length=200)
+) -> Response:
     record = _get_history_record_or_404(history_id)
     pdf_bytes = export_service.battlecard_to_pdf_bytes(record.battlecard)
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
-        headers={
-            "Content-Disposition": f'attachment; filename="battlecard-{history_id}.pdf"'
-        },
+        headers=_export_headers(record, "pdf", filename),
     )
 
 

@@ -8,6 +8,10 @@ that platypus flowables are simpler than a template.
 from __future__ import annotations
 
 import io
+import re
+import unicodedata
+from datetime import datetime
+from typing import Optional
 from xml.sax.saxutils import escape as _esc
 
 from reportlab.lib import colors
@@ -70,6 +74,51 @@ def _names(battlecard: BattlecardResponse) -> tuple[str, str]:
     return model_name.get("device_a", "Device A"), model_name.get(
         "device_b", "Device B"
     )
+
+
+_SLUG_MAX_CHARS = 40
+_FILENAME_MAX_CHARS = 100
+_PATH_SEPARATOR_RE = re.compile(r"[\\/]+")
+_UNSAFE_FILENAME_CHARS_RE = re.compile(r"[^A-Za-z0-9._()-]+")
+_EXPORT_EXTENSIONS = (".markdown", ".md", ".pdf")
+
+
+def _to_ascii(text: str) -> str:
+    return unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
+
+
+def _slug(text: str, fallback: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", _to_ascii(text).lower()).strip("-")
+    return slug[:_SLUG_MAX_CHARS].strip("-") or fallback
+
+
+def default_export_basename(
+    battlecard: BattlecardResponse, created_at: datetime
+) -> str:
+    """Default download name `battlecard-<a>-vs-<b>-<date>`, without extension."""
+    name_a, name_b = _names(battlecard)
+    return (
+        f"battlecard-{_slug(name_a, 'device-a')}-vs-{_slug(name_b, 'device-b')}"
+        f"-{created_at:%Y-%m-%d}"
+    )
+
+
+def sanitize_export_filename(
+    requested: Optional[str], ext: str, default_basename: str
+) -> str:
+    """Turn a user-supplied name into a safe download name ending in `.ext`.
+
+    The result is ASCII-only and limited to letters, digits and `._()-`, so it
+    can sit inside a Content-Disposition header without escaping and can never
+    carry a path. Anything unusable falls back to `default_basename`.
+    """
+    parts = [p for p in _PATH_SEPARATOR_RE.split(requested or "") if p.strip()]
+    name = _to_ascii(parts[-1]) if parts else ""
+    name = _UNSAFE_FILENAME_CHARS_RE.sub("-", name.strip())
+    while name.lower().endswith(_EXPORT_EXTENSIONS):
+        name = name[: name.rfind(".")]
+    name = re.sub(r"-{2,}", "-", name).strip(".-")[:_FILENAME_MAX_CHARS].strip(".-")
+    return f"{name or default_basename}.{ext}"
 
 
 def _md_cell(text: str) -> str:

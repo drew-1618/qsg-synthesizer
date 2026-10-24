@@ -45,19 +45,16 @@ let historyOffset = 0;
 let historyItems = [];
 let historySearch = "";
 
-function setExportLinks(historyId) {
+const EXPORT_FORMATS = {
+  md: { buttonId: "export-md-btn", label: "Markdown" },
+  pdf: { buttonId: "export-pdf-btn", label: "PDF" },
+};
+
+// Enables the export buttons only while a saved comparison is on screen.
+function setExportTarget(historyId) {
   currentHistoryId = historyId;
-  const active = Boolean(historyId);
-  [
-    ["export-md-btn", "export.md"],
-    ["export-pdf-btn", "export.pdf"],
-  ].forEach(([id, file]) => {
-    const link = document.getElementById(id);
-    link.href = active ? `/api/v1/history/${historyId}/${file}` : "#";
-    link.classList.toggle("pointer-events-none", !active);
-    link.classList.toggle("opacity-40", !active);
-    link.setAttribute("aria-disabled", String(!active));
-    link.tabIndex = active ? 0 : -1;
+  Object.values(EXPORT_FORMATS).forEach(({ buttonId }) => {
+    document.getElementById(buttonId).disabled = !historyId;
   });
 }
 
@@ -283,6 +280,77 @@ document.getElementById("load-samples-btn").addEventListener("click", async () =
   }
 });
 
+// ---- Export ----
+const exportDialog = document.getElementById("export-dialog");
+const exportForm = document.getElementById("export-form");
+const exportFilenameInput = document.getElementById("export-filename");
+const exportErrorEl = document.getElementById("export-error");
+const exportDownloadBtn = document.getElementById("export-download-btn");
+let exportFormat = "md";
+
+async function downloadExport(format, requestedName) {
+  const query = requestedName ? `?filename=${encodeURIComponent(requestedName)}` : "";
+  const res = await fetch(`/api/v1/history/${currentHistoryId}/export.${format}${query}`);
+  if (!res.ok) {
+    throw new Error(describeFailure(res, await readJson(res), "Could not export that comparison."));
+  }
+  // The server sanitizes the requested name; use exactly what it settled on.
+  const match = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") || "");
+  const url = URL.createObjectURL(await res.blob());
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = match ? match[1] : `battlecard.${format}`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function openExportDialog(format) {
+  exportFormat = format;
+  document.getElementById("export-title").textContent = `Export as ${EXPORT_FORMATS[format].label}`;
+  document.getElementById("export-ext").textContent = `.${format}`;
+  exportFilenameInput.value = "";
+  exportErrorEl.classList.add("hidden");
+  exportDownloadBtn.disabled = false;
+  exportDialog.showModal();
+  exportFilenameInput.focus();
+  try {
+    const res = await fetch(`/api/v1/history/${currentHistoryId}/export-name`);
+    if (!res.ok) return;
+    const { basename } = await res.json();
+    // Don't overwrite a name the user has already started typing.
+    if (exportDialog.open && exportFilenameInput.value === "") {
+      exportFilenameInput.value = basename;
+      exportFilenameInput.select();
+    }
+  } catch {
+    // No suggestion: leaving the field empty makes the server pick the default.
+  }
+}
+
+Object.entries(EXPORT_FORMATS).forEach(([format, { buttonId }]) => {
+  document.getElementById(buttonId).addEventListener("click", () => openExportDialog(format));
+});
+
+exportForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  exportDownloadBtn.disabled = true;
+  exportErrorEl.classList.add("hidden");
+  try {
+    await downloadExport(exportFormat, exportFilenameInput.value.trim());
+    exportDialog.close();
+  } catch (err) {
+    exportErrorEl.textContent = describeException(err, "Could not export that comparison.");
+    exportErrorEl.classList.remove("hidden");
+    exportDownloadBtn.disabled = false;
+  }
+});
+document.getElementById("export-cancel-btn").addEventListener("click", () => exportDialog.close());
+exportDialog.addEventListener("click", (e) => {
+  if (e.target === exportDialog) exportDialog.close();
+});
+
 // ---- Compare ----
 // Compare is one request with no server-side progress, so the status line
 // reports only what is known: that it is running, for how long, and that long
@@ -338,7 +406,7 @@ async function synthesize() {
     const res = await fetch("/api/v1/compare-pdfs", { method: "POST", body: formData });
     const data = await readJson(res);
     if (!res.ok) throw new Error(describeFailure(res, data, "The comparison failed."));
-    setExportLinks(data.history_id);
+    setExportTarget(data.history_id);
     setUrlId(data.history_id);
     await loadHistory();
     renderResults(data);
@@ -460,7 +528,7 @@ async function loadHistoryItem(id) {
     const res = await fetch(`/api/v1/history/${id}`);
     const record = await readJson(res);
     if (!res.ok) throw new Error(describeFailure(res, record, "Could not load that comparison."));
-    setExportLinks(id);
+    setExportTarget(id);
     renderResults(record.battlecard);
     return true;
   } catch (err) {
@@ -488,7 +556,7 @@ async function deleteHistoryItem(id) {
       throw new Error(describeFailure(res, await readJson(res), "Could not delete that comparison."));
     }
     if (id === currentHistoryId) {
-      setExportLinks(null);
+      setExportTarget(null);
       hideResults();
       setUrlId(null, { replace: true });
     }
@@ -517,7 +585,7 @@ document.getElementById("clear-history-btn").addEventListener("click", async () 
   try {
     const res = await fetch("/api/v1/history", { method: "DELETE" });
     if (!res.ok) throw new Error(describeFailure(res, await readJson(res), "Could not clear history."));
-    setExportLinks(null);
+    setExportTarget(null);
     hideResults();
     setUrlId(null, { replace: true });
     await loadHistory();
@@ -550,7 +618,7 @@ window.addEventListener("popstate", () => {
   if (id) {
     loadHistoryItem(id);
   } else {
-    setExportLinks(null);
+    setExportTarget(null);
     hideResults();
   }
 });

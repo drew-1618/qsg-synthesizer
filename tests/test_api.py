@@ -1,4 +1,5 @@
 import logging
+import re
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -364,6 +365,48 @@ class TestHistory:
         assert response.headers["content-type"] == "application/pdf"
         assert "attachment" in response.headers["content-disposition"]
         assert response.content[:4] == b"%PDF"
+
+    def test_export_default_filename_is_descriptive(self):
+        self._post_comparison()
+        history_id = client.get("/api/v1/history").json()["items"][0]["id"]
+
+        for ext in ("md", "pdf"):
+            response = client.get(f"/api/v1/history/{history_id}/export.{ext}")
+            disposition = response.headers["content-disposition"]
+            assert history_id not in disposition
+            assert re.search(
+                rf'filename="battlecard-[a-z0-9-]+-vs-[a-z0-9-]+-\d{{4}}-\d{{2}}-\d{{2}}\.{ext}"',
+                disposition,
+            )
+
+    def test_export_custom_filename_is_sanitized(self):
+        self._post_comparison()
+        history_id = client.get("/api/v1/history").json()["items"][0]["id"]
+
+        response = client.get(
+            f"/api/v1/history/{history_id}/export.pdf",
+            params={"filename": "../Q4 card.md"},
+        )
+        assert response.headers["content-disposition"] == (
+            'attachment; filename="Q4-card.pdf"'
+        )
+
+    def test_export_name_endpoint_returns_default_basename(self):
+        self._post_comparison()
+        history_id = client.get("/api/v1/history").json()["items"][0]["id"]
+
+        response = client.get(f"/api/v1/history/{history_id}/export-name")
+        assert response.status_code == 200
+        basename = response.json()["basename"]
+        assert basename.startswith("battlecard-")
+        disposition = client.get(f"/api/v1/history/{history_id}/export.md").headers[
+            "content-disposition"
+        ]
+        assert f'filename="{basename}.md"' in disposition
+
+    def test_export_name_unknown_history_id_returns_404(self):
+        response = client.get("/api/v1/history/" + "0" * 32 + "/export-name")
+        assert response.status_code == 404
 
     def test_export_unknown_history_id_returns_404(self):
         response = client.get("/api/v1/history/" + "0" * 32 + "/export.md")
