@@ -7,6 +7,7 @@ from app.services.orchestrator import (
     NO_RISKS_MESSAGE,
     _build_key_risks,
     _heuristic_extract_qsg,
+    _select_llm_provider,
     extract_device_spec,
     extract_qsg_fields,
     synthesize_battlecard,
@@ -77,9 +78,138 @@ class TestExtractViaAnthropic:
             import os
 
             os.environ.pop("ANTHROPIC_API_KEY", None)
+            os.environ.pop("GEMINI_API_KEY", None)
+            os.environ.pop("LLM_PROVIDER", None)
             document_text = "# LegacyLink RG-210\n\nSome QSG content."
             result = extract_qsg_fields(document_text, "device_b_qsg.md")
             assert result == _heuristic_extract_qsg(document_text, "device_b_qsg.md")
+
+
+def _fake_gemini_response(payload: dict) -> MagicMock:
+    response = MagicMock()
+    response.text = json.dumps(payload)
+    return response
+
+
+class TestExtractViaGemini:
+    def test_uses_gemini_when_key_and_package_present(self):
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "ANTHROPIC_API_KEY": "",
+                    "GEMINI_API_KEY": "test-key",
+                    "LLM_PROVIDER": "",
+                },
+            ),
+            patch("app.services.orchestrator.genai") as mock_genai,
+        ):
+            mock_client = MagicMock()
+            mock_client.models.generate_content.return_value = _fake_gemini_response(
+                _FAKE_EXTRACTION
+            )
+            mock_genai.Client.return_value = mock_client
+
+            result = extract_qsg_fields("some document text", "device_a_qsg.md")
+
+            assert result.device_name == "NovaFiber GX400"
+            assert result.provisioning_methods == ["TR-069"]
+            mock_client.models.generate_content.assert_called_once()
+            _, kwargs = mock_client.models.generate_content.call_args
+            assert kwargs["model"] == "gemini-2.5-flash"
+            assert "some document text" in kwargs["contents"]
+
+    def test_falls_back_to_heuristic_on_api_error(self, caplog):
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "ANTHROPIC_API_KEY": "",
+                    "GEMINI_API_KEY": "test-key",
+                    "LLM_PROVIDER": "",
+                },
+            ),
+            patch("app.services.orchestrator.genai") as mock_genai,
+        ):
+            mock_client = MagicMock()
+            mock_client.models.generate_content.side_effect = RuntimeError(
+                "api unreachable"
+            )
+            mock_genai.Client.return_value = mock_client
+
+            document_text = "# LegacyLink RG-210\n\nSome QSG content."
+            with caplog.at_level(logging.WARNING, logger="app.services.orchestrator"):
+                result = extract_qsg_fields(document_text, "device_b_qsg.md")
+
+            assert result == _heuristic_extract_qsg(document_text, "device_b_qsg.md")
+            assert "Gemini extraction failed" in caplog.text
+            assert "device_b_qsg.md" in caplog.text
+
+
+class TestSelectLlmProvider:
+    def test_defaults_to_anthropic_when_both_keys_set(self):
+        with patch.dict(
+            "os.environ",
+            {"ANTHROPIC_API_KEY": "a", "GEMINI_API_KEY": "g", "LLM_PROVIDER": ""},
+        ):
+            assert _select_llm_provider() == "anthropic"
+
+    def test_uses_gemini_when_only_gemini_key_set(self):
+        with patch.dict(
+            "os.environ",
+            {"ANTHROPIC_API_KEY": "", "GEMINI_API_KEY": "g", "LLM_PROVIDER": ""},
+        ):
+            assert _select_llm_provider() == "gemini"
+
+    def test_override_forces_gemini_even_when_anthropic_key_present(self):
+        with patch.dict(
+            "os.environ",
+            {"ANTHROPIC_API_KEY": "a", "GEMINI_API_KEY": "g", "LLM_PROVIDER": "gemini"},
+        ):
+            assert _select_llm_provider() == "gemini"
+
+    def test_override_is_case_insensitive(self):
+        with patch.dict(
+            "os.environ",
+            {"ANTHROPIC_API_KEY": "a", "GEMINI_API_KEY": "g", "LLM_PROVIDER": "GEMINI"},
+        ):
+            assert _select_llm_provider() == "gemini"
+
+    def test_invalid_override_falls_back_to_auto_detection(self, caplog):
+        with patch.dict(
+            "os.environ",
+            {"ANTHROPIC_API_KEY": "a", "GEMINI_API_KEY": "", "LLM_PROVIDER": "bogus"},
+        ):
+            with caplog.at_level(logging.WARNING, logger="app.services.orchestrator"):
+                assert _select_llm_provider() == "anthropic"
+            assert "Unrecognized LLM_PROVIDER" in caplog.text
+
+    def test_none_when_no_keys_and_no_override(self):
+        with patch.dict(
+            "os.environ",
+            {"ANTHROPIC_API_KEY": "", "GEMINI_API_KEY": "", "LLM_PROVIDER": ""},
+        ):
+            assert _select_llm_provider() is None
+
+
+class TestLlmProviderOverrideEndToEnd:
+    def test_override_naming_unready_provider_never_falls_back_to_other_provider(self):
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "ANTHROPIC_API_KEY": "a",
+                    "GEMINI_API_KEY": "",
+                    "LLM_PROVIDER": "gemini",
+                },
+            ),
+            patch("app.services.orchestrator.anthropic") as mock_anthropic,
+        ):
+            document_text = "# Device\n\nSome QSG content."
+            result = extract_qsg_fields(document_text, "d.md")
+
+            assert result == _heuristic_extract_qsg(document_text, "d.md")
+            mock_anthropic.Anthropic.assert_not_called()
 
 
 _DEVICE_A_TEXT = """# Device A

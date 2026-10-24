@@ -2,6 +2,21 @@
 
 from __future__ import annotations
 
+import os
+
+from dotenv import load_dotenv
+
+# Must run before any app.* import below: several modules (app.services.history's
+# HISTORY_DIR, app.logging_config's LOG_LEVEL) read os.environ at import/call time,
+# so .env has to be loaded into the process environment first. Skipped under
+# pytest (PYTEST_VERSION is set by pytest>=7.2 for exactly this check) so the
+# test suite never picks up a developer's real API keys from .env and starts
+# making live LLM calls - see README's "Tests" section, which promises fully
+# offline/deterministic runs. (Ruff's E402 is disabled for this file in
+# pyproject.toml since these imports intentionally follow this guard.)
+if "PYTEST_VERSION" not in os.environ:
+    load_dotenv()
+
 import base64
 import logging
 from pathlib import Path

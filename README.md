@@ -12,11 +12,14 @@ as Markdown or PDF.
 ## Architecture
 
 1. **Extraction** (one document in, structured facts out) — delegated to the
-   bounded `qsg_extractor` subagent (`.claude/agents/qsg_extractor.md`, Haiku)
-   when `ANTHROPIC_API_KEY` is set, so raw multi-page documents are never
-   dumped into the orchestrator's own prompt. Without a key (or if the API
-   call fails), a deterministic regex/heuristic parser produces the same
-   shape, so the app and test suite never fail hard on missing credentials.
+   bounded `qsg_extractor` subagent (`.claude/agents/qsg_extractor.md`) when
+   an `ANTHROPIC_API_KEY` and/or `GEMINI_API_KEY` is set, so raw multi-page
+   documents are never dumped into the orchestrator's own prompt. Anthropic
+   (Haiku) is used if its key is present, Gemini (`gemini-2.5-flash`)
+   otherwise — see `LLM_PROVIDER` below to force one explicitly. Without a
+   usable key (or if the API call fails), a deterministic regex/heuristic
+   parser produces the same shape, so the app and test suite never fail
+   hard on missing credentials.
 2. **Normalization** — IP validation/classification (`app/tools/net_validator.py`)
    and LED-state normalization (`app/tools/led_normalizer.py`) are always
    deterministic, never LLM-guessed.
@@ -27,8 +30,14 @@ as Markdown or PDF.
 ## Requirements
 
 - Python 3.11+
-- An `ANTHROPIC_API_KEY` (optional — enables the real `qsg_extractor` LLM
-  call; the app runs fully without one via the heuristic fallback)
+- An `ANTHROPIC_API_KEY` and/or `GEMINI_API_KEY` (both optional — either
+  enables the real `qsg_extractor` LLM call; the app runs fully without
+  either via the heuristic fallback)
+- `LLM_PROVIDER` (optional — `anthropic` or `gemini`; forces that provider
+  when both keys above are set. Unset auto-detects: Anthropic wins if both
+  keys are present, else whichever one is set. Naming a provider whose
+  key/package isn't available falls back to the heuristic parser rather
+  than silently using the other provider.)
 - `APP_USERNAME` / `APP_PASSWORD` (optional — set both to gate the dashboard
   and API behind HTTP Basic Auth; `/healthz` always stays open for health
   checks. Neither is set by default, so local dev and the test suite run

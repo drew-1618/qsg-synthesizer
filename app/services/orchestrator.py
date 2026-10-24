@@ -3,12 +3,13 @@
 Two stages, matching the two isolated subagents in `.claude/agents/`:
 
 1. Extraction (`qsg_extractor`): one document in, one raw `QSGExtraction`
-   out. When `ANTHROPIC_API_KEY` is set and the `anthropic` package is
-   installed, a real bounded subagent call is made per CLAUDE.md's "never
-   dump raw documents into the primary orchestrator" rule. Otherwise (no
-   key, package missing, or a flaky API call) we fall back to a
-   deterministic regex/heuristic parser, so local staging and the test
-   suite never fail hard on missing credentials.
+   out. When an `ANTHROPIC_API_KEY` and/or `GEMINI_API_KEY` is set (see
+   `_select_llm_provider` for which one wins, and `LLM_PROVIDER` to force
+   one explicitly) and the matching package is installed, a real bounded
+   subagent call is made per CLAUDE.md's "never dump raw documents into the
+   primary orchestrator" rule. Otherwise (no usable key/package, or a flaky
+   API call) we fall back to a deterministic regex/heuristic parser, so
+   local staging and the test suite never fail hard on missing credentials.
 2. Synthesis: two normalized `DeviceSpec` objects in, one `BattlecardResponse`
    out. This stage is fully deterministic/rule-based rather than routed
    through `battlecard_analyst` (that subagent's contract is free-form
@@ -55,10 +56,22 @@ try:
 except ImportError:  # pragma: no cover - exercised only when package absent
     anthropic = None  # type: ignore[assignment]
 
+try:
+    from google import genai
+    from google.genai import types as gemini_types
+except ImportError:  # pragma: no cover - exercised only when package absent
+    genai = None  # type: ignore[assignment]
+    gemini_types = None  # type: ignore[assignment]
+
 logger = logging.getLogger(__name__)
 
 _AGENTS_DIR = Path(__file__).resolve().parents[2] / ".claude" / "agents"
-_EXTRACTOR_MODEL = "claude-haiku-4-5-20251001"
+_ANTHROPIC_EXTRACTOR_MODEL = "claude-haiku-4-5-20251001"
+_GEMINI_EXTRACTOR_MODEL = "gemini-2.5-flash"
+
+_PROVIDER_ANTHROPIC = "anthropic"
+_PROVIDER_GEMINI = "gemini"
+_VALID_LLM_PROVIDERS = {_PROVIDER_ANTHROPIC, _PROVIDER_GEMINI}
 
 # ---------------------------------------------------------------------------
 # Stage 1: extraction
@@ -276,15 +289,47 @@ def _load_agent_system_prompt(agent_file: str) -> str:
     return content.strip()
 
 
-def _anthropic_available() -> bool:
-    return anthropic is not None and bool(os.environ.get("ANTHROPIC_API_KEY"))
+def _select_llm_provider() -> Optional[str]:
+    """Which LLM provider (if any) to use for extraction.
+
+    `LLM_PROVIDER` is an explicit override ("anthropic" or "gemini") for
+    when both API keys are configured and you want to force one — e.g. to
+    use a free Gemini key for local testing while an Anthropic key stays
+    set for production. Without it, whichever key is actually configured
+    wins, Anthropic taking precedence if both are set (preserving prior
+    default behavior)."""
+    override = os.environ.get("LLM_PROVIDER", "").strip().lower()
+    if override:
+        if override in _VALID_LLM_PROVIDERS:
+            return override
+        logger.warning(
+            "Unrecognized LLM_PROVIDER %r; falling back to auto-detection by API key",
+            override,
+        )
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        return _PROVIDER_ANTHROPIC
+    if os.environ.get("GEMINI_API_KEY"):
+        return _PROVIDER_GEMINI
+    return None
+
+
+def _provider_ready(provider: str) -> bool:
+    """Whether the given provider's package is installed and its API key is
+    set — an explicit LLM_PROVIDER override that names a provider with
+    neither is not silently redirected to the other provider, it just falls
+    back to the heuristic parser."""
+    if provider == _PROVIDER_ANTHROPIC:
+        return anthropic is not None and bool(os.environ.get("ANTHROPIC_API_KEY"))
+    if provider == _PROVIDER_GEMINI:
+        return genai is not None and bool(os.environ.get("GEMINI_API_KEY"))
+    return False
 
 
 def _extract_via_anthropic(document_text: str, source_document: str) -> QSGExtraction:
     client = anthropic.Anthropic()
     system_prompt = _load_agent_system_prompt("qsg_extractor.md")
     response = client.messages.create(
-        model=_EXTRACTOR_MODEL,
+        model=_ANTHROPIC_EXTRACTOR_MODEL,
         max_tokens=2000,
         system=system_prompt,
         messages=[
@@ -302,24 +347,53 @@ def _extract_via_anthropic(document_text: str, source_document: str) -> QSGExtra
     return QSGExtraction.model_validate(json.loads(payload))
 
 
+def _extract_via_gemini(document_text: str, source_document: str) -> QSGExtraction:
+    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+    system_prompt = _load_agent_system_prompt("qsg_extractor.md")
+    response = client.models.generate_content(
+        model=_GEMINI_EXTRACTOR_MODEL,
+        contents=f"Source document: {source_document}\n\n{document_text}",
+        config=gemini_types.GenerateContentConfig(
+            system_instruction=system_prompt,
+            response_mime_type="application/json",
+        ),
+    )
+    return QSGExtraction.model_validate(json.loads(response.text))
+
+
+_PROVIDER_EXTRACTORS = {
+    _PROVIDER_ANTHROPIC: _extract_via_anthropic,
+    _PROVIDER_GEMINI: _extract_via_gemini,
+}
+
+
 def extract_qsg_fields(document_text: str, source_document: str) -> QSGExtraction:
-    """Extract raw QSG fields via the qsg_extractor subagent when an
-    Anthropic API key is configured, otherwise via a deterministic
-    heuristic parser."""
-    if _anthropic_available():
+    """Extract raw QSG fields via a configured LLM provider (Anthropic or
+    Gemini — see `_select_llm_provider`) when available, otherwise via a
+    deterministic heuristic parser."""
+    provider = _select_llm_provider()
+    if provider and _provider_ready(provider):
         try:
-            return _extract_via_anthropic(document_text, source_document)
+            return _PROVIDER_EXTRACTORS[provider](document_text, source_document)
         except Exception:
             # never fail hard on a flaky/unreachable API - fall back, but
             # log it so a persistently failing key doesn't go unnoticed
             logger.warning(
-                "Anthropic extraction failed for %r; falling back to heuristic parser",
+                "%s extraction failed for %r; falling back to heuristic parser",
+                provider.capitalize(),
                 source_document,
                 exc_info=True,
             )
+    elif provider:
+        logger.debug(
+            "LLM_PROVIDER=%r selected but its package or API key isn't "
+            "available; using heuristic parser for %r",
+            provider,
+            source_document,
+        )
     else:
         logger.debug(
-            "No Anthropic API key configured; using heuristic parser for %r",
+            "No LLM provider configured; using heuristic parser for %r",
             source_document,
         )
     return _heuristic_extract_qsg(document_text, source_document)

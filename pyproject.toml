@@ -4,6 +4,11 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "I"]
 
+# app/main.py must call load_dotenv() before its app.* imports (see that
+# file's comment) - E402 would otherwise flag every import after it.
+[tool.ruff.lint.per-file-ignores]
+"app/main.py" = ["E402"]
+
 [tool.black]
 target-version = ["py311"]
 
@@ -20,5 +25,13 @@ files = ["app"]
 # untyped boundary instead of following imports into them.
 [[tool.mypy.overrides]]
 module = ["pymupdf", "pymupdf4llm"]
+ignore_missing_imports = true
+follow_imports = "skip"
+
+# google-genai's types.py optionally imports numpy for array-typed inputs,
+# reaching the same numpy stub syntax issue as above - treat it as an
+# untyped boundary too.
+[[tool.mypy.overrides]]
+module = ["google.genai", "google.genai.*"]
 ignore_missing_imports = true
 follow_imports = "skip"
