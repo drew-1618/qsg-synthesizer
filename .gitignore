@@ -26,3 +26,7 @@ data/
 
 # Node (Tailwind CSS build — see package.json)
 node_modules/
+
+# Third-party agent skills (reinstall from skills-lock.json)
+.agents/
+.claude/skills/

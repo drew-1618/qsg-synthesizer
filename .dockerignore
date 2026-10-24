@@ -38,3 +38,7 @@ docker-compose.yml
 .vscode/
 .idea/
 .DS_Store
+
+# Third-party agent skills (symlinks into .agents/, not needed at runtime)
+.agents/
+.claude/skills/
