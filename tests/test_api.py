@@ -198,6 +198,25 @@ class TestPdfUploadErrors:
         assert response.status_code == 400
         assert "could not be read as a PDF" in response.json()["detail"]
 
+    def test_encrypted_pdf_returns_400(self):
+        import pymupdf
+
+        doc = pymupdf.open()
+        doc.new_page().insert_text((72, 72), "Quick start guide")
+        locked = doc.tobytes(
+            encryption=pymupdf.PDF_ENCRYPT_AES_256, user_pw="x", owner_pw="y"
+        )
+        doc.close()
+        response = client.post(
+            "/api/v1/compare-pdfs",
+            files={
+                "device_a_pdf": ("a.pdf", locked, "application/pdf"),
+                "device_b_pdf": ("b.pdf", locked, "application/pdf"),
+            },
+        )
+        assert response.status_code == 400
+        assert client.get("/api/v1/history").json()["total"] == 0
+
 
 class TestHistoryId:
     def test_compare_text_returns_id_of_saved_record(self):

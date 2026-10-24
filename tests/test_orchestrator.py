@@ -462,3 +462,122 @@ class TestCarriedThroughFields:
 
     def test_port_notes_are_kept(self):
         assert self._spec().ports == ["WAN (RJ45) - PoE in"]
+
+
+class TestLlmFailureModes:
+    def _run_gemini(self, text):
+        with (
+            patch.dict(
+                "os.environ",
+                {"ANTHROPIC_API_KEY": "", "GEMINI_API_KEY": "k", "LLM_PROVIDER": ""},
+            ),
+            patch("app.services.orchestrator.genai") as mock_genai,
+        ):
+            client = MagicMock()
+            client.models.generate_content.return_value = MagicMock(text=text)
+            mock_genai.Client.return_value = client
+            result = orchestrator._extract_with_source("doc", "d.md")
+            return result, client
+
+    def test_gemini_receives_extractor_system_prompt(self):
+        _, client = self._run_gemini(json.dumps(_FAKE_EXTRACTION))
+        config = client.models.generate_content.call_args.kwargs["config"]
+        assert config.system_instruction == orchestrator._load_agent_system_prompt(
+            "qsg_extractor.md"
+        )
+
+    def test_gemini_fenced_json_is_parsed(self):
+        (_, source), _ = self._run_gemini(
+            "```json\n" + json.dumps(_FAKE_EXTRACTION) + "\n```"
+        )
+        assert source == "llm"
+
+    def test_gemini_schema_invalid_json_falls_back(self):
+        (_, source), _ = self._run_gemini('{"device_name": 5, "led_indicators": "x"}')
+        assert source == "heuristic"
+
+    def test_gemini_non_json_falls_back(self):
+        (_, source), _ = self._run_gemini("Sorry, I can't help with that.")
+        assert source == "heuristic"
+
+    def test_anthropic_receives_extractor_system_prompt(self):
+        with (
+            patch.dict("os.environ", {"ANTHROPIC_API_KEY": "k", "LLM_PROVIDER": ""}),
+            patch("app.services.orchestrator.anthropic") as mock_anthropic,
+        ):
+            client = MagicMock()
+            client.messages.create.return_value = _fake_anthropic_response(
+                _FAKE_EXTRACTION
+            )
+            mock_anthropic.Anthropic.return_value = client
+            orchestrator._extract_with_source("doc", "d.md")
+        assert client.messages.create.call_args.kwargs[
+            "system"
+        ] == orchestrator._load_agent_system_prompt("qsg_extractor.md")
+
+    def test_anthropic_schema_invalid_tool_input_falls_back(self):
+        bad = _fake_anthropic_response({"device_name": 5, "led_indicators": "x"})
+        with (
+            patch.dict("os.environ", {"ANTHROPIC_API_KEY": "k", "LLM_PROVIDER": ""}),
+            patch("app.services.orchestrator.anthropic") as mock_anthropic,
+        ):
+            mock_anthropic.Anthropic.return_value.messages.create.return_value = bad
+            _, source = orchestrator._extract_with_source("# Doc\n", "d.md")
+        assert source == "heuristic"
+
+
+class TestFrictionScoreRules:
+    def _spec(self, method, tools=0):
+        return orchestrator.DeviceSpec(
+            model_name="X",
+            provisioning_method=method,
+            required_tools=[f"tool{i}" for i in range(tools)],
+        )
+
+    def test_remote_provisioning_with_no_tools_is_lowest(self):
+        for method in (
+            orchestrator.ProvisioningMethod.TR069,
+            orchestrator.ProvisioningMethod.DHCP,
+        ):
+            assert orchestrator._compute_friction_score(self._spec(method)) == 1
+
+    def test_web_gui_adds_manual_penalty(self):
+        spec = self._spec(orchestrator.ProvisioningMethod.WEB_GUI)
+        assert orchestrator._compute_friction_score(spec) == 4
+
+    def test_console_adds_extra_penalty(self):
+        spec = self._spec(orchestrator.ProvisioningMethod.CONSOLE)
+        assert orchestrator._compute_friction_score(spec) == 6
+
+    def test_tool_count_is_capped_at_four(self):
+        many = self._spec(orchestrator.ProvisioningMethod.TR069, tools=9)
+        four = self._spec(orchestrator.ProvisioningMethod.TR069, tools=4)
+        assert orchestrator._compute_friction_score(many) == 5
+        assert orchestrator._compute_friction_score(four) == 5
+
+    def test_score_is_clamped_to_ten(self):
+        spec = self._spec(orchestrator.ProvisioningMethod.CONSOLE, tools=9)
+        assert orchestrator._compute_friction_score(spec) == 10
+
+
+class TestProvisioningMapping:
+    def test_qr_mobile_app_maps_to_web_gui(self):
+        raw = orchestrator.RawProvisioningMethod
+        assert (
+            orchestrator._select_primary_provisioning_method([raw.QR_MOBILE_APP])
+            == orchestrator.ProvisioningMethod.WEB_GUI
+        )
+
+    def test_other_maps_to_console(self):
+        raw = orchestrator.RawProvisioningMethod
+        assert (
+            orchestrator._select_primary_provisioning_method([raw.OTHER])
+            == orchestrator.ProvisioningMethod.CONSOLE
+        )
+
+    def test_first_listed_method_is_primary(self):
+        raw = orchestrator.RawProvisioningMethod
+        assert (
+            orchestrator._select_primary_provisioning_method([raw.WEB_GUI, raw.TR069])
+            == orchestrator.ProvisioningMethod.WEB_GUI
+        )
