@@ -92,9 +92,16 @@ class TestNormalizeLed:
         assert result.pattern == "blinking"
         assert result.state == LEDState.BOOTING
 
-    def test_off_is_unknown(self):
+    def test_off_is_its_own_state(self):
         result = normalize_led("LED off")
-        assert result.state == LEDState.UNKNOWN
+        assert result.state == LEDState.OFF
+
+    @pytest.mark.parametrize("text", ["solid white", "steady blue"])
+    def test_solid_white_and_blue_are_online(self, text):
+        assert normalize_led(text).state == LEDState.ONLINE
+
+    def test_blinking_blue_is_booting(self):
+        assert normalize_led("blinking blue").state == LEDState.BOOTING
 
     def test_unrecognized_text_is_unknown(self):
         result = normalize_led("mysterious purple glow")
@@ -148,3 +155,25 @@ class TestParseSpeedMbps:
 
     def test_returns_none_for_missing_value(self):
         assert parse_speed_mbps(None) is None
+
+
+class TestMultiStandardWifiRank:
+    @pytest.mark.parametrize(
+        "text, expected",
+        [
+            ("802.11b/g/n/ac", rank_wifi_standard("802.11ac")),
+            ("802.11ac/ax", rank_wifi_standard("802.11ax")),
+            ("802.11a/b/g/n", rank_wifi_standard("802.11n")),
+            ("802.11n, 802.11ax", rank_wifi_standard("802.11ax")),
+            ("Wi-Fi 5 / Wi-Fi 6", rank_wifi_standard("Wi-Fi 6")),
+        ],
+    )
+    def test_ranks_by_newest_standard(self, text, expected):
+        assert rank_wifi_standard(text) == expected
+
+    def test_newer_multi_standard_outranks_older(self):
+        assert rank_wifi_standard("802.11ac/ax") > rank_wifi_standard("802.11b/g/n/ac")
+
+
+def test_parse_speed_ignores_bare_dot():
+    assert parse_speed_mbps("Up to . Gbps") is None
