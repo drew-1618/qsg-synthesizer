@@ -194,7 +194,7 @@ document.getElementById("load-samples-btn").addEventListener("click", async () =
 // ---- Synthesize ----
 function setLoading(isLoading) {
   document.getElementById("synthesize-spinner").classList.toggle("hidden", !isLoading);
-  document.getElementById("synthesize-label").textContent = isLoading ? "Synthesizing..." : "Synthesize";
+  document.getElementById("synthesize-label").textContent = isLoading ? "Synthesizing…" : "Synthesize";
   document.getElementById("synthesize-btn").disabled = isLoading;
   document.getElementById("load-samples-btn").disabled = isLoading;
 }
@@ -395,31 +395,25 @@ function frictionColor(score) {
   return "bg-red-500";
 }
 
-// Fixed lookup only — never interpolates led.color/led.pattern text directly,
-// so no untrusted string ever reaches the style attribute.
-const LED_COLOR_HEX = {
-  green: "#22c55e",
-  amber: "#f59e0b",
-  red: "#ef4444",
-  blue: "#3b82f6",
-  white: "#e2e8f0",
-  off: "#cbd5e1",
-};
+// Fixed allowlist only — never interpolates led.color/led.pattern text directly,
+// so no untrusted string ever reaches the class or style attribute. Colors live
+// in input.css as .led-dot--<color> token classes.
+const LED_COLORS = new Set(["green", "amber", "red", "blue", "white", "off"]);
 // Capped well below real-device rates (LEDs are commonly documented up to
 // ~2-4Hz) so a fast blink stays readable at dot size instead of flickering.
 const MIN_BLINK_SECONDS = 0.6;
 const MAX_BLINK_SECONDS = 3;
 
 function ledDot(led) {
-  const hex = LED_COLOR_HEX[led.color] || "#94a3b8";
+  const colorClass = `led-dot--${LED_COLORS.has(led.color) ? led.color : "unknown"}`;
   const patternClass =
     led.pattern === "blinking" ? "led-dot--blinking" : led.pattern === "pulsing" ? "led-dot--pulsing" : "";
-  let style = `background-color:${hex}`;
+  let style = "";
   if (patternClass && led.frequency_hz > 0) {
     const seconds = Math.min(MAX_BLINK_SECONDS, Math.max(MIN_BLINK_SECONDS, 1 / led.frequency_hz));
-    style += `;animation-duration:${seconds}s`;
+    style = ` style="animation-duration:${seconds}s"`;
   }
-  return `<span class="led-dot ${patternClass}" style="${style}" aria-hidden="true"></span>`;
+  return `<span class="led-dot ${colorClass} ${patternClass}"${style} aria-hidden="true"></span>`;
 }
 
 function ipBadge(isPrivate) {
@@ -466,9 +460,9 @@ function renderResults(data) {
   const barA = document.getElementById("friction-bar-a");
   const barB = document.getElementById("friction-bar-b");
   barA.style.width = `${scoreA * 10}%`;
-  barA.className = `h-2.5 rounded-full transition-all ${frictionColor(scoreA)}`;
+  barA.className = `h-2.5 rounded-full transition-[width] ${frictionColor(scoreA)}`;
   barB.style.width = `${scoreB * 10}%`;
-  barB.className = `h-2.5 rounded-full transition-all ${frictionColor(scoreB)}`;
+  barB.className = `h-2.5 rounded-full transition-[width] ${frictionColor(scoreB)}`;
 
   // Sales talk track
   document.getElementById("sales-talk-track").textContent = data.sales_talk_track;
