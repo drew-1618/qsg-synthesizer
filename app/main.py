@@ -29,6 +29,7 @@ from fastapi import (
     FastAPI,
     File,
     Form,
+    Header,
     HTTPException,
     Query,
     Request,
@@ -51,7 +52,12 @@ from app.schemas import (
 from app.services import export as export_service
 from app.services import history
 from app.services.auth import require_auth, security, verify_credentials
-from app.services.orchestrator import extract_device_specs, synthesize_battlecard
+from app.services.orchestrator import (
+    LLMOverride,
+    extract_device_specs,
+    server_llm_provider,
+    synthesize_battlecard,
+)
 from app.services.rate_limiter import RateLimiter
 from app.tools.document_parser import (
     DocumentParseError,
@@ -70,6 +76,8 @@ SAMPLE_DOCS_DIR = BASE_DIR / "sample_docs"
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20MB per uploaded document
 MIN_TEXT_CHARS = 50  # below this (ignoring whitespace) there is nothing to extract from
 MAX_TEXT_CHARS = 2_000_000  # cap for compare-text's raw device_*_text fields
+MAX_API_KEY_CHARS = 300
+LLM_PROVIDER_CHOICES = ("anthropic", "gemini", "heuristic")
 
 # Compare endpoints run the extraction+synthesis pipeline (the expensive
 # path); export endpoints only render an already-saved battlecard, so they
@@ -298,6 +306,40 @@ def _resolve_document(
     return _require_text(text or "", source_name), source_name
 
 
+def _llm_override(
+    provider: Optional[str], api_key: Optional[str]
+) -> Optional[LLMOverride]:
+    """Build the request's extractor choice from the dashboard's settings
+    headers. Validated by hand so a rejected key never appears in the error."""
+    if not provider:
+        if api_key:
+            raise HTTPException(
+                status_code=422, detail="Choose an AI provider to use with the key."
+            )
+        return None
+    provider = provider.strip().lower()
+    if provider not in LLM_PROVIDER_CHOICES:
+        raise HTTPException(
+            status_code=422,
+            detail="Unknown AI provider. Use anthropic, gemini or heuristic.",
+        )
+    key = (api_key or "").strip() or None
+    if key is not None and (
+        len(key) > MAX_API_KEY_CHARS or not all(33 <= ord(ch) <= 126 for ch in key)
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="That API key doesn't look valid. Paste it again in Settings.",
+        )
+    return LLMOverride(provider=provider, api_key=key)  # type: ignore[arg-type]
+
+
+@router.get("/api/v1/settings")
+def get_settings() -> dict:
+    """What "Server default" means in the dashboard's settings."""
+    return {"server_provider": server_llm_provider()}
+
+
 @router.post(
     "/api/v1/compare",
     response_model=CompareResponse,
@@ -311,14 +353,17 @@ def compare_documents(
     device_b_text: Optional[str] = Form(None, max_length=MAX_TEXT_CHARS),
     device_b_name: Optional[str] = Form(None, max_length=200),
     mode: Literal["sales", "neutral"] = Form("sales"),
+    llm_provider: Optional[str] = Header(None, alias="X-LLM-Provider"),
+    llm_api_key: Optional[str] = Header(None, alias="X-LLM-API-Key"),
 ) -> CompareResponse:
+    llm = _llm_override(llm_provider, llm_api_key)
     text_a, source_a = _resolve_document(
         "Device A", device_a_file, device_a_text, device_a_name
     )
     text_b, source_b = _resolve_document(
         "Device B", device_b_file, device_b_text, device_b_name
     )
-    device_a, device_b = extract_device_specs(text_a, source_a, text_b, source_b)
+    device_a, device_b = extract_device_specs(text_a, source_a, text_b, source_b, llm)
     fingerprint = _input_fingerprint(text_a, text_b)
     return _synthesize_and_save(device_a, device_b, fingerprint, mode)
 

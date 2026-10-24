@@ -15,10 +15,12 @@ function slotHasContent(slot) {
   return slot.mode === "file" ? Boolean(slot.file) : slot.text.trim().length > 0;
 }
 // ---- Theme ----
-// Follows the OS until the user picks one; the pick is remembered per browser.
+// Follows the OS ("System") until the user picks one in Settings; the pick is
+// remembered per browser. The inline script in index.html applies it before
+// first paint.
 const THEME_STORAGE_KEY = "qsg-theme";
 const THEME_BAR_COLORS = { light: "#2b333b", dark: "#0c0f12" };
-const themeToggle = document.getElementById("theme-toggle");
+const darkSchemeQuery = window.matchMedia("(prefers-color-scheme: dark)");
 
 function storedTheme() {
   try {
@@ -29,30 +31,171 @@ function storedTheme() {
   }
 }
 
+function systemTheme() {
+  return darkSchemeQuery.matches ? "dark" : "light";
+}
+
 function applyTheme(theme) {
   document.documentElement.dataset.theme = theme;
-  // The button names the action, and its icon (swapped in CSS) shows the target mode.
-  const label = `Switch to ${theme === "dark" ? "light" : "dark"} theme`;
-  themeToggle.setAttribute("aria-label", label);
-  themeToggle.title = label;
   document.querySelector('meta[name="theme-color"]').content = THEME_BAR_COLORS[theme];
 }
 
-themeToggle.addEventListener("click", () => {
-  const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
-  applyTheme(next);
+// "light", "dark" or "system".
+function setThemePreference(preference) {
   try {
-    localStorage.setItem(THEME_STORAGE_KEY, next);
+    if (preference === "system") localStorage.removeItem(THEME_STORAGE_KEY);
+    else localStorage.setItem(THEME_STORAGE_KEY, preference);
   } catch {
     // Storage unavailable (e.g. private mode): the choice just won't persist.
   }
-});
+  applyTheme(preference === "system" ? systemTheme() : preference);
+}
 
-window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (e) => {
-  if (!storedTheme()) applyTheme(e.matches ? "dark" : "light");
+darkSchemeQuery.addEventListener("change", () => {
+  if (!storedTheme()) applyTheme(systemTheme());
 });
 
 applyTheme(document.documentElement.dataset.theme === "dark" ? "dark" : "light");
+
+// ---- Settings: which AI reads documents, with the user's own keys ----
+// The provider choice is remembered in localStorage. Keys go to localStorage
+// only when "Remember keys" is on, otherwise sessionStorage, so they clear
+// with the tab. They are sent as headers with compare requests and never
+// stored on the server.
+const LLM_STORAGE_KEY = "qsg-llm";
+const LLM_KEYS_STORAGE_KEY = "qsg-llm-keys";
+const LLM_PROVIDERS = ["server", "anthropic", "gemini", "heuristic"];
+const LLM_PROVIDER_NAMES = { anthropic: "Anthropic", gemini: "Gemini" };
+
+function readStored(storage, key) {
+  try {
+    const value = JSON.parse(storage.getItem(key));
+    return value && typeof value === "object" ? value : {};
+  } catch {
+    return {};
+  }
+}
+
+function loadLlmSettings() {
+  const saved = readStored(localStorage, LLM_STORAGE_KEY);
+  const remember = saved.remember === true;
+  const keys = readStored(remember ? localStorage : sessionStorage, LLM_KEYS_STORAGE_KEY);
+  const asKey = (value) => (typeof value === "string" ? value : "");
+  return {
+    provider: LLM_PROVIDERS.includes(saved.provider) ? saved.provider : "server",
+    remember,
+    keys: { anthropic: asKey(keys.anthropic), gemini: asKey(keys.gemini) },
+  };
+}
+
+const llmSettings = loadLlmSettings();
+
+function saveLlmSettings() {
+  try {
+    localStorage.setItem(
+      LLM_STORAGE_KEY,
+      JSON.stringify({ provider: llmSettings.provider, remember: llmSettings.remember })
+    );
+    const [keep, drop] = llmSettings.remember ? [localStorage, sessionStorage] : [sessionStorage, localStorage];
+    keep.setItem(LLM_KEYS_STORAGE_KEY, JSON.stringify(llmSettings.keys));
+    drop.removeItem(LLM_KEYS_STORAGE_KEY);
+  } catch {
+    // Storage unavailable: settings last until the page reloads.
+  }
+}
+
+// Headers for POST /api/v1/compare; none means the server's own configuration.
+function llmHeaders() {
+  const { provider } = llmSettings;
+  if (provider === "server") return {};
+  const headers = { "X-LLM-Provider": provider };
+  const key = llmSettings.keys[provider];
+  if (key) headers["X-LLM-API-Key"] = key;
+  return headers;
+}
+
+const settingsDialog = document.getElementById("settings-dialog");
+const settingsKeyInput = document.getElementById("settings-key");
+const settingsKeyReveal = document.getElementById("settings-key-reveal");
+let serverProviderLoaded = false;
+
+function syncSettingsDialog() {
+  const theme = storedTheme() || "system";
+  settingsDialog.querySelectorAll('input[name="theme"]').forEach((radio) => {
+    radio.checked = radio.value === theme;
+  });
+  settingsDialog.querySelectorAll('input[name="llm-provider"]').forEach((radio) => {
+    radio.checked = radio.value === llmSettings.provider;
+  });
+  const name = LLM_PROVIDER_NAMES[llmSettings.provider];
+  document.getElementById("settings-key-section").classList.toggle("hidden", !name);
+  if (!name) return;
+  document.getElementById("settings-key-label").textContent = `${name} API key`;
+  settingsKeyInput.value = llmSettings.keys[llmSettings.provider];
+  document.getElementById("settings-key-hint").textContent =
+    `Without a key, the server's own ${name} key is used if it has one. Otherwise documents are read with the built-in parser.`;
+  document.getElementById("settings-remember").checked = llmSettings.remember;
+}
+
+async function loadServerProvider() {
+  if (serverProviderLoaded) return;
+  try {
+    const res = await fetch("/api/v1/settings");
+    if (!res.ok) return;
+    const { server_provider: provider } = await res.json();
+    document.getElementById("settings-server-hint").textContent =
+      `(${LLM_PROVIDER_NAMES[provider] || "built-in parser"})`;
+    serverProviderLoaded = true;
+  } catch {
+    // Leave the hint empty; the option still works.
+  }
+}
+
+function setKeyRevealed(revealed) {
+  settingsKeyInput.type = revealed ? "text" : "password";
+  settingsKeyReveal.setAttribute("aria-pressed", String(revealed));
+  settingsKeyReveal.textContent = revealed ? "Hide" : "Show";
+}
+
+document.getElementById("settings-toggle").addEventListener("click", () => {
+  setKeyRevealed(false);
+  syncSettingsDialog();
+  settingsDialog.showModal();
+  loadServerProvider();
+});
+document.getElementById("settings-done").addEventListener("click", () => settingsDialog.close());
+settingsDialog.addEventListener("click", (e) => {
+  if (e.target === settingsDialog) settingsDialog.close();
+});
+settingsDialog.addEventListener("close", () => setKeyRevealed(false));
+
+settingsDialog.addEventListener("change", (e) => {
+  const input = e.target;
+  if (input.name === "theme") {
+    setThemePreference(input.value);
+  } else if (input.name === "llm-provider") {
+    llmSettings.provider = input.value;
+    saveLlmSettings();
+    setKeyRevealed(false);
+    syncSettingsDialog();
+  } else if (input.id === "settings-remember") {
+    llmSettings.remember = input.checked;
+    saveLlmSettings();
+  }
+});
+
+settingsKeyInput.addEventListener("input", () => {
+  llmSettings.keys[llmSettings.provider] = settingsKeyInput.value.trim();
+  saveLlmSettings();
+});
+settingsKeyReveal.addEventListener("click", () => setKeyRevealed(settingsKeyInput.type === "password"));
+
+document.getElementById("settings-forget").addEventListener("click", () => {
+  llmSettings.keys = { anthropic: "", gemini: "" };
+  saveLlmSettings();
+  settingsKeyInput.value = "";
+  settingsKeyInput.focus();
+});
 
 let currentHistoryId = null;
 const HISTORY_PAGE_SIZE = 20;
@@ -539,7 +682,7 @@ async function synthesize() {
         if (slot.name.trim()) formData.append(`device_${id}_name`, slot.name.trim());
       }
     }
-    const res = await fetch("/api/v1/compare", { method: "POST", body: formData });
+    const res = await fetch("/api/v1/compare", { method: "POST", body: formData, headers: llmHeaders() });
     const data = await readJson(res);
     if (!res.ok) throw new Error(describeFailure(res, data, "The comparison failed."));
     setExportTarget(data.history_id);

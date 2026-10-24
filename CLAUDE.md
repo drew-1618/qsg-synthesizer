@@ -42,6 +42,13 @@ docker compose up --build                        # requires a .env file (cp .env
      `.claude/agents/qsg_extractor.md` (frontmatter stripped) as the system prompt. With no
      usable key, or on *any* API/parse error, it silently falls back to `_heuristic_extract_qsg`,
      a regex parser keyed on the heading names used in `sample_docs/*.md`.
+   - The dashboard's Settings can override the provider per request: `POST /api/v1/compare`
+     reads `X-LLM-Provider` (`anthropic`/`gemini`/`heuristic`) and `X-LLM-API-Key` into an
+     `LLMOverride`, which `_resolve_llm` turns into (provider, key) and which is passed
+     explicitly down to the extractors (not via contextvars, because of the thread pools).
+     User keys are never stored or logged server-side; a failing user key adds a warning
+     (`_user_key_warning`) instead of falling back silently. `GET /api/v1/settings` reports
+     the server's own provider.
    - `_normalize_to_device_spec` converts it into the API-facing `DeviceSpec` (`app/schemas.py`)
      using the deterministic tools in `app/tools/`.
    - Documents longer than `MAX_LLM_INPUT_CHARS` are not truncated: `_extract_document` splits
@@ -55,7 +62,11 @@ docker compose up --build                        # requires a .env file (cp .env
    which treats a missing type as a guide); otherwise both scores are `None` and the talk track
    is spec-based. The UI, history and exports all handle `None` scores.
 4. `app/services/history.py` saves the result as `data/history/<uuid hex>.json` (capped at 50);
-   the export endpoints (`app/services/export.py`) render from those saved records.
+   the export endpoints (`app/services/export.py`) render from those saved records. Each record
+   stores `input_fingerprint` (a sha256 of both input texts). The drawer loads
+   `GET /api/v1/history/stacks`, which groups records by device pair and mode (`_stack_key`) and
+   marks older runs of identical documents as `redundant_ids`, which
+   `DELETE /api/v1/history/{id}/copies` removes.
 
 Things that span multiple files:
 - Comparison perspective: `BattlecardResponse.perspective` is `"sales"` (side A is the user's own
@@ -121,7 +132,9 @@ everything else stays quiet. Sentence case, no all-caps labels, no tinted-card-f
   `:root[data-theme="dark"]` in `input.css`; never branch on theme in markup, use tokens (e.g.
   `bg-plate-hover`, `text-on-action`, `bg-scrim`, not `bg-white`/`text-white`). `data-theme` is set
   before first paint by the inline script in `index.html` (stored `qsg-theme`, else the OS
-  setting) and toggled by `applyTheme()` in `app.js`. Check contrast per theme when adding tokens.
+  setting) and changed from the Settings dialog (`#settings-dialog`, Light/Dark/System) via
+  `setThemePreference()` in `app.js`; "System" removes `qsg-theme`. Check contrast per theme
+  when adding tokens.
 - Spacing: 4px base scale (Tailwind default at a 16px root); avoid arbitrary values.
 - Mobile-first, test at 375px width.
 - No `src/components/` dir here (vanilla JS, no build step beyond Tailwind). Build reusable UI as
