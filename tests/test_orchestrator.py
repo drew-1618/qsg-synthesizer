@@ -2,6 +2,7 @@ import json
 import logging
 from unittest.mock import MagicMock, patch
 
+from app.schemas import DeviceSpec, ProvisioningMethod
 from app.services import orchestrator
 from app.services.orchestrator import (
     NO_ADVANTAGES_MESSAGE,
@@ -365,6 +366,77 @@ class TestTiedTalkTrack:
         track = synthesize_battlecard(a, b).sales_talk_track
         assert "tied" in track
         assert "meaningfully less" not in track
+
+
+class TestPerspectiveTalkTrack:
+    def _spec(self, name):
+        return DeviceSpec(
+            model_name=name, provisioning_method=ProvisioningMethod.WEB_GUI
+        )
+
+    def _track(self, score_a, score_b, perspective, advantages=None):
+        return orchestrator._build_sales_talk_track(
+            self._spec("Ours X"),
+            score_a,
+            self._spec("Rival Y"),
+            score_b,
+            perspective,
+            advantages,
+        )
+
+    def test_sales_ours_wins_leads_with_install_advantage(self):
+        track = self._track(2, 7, "sales")
+        assert (
+            "Ours X installs with meaningfully less field labor than Rival Y" in track
+        )
+        assert "whenever Rival Y is the incumbent" in track
+
+    def test_sales_ours_loses_does_not_compete_on_install_speed(self):
+        track = self._track(
+            7,
+            2,
+            "sales",
+            ["Unique capability: Mesh Wi-Fi support", "Faster WAN throughput (10G)."],
+        )
+        assert "Ours X takes more field effort to install than Rival Y" in track
+        assert "don't compete on install speed" in track
+        assert "Mesh Wi-Fi support; Faster WAN throughput (10G)." in track
+        assert "Unique capability" not in track
+        assert "Expect Rival Y to lead with easier installation" in track
+        assert "meaningfully less" not in track
+
+    def test_sales_ours_loses_with_no_advantages_says_so_without_inventing_any(self):
+        track = self._track(7, 2, "sales", [orchestrator.NO_ADVANTAGES_MESSAGE])
+        assert "No spec advantages for Ours X were identified" in track
+        assert "Lead with what" not in track
+
+    def test_sales_ours_loses_caps_advantages_at_three(self):
+        track = self._track(
+            7, 2, "sales", [f"Unique capability: cap {i}" for i in range(5)]
+        )
+        assert "cap 2" in track
+        assert "cap 3" not in track
+
+    def test_tie_is_the_same_in_every_perspective(self):
+        for perspective in ("sales", "neutral", None):
+            track = self._track(4, 4, perspective)
+            assert "tied on install effort" in track
+            assert "incumbent" not in track
+
+    def test_neutral_describes_the_winner_without_sales_framing(self):
+        for perspective in ("neutral", None):
+            for a, b, winner in ((2, 7, "Ours X"), (7, 2, "Rival Y")):
+                track = self._track(a, b, perspective)
+                assert track.startswith(f"{winner} installs with meaningfully less")
+                assert "incumbent" not in track
+                assert "don't compete" not in track
+
+    def test_synthesize_records_the_perspective(self):
+        a = extract_device_spec("# A\n\nProvision over the web GUI.\n", "a.md")
+        b = extract_device_spec("# B\n\nProvision over the web GUI.\n", "b.md")
+        assert synthesize_battlecard(a, b, "sales").perspective == "sales"
+        assert synthesize_battlecard(a, b, "neutral").perspective == "neutral"
+        assert synthesize_battlecard(a, b).perspective is None
 
 
 class TestLlmHardening:

@@ -29,6 +29,19 @@ class SetupDifficulty(str, Enum):
     HARD = "hard"
 
 
+class DocumentType(str, Enum):
+    QUICK_START_GUIDE = "quick_start_guide"
+    DATASHEET = "datasheet"
+    OTHER = "other"
+
+
+class SpecItem(BaseModel):
+    """One open-ended specification, copied verbatim (e.g. "Power draw": "12 W")."""
+
+    name: str
+    value: str
+
+
 class CablingPort(BaseModel):
     port_name: str
     port_type: str
@@ -59,6 +72,13 @@ class QSGExtraction(BaseModel):
     setup_difficulty: Optional[SetupDifficulty] = None
     strengths: List[str] = Field(default_factory=list)
     gaps: List[str] = Field(default_factory=list)
+    # What kind of document this is, and any specs beyond the fixed fields
+    # above. Optional for the same reason as the assessment.
+    document_type: Optional[DocumentType] = None
+    specs: List[SpecItem] = Field(default_factory=list)
 
 
 ASSESSMENT_FIELDS = frozenset({"step_count", "setup_difficulty", "strengths", "gaps"})
+
+# Fields whose malformed value is dropped rather than failing the extraction.
+DROPPABLE_FIELDS = ASSESSMENT_FIELDS | frozenset({"document_type", "specs"})

@@ -10,13 +10,15 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.tools.led_normalizer import LEDState
 
 __all__ = [
+    "SpecValue",
+    "Perspective",
     "LEDStatus",
     "ProvisioningMethod",
     "DeviceSpec",
@@ -26,6 +28,12 @@ __all__ = [
     "HistoryRecord",
     "HistoryPage",
 ]
+
+
+# "sales": side A is the user's own device and side B the competitor's, and the
+# talk track is written from A's side. "neutral" (or None, for records saved
+# before this existed) compares two devices without picking a side.
+Perspective = Literal["sales", "neutral"]
 
 
 class ProvisioningMethod(str, Enum):
@@ -44,6 +52,11 @@ class LEDStatus(BaseModel):
     pattern: Optional[str] = None
     frequency_hz: Optional[float] = None
     description: str
+
+
+class SpecValue(BaseModel):
+    name: str
+    value: str
 
 
 class DeviceSpec(BaseModel):
@@ -72,12 +85,24 @@ class DeviceSpec(BaseModel):
     gaps: List[str] = Field(default_factory=list)
     # "llm" or "heuristic"; set by the orchestrator, not the document
     extraction_source: Optional[str] = None
+    # "quick_start_guide", "datasheet" or "other"; None when not determined
+    # (treated as a quick start guide, as before document types existed).
+    document_type: Optional[str] = None
+    # Specs beyond the fixed fields above, e.g. power draw or certifications.
+    specs: List[SpecValue] = Field(default_factory=list)
+    # Notes about how the document was read, e.g. only part of a long one.
+    extraction_warnings: List[str] = Field(default_factory=list)
 
 
 class BattlecardResponse(BaseModel):
     comparison_matrix: dict
-    installation_friction_score_device_a: int = Field(ge=1, le=10)
-    installation_friction_score_device_b: int = Field(ge=1, le=10)
+    # None when install effort isn't comparable (not both quick start guides).
+    installation_friction_score_device_a: Optional[int] = Field(
+        default=None, ge=1, le=10
+    )
+    installation_friction_score_device_b: Optional[int] = Field(
+        default=None, ge=1, le=10
+    )
     key_risks_device_a: List[str]
     key_risks_device_b: List[str]
     key_advantages_device_a: List[str]
@@ -86,6 +111,8 @@ class BattlecardResponse(BaseModel):
     # None on history records saved before provenance was tracked
     extraction_source_device_a: Optional[str] = None
     extraction_source_device_b: Optional[str] = None
+    perspective: Optional[Perspective] = None
+    warnings: List[str] = Field(default_factory=list)
 
 
 class CompareResponse(BattlecardResponse):
@@ -99,8 +126,9 @@ class HistorySummary(BaseModel):
     created_at: datetime
     device_a_name: str
     device_b_name: str
-    installation_friction_score_device_a: int
-    installation_friction_score_device_b: int
+    installation_friction_score_device_a: Optional[int] = None
+    installation_friction_score_device_b: Optional[int] = None
+    perspective: Optional[Perspective] = None
 
 
 class HistoryRecord(BaseModel):

@@ -20,13 +20,14 @@ if "PYTEST_VERSION" not in os.environ:
 import base64
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import (
     APIRouter,
     Depends,
     FastAPI,
     File,
+    Form,
     HTTPException,
     Query,
     Request,
@@ -38,13 +39,24 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from app.logging_config import configure_logging
-from app.schemas import CompareResponse, DeviceSpec, HistoryPage, HistoryRecord
+from app.schemas import (
+    CompareResponse,
+    DeviceSpec,
+    HistoryPage,
+    HistoryRecord,
+    Perspective,
+)
 from app.services import export as export_service
 from app.services import history
 from app.services.auth import require_auth, security, verify_credentials
 from app.services.orchestrator import extract_device_specs, synthesize_battlecard
 from app.services.rate_limiter import RateLimiter
-from app.tools.pdf_parser import extract_text_from_pdf
+from app.tools.document_parser import (
+    DocumentParseError,
+    extract_text,
+    file_kind,
+    is_supported,
+)
 
 configure_logging()
 logger = logging.getLogger(__name__)
@@ -53,7 +65,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 STATIC_DIR = BASE_DIR / "app" / "static"
 SAMPLE_DOCS_DIR = BASE_DIR / "sample_docs"
 
-MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20MB per PDF
+MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20MB per uploaded document
 MIN_TEXT_CHARS = 50  # below this (ignoring whitespace) there is nothing to extract from
 MAX_TEXT_CHARS = 2_000_000  # cap for compare-text's raw device_*_text fields
 
@@ -178,8 +190,12 @@ def compare_text(payload: CompareTextRequest) -> CompareResponse:
     return _synthesize_and_save(device_a, device_b)
 
 
-def _synthesize_and_save(device_a: DeviceSpec, device_b: DeviceSpec) -> CompareResponse:
-    battlecard = synthesize_battlecard(device_a, device_b)
+def _synthesize_and_save(
+    device_a: DeviceSpec,
+    device_b: DeviceSpec,
+    perspective: Optional[Perspective] = None,
+) -> CompareResponse:
+    battlecard = synthesize_battlecard(device_a, device_b, perspective)
     record = history.save_comparison(battlecard)
     return CompareResponse(**battlecard.model_dump(), history_id=record.id)
 
@@ -197,28 +213,37 @@ def _require_text(text: str, name: str) -> str:
     return text
 
 
-def _read_pdf_upload(upload: UploadFile) -> str:
-    if not (upload.filename or "").lower().endswith(".pdf"):
+SUPPORTED_TYPES_HINT = "Use a PDF, Word (.docx), Markdown or text file."
+
+
+def _read_document_upload(upload: UploadFile, pdf_only: bool = False) -> str:
+    filename = upload.filename or ""
+    if pdf_only:
+        if not filename.lower().endswith(".pdf"):
+            raise HTTPException(
+                status_code=400, detail=f"'{filename}' is not a PDF file."
+            )
+    elif not is_supported(filename):
         raise HTTPException(
-            status_code=400, detail=f"'{upload.filename}' is not a PDF file."
+            status_code=400,
+            detail=f"'{filename}' is not a supported file type. {SUPPORTED_TYPES_HINT}",
         )
     contents = upload.file.read(MAX_UPLOAD_BYTES + 1)
     if len(contents) > MAX_UPLOAD_BYTES:
         max_mb = MAX_UPLOAD_BYTES // (1024 * 1024)
         raise HTTPException(
             status_code=413,
-            detail=f"'{upload.filename}' exceeds the {max_mb}MB upload limit.",
+            detail=f"'{filename}' exceeds the {max_mb}MB upload limit.",
         )
     try:
-        text = extract_text_from_pdf(contents)
-    except Exception:
-        logger.warning(
-            "Could not parse upload '%s' as a PDF", upload.filename, exc_info=True
-        )
+        text = extract_text(filename, contents)
+    except DocumentParseError:
+        logger.warning("Could not parse upload '%s'", filename, exc_info=True)
         raise HTTPException(
-            status_code=400, detail=f"'{upload.filename}' could not be read as a PDF."
+            status_code=400,
+            detail=f"'{filename}' could not be read as a {file_kind(filename)}.",
         )
-    return _require_text(text, upload.filename or "upload")
+    return _require_text(text, filename or "upload")
 
 
 @router.post(
@@ -230,8 +255,8 @@ def compare_pdfs(
     device_a_pdf: UploadFile = File(...),
     device_b_pdf: UploadFile = File(...),
 ) -> CompareResponse:
-    device_a_text = _read_pdf_upload(device_a_pdf)
-    device_b_text = _read_pdf_upload(device_b_pdf)
+    device_a_text = _read_document_upload(device_a_pdf, pdf_only=True)
+    device_b_text = _read_document_upload(device_b_pdf, pdf_only=True)
 
     device_a, device_b = extract_device_specs(
         device_a_text,
@@ -241,6 +266,50 @@ def compare_pdfs(
     )
 
     return _synthesize_and_save(device_a, device_b)
+
+
+def _resolve_document(
+    label: str,
+    file: Optional[UploadFile],
+    text: Optional[str],
+    name: Optional[str],
+) -> tuple[str, str]:
+    """Return (document text, source name) from exactly one of a file or pasted text."""
+    has_file = file is not None and bool(file.filename)
+    has_text = bool(text and text.strip())
+    if has_file == has_text:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Add either a file or pasted text for {label}, not both.",
+        )
+    if file is not None and has_file:
+        return _read_document_upload(file), file.filename or "upload"
+    source_name = (name or "").strip() or "Pasted text"
+    return _require_text(text or "", source_name), source_name
+
+
+@router.post(
+    "/api/v1/compare",
+    response_model=CompareResponse,
+    dependencies=[Depends(compare_rate_limiter)],
+)
+def compare_documents(
+    device_a_file: Optional[UploadFile] = File(None),
+    device_a_text: Optional[str] = Form(None, max_length=MAX_TEXT_CHARS),
+    device_a_name: Optional[str] = Form(None, max_length=200),
+    device_b_file: Optional[UploadFile] = File(None),
+    device_b_text: Optional[str] = Form(None, max_length=MAX_TEXT_CHARS),
+    device_b_name: Optional[str] = Form(None, max_length=200),
+    mode: Literal["sales", "neutral"] = Form("sales"),
+) -> CompareResponse:
+    text_a, source_a = _resolve_document(
+        "Device A", device_a_file, device_a_text, device_a_name
+    )
+    text_b, source_b = _resolve_document(
+        "Device B", device_b_file, device_b_text, device_b_name
+    )
+    device_a, device_b = extract_device_specs(text_a, source_a, text_b, source_b)
+    return _synthesize_and_save(device_a, device_b, mode)
 
 
 @router.get("/api/v1/history", response_model=HistoryPage)
@@ -272,19 +341,43 @@ def get_history_item(history_id: str) -> HistoryRecord:
 
 
 @router.get(
+    "/api/v1/history/{history_id}/export-name",
+    include_in_schema=False,
+    dependencies=[Depends(export_rate_limiter)],
+)
+def export_default_name(history_id: str) -> dict:
+    """Default export file name (no extension), used unless the caller renames it."""
+    record = _get_history_record_or_404(history_id)
+    return {
+        "basename": export_service.default_export_basename(
+            record.battlecard, record.created_at
+        )
+    }
+
+
+def _export_headers(record: HistoryRecord, ext: str, requested: Optional[str]) -> dict:
+    filename = export_service.sanitize_export_filename(
+        requested,
+        ext,
+        export_service.default_export_basename(record.battlecard, record.created_at),
+    )
+    return {"Content-Disposition": f'attachment; filename="{filename}"'}
+
+
+@router.get(
     "/api/v1/history/{history_id}/export.md",
     include_in_schema=False,
     dependencies=[Depends(export_rate_limiter)],
 )
-def export_history_markdown(history_id: str) -> Response:
+def export_history_markdown(
+    history_id: str, filename: Optional[str] = Query(None, max_length=200)
+) -> Response:
     record = _get_history_record_or_404(history_id)
     markdown = export_service.battlecard_to_markdown(record.battlecard)
     return Response(
         content=markdown,
         media_type="text/markdown",
-        headers={
-            "Content-Disposition": f'attachment; filename="battlecard-{history_id}.md"'
-        },
+        headers=_export_headers(record, "md", filename),
     )
 
 
@@ -293,15 +386,15 @@ def export_history_markdown(history_id: str) -> Response:
     include_in_schema=False,
     dependencies=[Depends(export_rate_limiter)],
 )
-def export_history_pdf(history_id: str) -> Response:
+def export_history_pdf(
+    history_id: str, filename: Optional[str] = Query(None, max_length=200)
+) -> Response:
     record = _get_history_record_or_404(history_id)
     pdf_bytes = export_service.battlecard_to_pdf_bytes(record.battlecard)
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
-        headers={
-            "Content-Disposition": f'attachment; filename="battlecard-{history_id}.pdf"'
-        },
+        headers=_export_headers(record, "pdf", filename),
     )
 
 

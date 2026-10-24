@@ -1,4 +1,5 @@
 import logging
+import re
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -186,6 +187,287 @@ class TestComparePdfs:
         assert response.status_code == 413
 
 
+class TestCompareDocuments:
+    """POST /api/v1/compare: each side is an uploaded file or pasted text."""
+
+    def _sample(self, name):
+        return (SAMPLE_DOCS_DIR / name).read_bytes()
+
+    def test_two_markdown_files(self):
+        response = client.post(
+            "/api/v1/compare",
+            files={
+                "device_a_file": (
+                    "a.md",
+                    self._sample("device_a_qsg.md"),
+                    "text/markdown",
+                ),
+                "device_b_file": (
+                    "b.md",
+                    self._sample("device_b_qsg.md"),
+                    "text/markdown",
+                ),
+            },
+        )
+        assert response.status_code == 200
+        assert "history_id" in response.json()
+
+    def test_two_pasted_texts_with_names(self):
+        response = client.post(
+            "/api/v1/compare",
+            data={
+                "device_a_text": self._sample("device_a_qsg.md").decode(),
+                "device_a_name": "Our guide",
+                "device_b_text": self._sample("device_b_qsg.md").decode(),
+            },
+        )
+        assert response.status_code == 200
+
+    def test_file_and_pasted_text_can_be_mixed(self):
+        response = client.post(
+            "/api/v1/compare",
+            data={"device_b_text": self._sample("device_b_qsg.md").decode()},
+            files={
+                "device_a_file": (
+                    "a.pdf",
+                    self._sample("device_a_qsg.pdf"),
+                    "application/pdf",
+                )
+            },
+        )
+        assert response.status_code == 200
+
+    def test_docx_upload_is_accepted(self):
+        import io
+
+        import docx
+
+        document = docx.Document()
+        for line in self._sample("device_a_qsg.md").decode().splitlines():
+            document.add_paragraph(line)
+        buffer = io.BytesIO()
+        document.save(buffer)
+        response = client.post(
+            "/api/v1/compare",
+            data={"device_b_text": self._sample("device_b_qsg.md").decode()},
+            files={
+                "device_a_file": (
+                    "a.docx",
+                    buffer.getvalue(),
+                    "application/octet-stream",
+                )
+            },
+        )
+        assert response.status_code == 200
+
+    def test_file_and_text_for_the_same_side_is_422(self):
+        response = client.post(
+            "/api/v1/compare",
+            data={
+                "device_a_text": self._sample("device_a_qsg.md").decode(),
+                "device_b_text": self._sample("device_b_qsg.md").decode(),
+            },
+            files={
+                "device_a_file": (
+                    "a.md",
+                    self._sample("device_a_qsg.md"),
+                    "text/markdown",
+                )
+            },
+        )
+        assert response.status_code == 422
+        assert "Device A" in response.json()["detail"]
+
+    def test_missing_side_is_422(self):
+        response = client.post(
+            "/api/v1/compare",
+            data={"device_a_text": self._sample("device_a_qsg.md").decode()},
+        )
+        assert response.status_code == 422
+        assert "Device B" in response.json()["detail"]
+
+    def test_blank_pasted_text_counts_as_missing(self):
+        response = client.post(
+            "/api/v1/compare",
+            data={
+                "device_a_text": "   \n  ",
+                "device_b_text": self._sample("device_b_qsg.md").decode(),
+            },
+        )
+        assert response.status_code == 422
+
+    def test_unsupported_extension_is_400_with_hint(self):
+        response = client.post(
+            "/api/v1/compare",
+            data={"device_b_text": self._sample("device_b_qsg.md").decode()},
+            files={
+                "device_a_file": ("deck.pptx", b"x" * 100, "application/octet-stream")
+            },
+        )
+        assert response.status_code == 400
+        assert "not a supported file type" in response.json()["detail"]
+        assert "Word (.docx)" in response.json()["detail"]
+
+    def test_corrupt_docx_is_400_naming_the_file_kind(self):
+        response = client.post(
+            "/api/v1/compare",
+            data={"device_b_text": self._sample("device_b_qsg.md").decode()},
+            files={
+                "device_a_file": ("a.docx", b"not a zip", "application/octet-stream")
+            },
+        )
+        assert response.status_code == 400
+        assert "could not be read as a Word document" in response.json()["detail"]
+
+    def test_too_little_pasted_text_is_422_and_not_saved(self):
+        response = client.post(
+            "/api/v1/compare",
+            data={
+                "device_a_text": "too short",
+                "device_b_text": self._sample("device_b_qsg.md").decode(),
+            },
+        )
+        assert response.status_code == 422
+        assert client.get("/api/v1/history").json()["items"] == []
+
+    def test_compare_pdfs_still_rejects_other_formats(self):
+        response = client.post(
+            "/api/v1/compare-pdfs",
+            files={
+                "device_a_pdf": ("a.md", b"# hi", "text/markdown"),
+                "device_b_pdf": (
+                    "b.pdf",
+                    self._sample("device_b_qsg.pdf"),
+                    "application/pdf",
+                ),
+            },
+        )
+        assert response.status_code == 400
+        assert "is not a PDF file" in response.json()["detail"]
+
+
+class TestComparisonMode:
+    def _compare(self, a="device_a_qsg.md", b="device_b_qsg.md", **data):
+        return client.post(
+            "/api/v1/compare",
+            data=data,
+            files={
+                "device_a_file": (
+                    "a.md",
+                    (SAMPLE_DOCS_DIR / a).read_bytes(),
+                    "text/markdown",
+                ),
+                "device_b_file": (
+                    "b.md",
+                    (SAMPLE_DOCS_DIR / b).read_bytes(),
+                    "text/markdown",
+                ),
+            },
+        )
+
+    def test_defaults_to_sales_perspective(self):
+        response = self._compare()
+        assert response.status_code == 200
+        assert response.json()["perspective"] == "sales"
+
+    def test_neutral_mode_is_recorded(self):
+        assert self._compare(mode="neutral").json()["perspective"] == "neutral"
+
+    def test_unknown_mode_is_422(self):
+        assert self._compare(mode="aggressive").status_code == 422
+
+    def test_sales_talk_track_follows_who_is_ours(self):
+        # Side A is ours: NovaFiber installs easier, so lead with that...
+        wins = self._compare().json()["sales_talk_track"]
+        assert "whenever" in wins and "incumbent" in wins
+        # ...and with the files swapped our device is the harder install.
+        loses = self._compare(a="device_b_qsg.md", b="device_a_qsg.md").json()[
+            "sales_talk_track"
+        ]
+        assert "don't compete on install speed" in loses
+
+    def test_perspective_round_trips_through_history(self):
+        history_id = self._compare().json()["history_id"]
+        assert (
+            client.get(f"/api/v1/history/{history_id}").json()["battlecard"][
+                "perspective"
+            ]
+            == "sales"
+        )
+        item = client.get("/api/v1/history").json()["items"][0]
+        assert item["perspective"] == "sales"
+
+    def test_older_endpoints_stay_neutral(self):
+        text = (SAMPLE_DOCS_DIR / "device_a_qsg.md").read_text(encoding="utf-8")
+        response = client.post(
+            "/api/v1/compare-text",
+            json={
+                "device_a_text": text,
+                "device_b_text": text.replace("NovaFiber", "Other"),
+            },
+        )
+        assert response.status_code == 200
+        assert response.json()["perspective"] is None
+
+    def test_exports_label_the_roles_in_sales_mode(self):
+        history_id = self._compare().json()["history_id"]
+        markdown = client.get(f"/api/v1/history/{history_id}/export.md")
+        assert "(ours)" in markdown.text and "(competitor)" in markdown.text
+        disposition = markdown.headers["content-disposition"]
+        assert "ours" not in disposition and "competitor" not in disposition
+
+
+class TestDatasheets:
+    def _compare(self, a, b, mode="sales"):
+        return client.post(
+            "/api/v1/compare",
+            data={"mode": mode},
+            files={
+                "device_a_file": (
+                    a,
+                    (SAMPLE_DOCS_DIR / a).read_bytes(),
+                    "text/markdown",
+                ),
+                "device_b_file": (
+                    b,
+                    (SAMPLE_DOCS_DIR / b).read_bytes(),
+                    "text/markdown",
+                ),
+            },
+        )
+
+    def test_two_datasheets_compare_specs_without_friction(self):
+        response = self._compare("device_c_datasheet.md", "device_d_datasheet.md")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["installation_friction_score_device_a"] is None
+        assert data["installation_friction_score_device_b"] is None
+        assert data["comparison_matrix"]["document_type"] == {
+            "device_a": "datasheet",
+            "device_b": "datasheet",
+        }
+        names = [row["name"] for row in data["comparison_matrix"]["extra_specs"]]
+        assert "Power Consumption" in names and "Battery Backup" in names
+
+    def test_history_lists_unscored_comparisons(self):
+        self._compare("device_c_datasheet.md", "device_d_datasheet.md")
+        item = client.get("/api/v1/history").json()["items"][0]
+        assert item["installation_friction_score_device_a"] is None
+
+    def test_exports_say_friction_was_not_compared_and_include_spec_rows(self):
+        history_id = self._compare("device_a_qsg.md", "device_c_datasheet.md").json()[
+            "history_id"
+        ]
+        markdown = client.get(f"/api/v1/history/{history_id}/export.md").text
+        assert "Not compared: install effort is only scored" in markdown
+        assert (
+            "| Power Consumption | Not listed | 28 W typical, 36 W max (PoE++) |"
+            in markdown
+        )
+        pdf = client.get(f"/api/v1/history/{history_id}/export.pdf")
+        assert pdf.content[:4] == b"%PDF"
+
+
 class TestPdfUploadErrors:
     def test_corrupt_pdf_returns_400(self):
         response = client.post(
@@ -364,6 +646,48 @@ class TestHistory:
         assert response.headers["content-type"] == "application/pdf"
         assert "attachment" in response.headers["content-disposition"]
         assert response.content[:4] == b"%PDF"
+
+    def test_export_default_filename_is_descriptive(self):
+        self._post_comparison()
+        history_id = client.get("/api/v1/history").json()["items"][0]["id"]
+
+        for ext in ("md", "pdf"):
+            response = client.get(f"/api/v1/history/{history_id}/export.{ext}")
+            disposition = response.headers["content-disposition"]
+            assert history_id not in disposition
+            assert re.search(
+                rf'filename="battlecard-[a-z0-9-]+-vs-[a-z0-9-]+-\d{{4}}-\d{{2}}-\d{{2}}\.{ext}"',
+                disposition,
+            )
+
+    def test_export_custom_filename_is_sanitized(self):
+        self._post_comparison()
+        history_id = client.get("/api/v1/history").json()["items"][0]["id"]
+
+        response = client.get(
+            f"/api/v1/history/{history_id}/export.pdf",
+            params={"filename": "../Q4 card.md"},
+        )
+        assert response.headers["content-disposition"] == (
+            'attachment; filename="Q4-card.pdf"'
+        )
+
+    def test_export_name_endpoint_returns_default_basename(self):
+        self._post_comparison()
+        history_id = client.get("/api/v1/history").json()["items"][0]["id"]
+
+        response = client.get(f"/api/v1/history/{history_id}/export-name")
+        assert response.status_code == 200
+        basename = response.json()["basename"]
+        assert basename.startswith("battlecard-")
+        disposition = client.get(f"/api/v1/history/{history_id}/export.md").headers[
+            "content-disposition"
+        ]
+        assert f'filename="{basename}.md"' in disposition
+
+    def test_export_name_unknown_history_id_returns_404(self):
+        response = client.get("/api/v1/history/" + "0" * 32 + "/export-name")
+        assert response.status_code == 404
 
     def test_export_unknown_history_id_returns_404(self):
         response = client.get("/api/v1/history/" + "0" * 32 + "/export.md")

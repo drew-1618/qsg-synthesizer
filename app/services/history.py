@@ -85,12 +85,13 @@ def _load_all_summaries() -> List[HistorySummary]:
                     created_at=data["created_at"],
                     device_a_name=data["device_a_name"],
                     device_b_name=data["device_b_name"],
-                    installation_friction_score_device_a=data["battlecard"][
+                    installation_friction_score_device_a=data["battlecard"].get(
                         "installation_friction_score_device_a"
-                    ],
-                    installation_friction_score_device_b=data["battlecard"][
+                    ),
+                    installation_friction_score_device_b=data["battlecard"].get(
                         "installation_friction_score_device_b"
-                    ],
+                    ),
+                    perspective=data["battlecard"].get("perspective"),
                 )
             )
         except (ValueError, KeyError, TypeError, OSError):

@@ -4,6 +4,7 @@ tests/conftest.py's autouse fixture redirects history.HISTORY_DIR to a
 per-test tmp_path, so these never touch the real repo's data/ directory.
 """
 
+import json
 from pathlib import Path
 
 from app.schemas import BattlecardResponse
@@ -103,3 +104,14 @@ def test_corrupt_and_incomplete_records_are_skipped_and_not_counted():
     assert history.count_comparisons() == 1
     assert history.get_comparison("a" * 32) is None
     assert history.get_comparison("b" * 32) is None
+
+
+def test_records_saved_before_perspectives_still_load():
+    record = history.save_comparison(_make_battlecard())
+    path = history.HISTORY_DIR / f"{record.id}.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["battlecard"].pop("perspective", None)
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    assert history.get_comparison(record.id).battlecard.perspective is None
+    assert history.list_comparisons()[0].perspective is None
