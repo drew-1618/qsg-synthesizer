@@ -178,4 +178,16 @@
     0%, 100% { opacity: 1; }
     50% { opacity: 0.25; }
   }
+
+  /* LED guide: dots sit on the dark bezel and glow like the real indicators. */
+  .led-panel .led-dot {
+    width: 0.875rem;
+    height: 0.875rem;
+    box-shadow: 0 0 0 1px rgb(255 255 255 / 0.15);
+  }
+  .led-panel .led-dot--green { box-shadow: 0 0 10px 2px color-mix(in srgb, var(--color-led-green) 55%, transparent); }
+  .led-panel .led-dot--amber { box-shadow: 0 0 10px 2px color-mix(in srgb, var(--color-led-amber) 55%, transparent); }
+  .led-panel .led-dot--red { box-shadow: 0 0 10px 2px color-mix(in srgb, var(--color-led-red) 55%, transparent); }
+  .led-panel .led-dot--blue { box-shadow: 0 0 10px 2px color-mix(in srgb, var(--color-led-blue) 55%, transparent); }
+  .led-panel .led-dot--white { box-shadow: 0 0 10px 2px color-mix(in srgb, var(--color-led-white) 45%, transparent); }
 }

@@ -15,7 +15,7 @@
 
   <!-- Header -->
   <header class="bg-bezel text-bezel-ink sticky top-0 z-10">
-    <div class="max-w-6xl mx-auto px-4 py-3 flex items-center gap-3">
+    <div class="max-w-6xl mx-auto px-4 h-16 flex items-center gap-3">
       <svg class="w-8 h-8 shrink-0" viewBox="0 0 32 32" aria-hidden="true">
         <rect x="1" y="1" width="30" height="30" rx="6" fill="none" stroke="currentColor" stroke-opacity="0.45" stroke-width="2" />
         <circle cx="9" cy="16" r="3" class="fill-led-green" />
@@ -82,127 +82,70 @@
       </button>
     </section>
 
-    <!-- Results section -->
-    <section id="results" class="hidden space-y-8">
+    <!-- Results: one comparative surface, rendered by renderResults() in app.js -->
+    <section id="results" aria-labelledby="results-heading" class="hidden space-y-10">
 
-      <div class="flex items-center justify-between">
-        <h2 class="text-lg font-bold text-slate-900">Results</h2>
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <h2 id="results-heading" tabindex="-1" class="font-heading font-semibold text-xl focus:outline-none">Results</h2>
         <div class="flex items-center gap-2">
-          <a id="export-md-btn" href="#"
-             class="text-sm font-medium bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 px-3.5 py-2 rounded-md transition-colors pointer-events-none opacity-40">
+          <a id="export-md-btn" href="#" aria-disabled="true" tabindex="-1"
+             class="text-sm font-medium bg-plate border border-line hover:bg-white px-3.5 py-2 rounded-control transition-colors pointer-events-none opacity-40">
             Export Markdown
           </a>
-          <a id="export-pdf-btn" href="#"
-             class="text-sm font-medium bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 px-3.5 py-2 rounded-md transition-colors pointer-events-none opacity-40">
+          <a id="export-pdf-btn" href="#" aria-disabled="true" tabindex="-1"
+             class="text-sm font-medium bg-plate border border-line hover:bg-white px-3.5 py-2 rounded-control transition-colors pointer-events-none opacity-40">
             Export PDF
           </a>
         </div>
       </div>
 
-      <!-- Friction scorecards -->
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div class="bg-white rounded-xl border border-slate-200 p-6">
-          <p class="text-xs font-semibold uppercase tracking-wide text-slate-400">Installation Friction Index</p>
-          <p id="friction-name-a" class="text-lg font-bold text-slate-900 mt-1"></p>
-          <div class="flex items-end gap-2 mt-3">
-            <span id="friction-score-a" class="text-3xl font-extrabold text-slate-900"></span>
-            <span class="text-sm text-slate-400 mb-1">/ 10</span>
-          </div>
-          <div class="w-full bg-slate-100 rounded-full h-2.5 mt-3">
-            <div id="friction-bar-a" class="h-2.5 rounded-full transition-[width]" style="width:0%"></div>
-          </div>
+      <section aria-labelledby="friction-heading" class="space-y-3">
+        <div>
+          <h3 id="friction-heading" class="font-heading font-semibold text-lg">Installation friction</h3>
+          <p class="text-sm text-ink-muted">Lower is easier to install.</p>
         </div>
-        <div class="bg-white rounded-xl border border-slate-200 p-6">
-          <p class="text-xs font-semibold uppercase tracking-wide text-slate-400">Installation Friction Index</p>
-          <p id="friction-name-b" class="text-lg font-bold text-slate-900 mt-1"></p>
-          <div class="flex items-end gap-2 mt-3">
-            <span id="friction-score-b" class="text-3xl font-extrabold text-slate-900"></span>
-            <span class="text-sm text-slate-400 mb-1">/ 10</span>
-          </div>
-          <div class="w-full bg-slate-100 rounded-full h-2.5 mt-3">
-            <div id="friction-bar-b" class="h-2.5 rounded-full transition-[width]" style="width:0%"></div>
-          </div>
-        </div>
-      </div>
+        <div id="results-verdict" class="grid grid-cols-1 md:grid-cols-2 gap-5"></div>
+      </section>
 
-      <!-- Sales talk track -->
-      <div class="bg-indigo-50 border-l-4 border-indigo-500 rounded-lg p-5 relative">
-        <p class="text-xs font-semibold uppercase tracking-wide text-indigo-500 mb-1.5">
-          Competitive Sales Talk Track
-        </p>
-        <p id="sales-talk-track" class="text-slate-700 text-sm leading-relaxed pr-44"></p>
-        <button id="copy-btn" type="button"
-                class="absolute top-4 right-4 text-sm font-medium bg-white border border-indigo-200 text-indigo-600 hover:bg-indigo-100 px-3.5 py-2 rounded-md transition-colors">
-          Copy to Clipboard
-        </button>
-      </div>
+      <section aria-labelledby="talk-track-heading" class="space-y-3">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <h3 id="talk-track-heading" class="font-heading font-semibold text-lg">Sales talk track</h3>
+          <button id="copy-btn" type="button"
+                  class="text-sm font-medium bg-plate border border-line hover:bg-white px-3.5 py-2 rounded-control transition-colors">
+            Copy talk track
+          </button>
+        </div>
+        <p id="sales-talk-track" class="max-w-[65ch] text-base leading-relaxed"></p>
+      </section>
 
-      <!-- Comparison matrix -->
-      <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
-        <p class="text-xs font-semibold uppercase tracking-wide text-slate-400 px-6 pt-5">
-          Side-by-Side Comparison
-        </p>
-        <div class="overflow-x-auto p-6 pt-3">
-          <table class="w-full text-sm border-collapse">
-            <thead>
-              <tr class="text-left text-slate-500 border-b border-slate-200">
-                <th class="py-2 pr-4 font-medium w-40">Attribute</th>
-                <th id="col-header-a" class="py-2 pr-4 font-semibold text-slate-800"></th>
-                <th id="col-header-b" class="py-2 pr-4 font-semibold text-slate-800"></th>
-              </tr>
-            </thead>
-            <tbody id="comparison-table-body" class="divide-y divide-slate-100"></tbody>
-          </table>
-        </div>
-      </div>
+      <section aria-labelledby="specs-heading" class="space-y-3">
+        <h3 id="specs-heading" class="font-heading font-semibold text-lg">Side-by-side specs</h3>
+        <table class="w-full table-fixed border-separate border-spacing-0 text-sm max-md:block">
+          <colgroup>
+            <col class="w-1/4" />
+            <col />
+            <col />
+          </colgroup>
+          <thead class="max-md:sr-only">
+            <tr class="text-left">
+              <th scope="col" class="sticky top-16 z-[5] bg-panel border-b border-line py-2 pr-3 font-medium text-ink-muted">Spec</th>
+              <th scope="col" id="col-header-a" class="sticky top-16 z-[5] bg-panel border-b border-line py-2 pr-3 font-semibold break-words"></th>
+              <th scope="col" id="col-header-b" class="sticky top-16 z-[5] bg-panel border-b border-line py-2 pr-3 font-semibold break-words"></th>
+            </tr>
+          </thead>
+          <tbody id="comparison-table-body" class="max-md:block"></tbody>
+        </table>
+      </section>
 
-      <!-- Competitive advantages -->
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div class="bg-white rounded-xl border border-slate-200 p-6">
-          <p class="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-3">
-            Competitive Advantages &mdash; <span id="advantage-name-a"></span>
-          </p>
-          <ul id="advantage-list-a" class="space-y-2 text-sm"></ul>
-        </div>
-        <div class="bg-white rounded-xl border border-slate-200 p-6">
-          <p class="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-3">
-            Competitive Advantages &mdash; <span id="advantage-name-b"></span>
-          </p>
-          <ul id="advantage-list-b" class="space-y-2 text-sm"></ul>
-        </div>
-      </div>
+      <section aria-labelledby="assessment-heading" class="space-y-3">
+        <h3 id="assessment-heading" class="font-heading font-semibold text-lg">Advantages and risks</h3>
+        <div id="results-assessment" class="grid grid-cols-1 md:grid-cols-2 gap-5"></div>
+      </section>
 
-      <!-- Field deployment risks -->
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div class="bg-white rounded-xl border border-slate-200 p-6">
-          <p class="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-3">
-            Field-Deployment Risks &mdash; <span id="risk-name-a"></span>
-          </p>
-          <ul id="risk-list-a" class="space-y-2 text-sm"></ul>
-        </div>
-        <div class="bg-white rounded-xl border border-slate-200 p-6">
-          <p class="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-3">
-            Field-Deployment Risks &mdash; <span id="risk-name-b"></span>
-          </p>
-          <ul id="risk-list-b" class="space-y-2 text-sm"></ul>
-        </div>
-      </div>
-
-      <!-- LED status -->
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div class="bg-white rounded-xl border border-slate-200 p-6">
-          <p class="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-3">
-            LED Status &mdash; <span id="led-name-a"></span>
-          </p>
-          <ul id="led-list-a" class="space-y-2 text-sm"></ul>
-        </div>
-        <div class="bg-white rounded-xl border border-slate-200 p-6">
-          <p class="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-3">
-            LED Status &mdash; <span id="led-name-b"></span>
-          </p>
-          <ul id="led-list-b" class="space-y-2 text-sm"></ul>
-        </div>
-      </div>
+      <section aria-labelledby="led-heading" class="space-y-3">
+        <h3 id="led-heading" class="font-heading font-semibold text-lg">LED guide</h3>
+        <div id="results-leds" class="led-panel grid grid-cols-1 md:grid-cols-2 gap-6 bg-bezel text-bezel-ink rounded-control p-5"></div>
+      </section>
 
     </section>
   </main>
