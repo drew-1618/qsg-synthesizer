@@ -1,4 +1,13 @@
-const state = { fileA: null, fileB: null, busy: false };
+const state = { busy: false, slots: { a: emptySlot(), b: emptySlot() } };
+
+// One slot holds either an uploaded file or pasted text; `mode` says which is used.
+function emptySlot() {
+  return { mode: "file", file: null, text: "", name: "" };
+}
+
+function slotHasContent(slot) {
+  return slot.mode === "file" ? Boolean(slot.file) : slot.text.trim().length > 0;
+}
 // ---- Theme ----
 // Follows the OS until the user picks one; the pick is remembered per browser.
 const THEME_STORAGE_KEY = "qsg-theme";
@@ -152,9 +161,12 @@ function describeFailure(res, data, fallback) {
   }
   if (res.status >= 500) return "The server hit an error. Try again in a moment.";
   if (res.status === 413) return `${detail || "That file is too large."} Choose a smaller file.`;
-  if (res.status === 422) return `${detail || "That document could not be read."} Use a PDF with selectable text.`;
+  if (res.status === 422) return `${detail || "That document could not be read."} Use a document with selectable text.`;
   if (res.status === 404) return `${detail || fallback} It may have been deleted. Open History to pick another.`;
-  if (res.status === 400) return `${detail || fallback} Choose a different PDF.`;
+  if (res.status === 400 && /exceeded maximum size/.test(detail)) {
+    return "That pasted text is too long. Paste a shorter excerpt or upload it as a file.";
+  }
+  if (res.status === 400) return `${detail || fallback} Choose a different file.`;
   return detail || fallback;
 }
 
@@ -163,9 +175,15 @@ function describeException(err, fallback) {
 }
 
 // ---- Device slots ----
-// One slot per device. The drop surface is a native <label> for a visually
-// hidden file input, so click, Enter/Space and focus all come from the browser;
-// the Remove button sits outside the label to avoid nesting controls.
+// Each slot takes a file or pasted text. The drop surface is a native <label>
+// for a visually hidden file input, so click, Enter/Space and focus all come
+// from the browser; the Remove button sits outside the label to avoid nesting
+// controls.
+const ACCEPTED_EXTENSIONS = [".pdf", ".docx", ".md", ".markdown", ".txt"];
+// Servers cap a single form field at about 1 MB; this stays under it even at
+// 3 bytes per character.
+const MAX_PASTE_CHARS = 300000;
+
 function renderDeviceSlot(letter) {
   const id = letter.toLowerCase();
   return `
@@ -180,59 +198,110 @@ function renderDeviceSlot(letter) {
           Remove<span class="sr-only"> file for Device ${letter}</span>
         </button>
       </div>
-      <label id="dropzone-${id}" for="file-${id}"
-             class="dropzone block cursor-pointer border-2 border-dashed border-line bg-plate rounded-control p-6 text-center transition-colors hover:border-action has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-action">
-        <span class="sr-only">Device ${letter} quick start guide (PDF)</span>
-        <input type="file" id="file-${id}" accept="application/pdf" class="sr-only" />
-        <svg class="w-8 h-8 mx-auto text-ink-muted mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8l-5-5zM14 3v5h5" />
-        </svg>
-        <span class="block text-ink-muted group-data-[state=filled]:hidden">
-          Drop a PDF here or <span class="font-medium text-action underline underline-offset-2">choose a file</span>
-        </span>
-        <span id="filename-${id}" class="block font-mono text-sm break-all"></span>
-      </label>
+      <fieldset class="mb-2 flex gap-5 text-sm">
+        <legend class="sr-only">Source for Device ${letter}</legend>
+        <label class="inline-flex items-center gap-2 cursor-pointer">
+          <input type="radio" name="source-${id}" value="file" checked class="accent-action" /> Upload file
+        </label>
+        <label class="inline-flex items-center gap-2 cursor-pointer">
+          <input type="radio" name="source-${id}" value="text" class="accent-action" /> Paste text
+        </label>
+      </fieldset>
+      <div id="pane-file-${id}">
+        <label id="dropzone-${id}" for="file-${id}"
+               class="dropzone block cursor-pointer border-2 border-dashed border-line bg-plate rounded-control p-6 text-center transition-colors hover:border-action has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-action">
+          <span class="sr-only">Device ${letter} document (PDF, Word, Markdown or text)</span>
+          <input type="file" id="file-${id}" accept="${ACCEPTED_EXTENSIONS.join(",")}" class="sr-only" />
+          <svg class="w-8 h-8 mx-auto text-ink-muted mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8l-5-5zM14 3v5h5" />
+          </svg>
+          <span class="block text-ink-muted group-data-[state=filled]:hidden">
+            Drop a file here or <span class="font-medium text-action underline underline-offset-2">choose one</span>
+          </span>
+          <span class="block text-sm text-ink-muted group-data-[state=filled]:hidden">PDF, Word, Markdown or text</span>
+          <span id="filename-${id}" class="block font-mono text-sm break-all"></span>
+        </label>
+      </div>
+      <div id="pane-text-${id}" class="hidden space-y-3">
+        <div>
+          <label for="text-${id}" class="sr-only">Device ${letter} document text</label>
+          <textarea id="text-${id}" name="text-${id}" rows="8" maxlength="${MAX_PASTE_CHARS}" spellcheck="false"
+                    placeholder="Paste the guide or spec sheet text…"
+                    class="w-full font-mono text-sm bg-plate border border-line rounded-control p-3 placeholder:text-ink-muted"></textarea>
+        </div>
+        <div>
+          <label for="name-${id}" class="block text-sm font-medium mb-1">Document name <span class="font-normal text-ink-muted">(optional)</span></label>
+          <input type="text" id="name-${id}" name="name-${id}" maxlength="100" autocomplete="off" placeholder="Pasted text"
+                 class="w-full text-sm bg-plate border border-line rounded-control px-3 py-2 placeholder:text-ink-muted" />
+        </div>
+      </div>
     </div>`;
 }
 
 document.getElementById("device-slots").innerHTML = ["A", "B"].map(renderDeviceSlot).join("");
 
-function wireDropzone(zoneId, inputId, filenameId, clearId, key) {
-  const zone = document.getElementById(zoneId);
-  const input = document.getElementById(inputId);
-  const filenameEl = document.getElementById(filenameId);
-  const clearBtn = document.getElementById(clearId);
-  const slot = zone.closest("[data-state]");
-  const led = slot.querySelector(".led-dot");
+function wireSlot(letter) {
+  const id = letter.toLowerCase();
+  const slotState = state.slots[id];
+  const root = document.getElementById(`slot-${id}`);
+  const zone = document.getElementById(`dropzone-${id}`);
+  const fileInput = document.getElementById(`file-${id}`);
+  const filenameEl = document.getElementById(`filename-${id}`);
+  const clearBtn = document.getElementById(`clear-${id}`);
+  const led = document.getElementById(`led-${id}`);
+  const textArea = document.getElementById(`text-${id}`);
+  const nameInput = document.getElementById(`name-${id}`);
+  const radios = root.querySelectorAll(`input[name="source-${id}"]`);
 
-  const setState = (filled) => {
-    slot.dataset.state = filled ? "filled" : "empty";
+  // Syncs everything derived from the slot's state: LED, Remove button, panes.
+  const refresh = () => {
+    const filled = slotHasContent(slotState);
     led.classList.toggle("led-dot--green", filled);
     led.classList.toggle("led-dot--off", !filled);
-    clearBtn.classList.toggle("hidden", !filled);
+    root.dataset.state = slotState.file ? "filled" : "empty";
+    clearBtn.classList.toggle("hidden", slotState.mode !== "file" || !slotState.file);
+    document.getElementById(`pane-file-${id}`).classList.toggle("hidden", slotState.mode !== "file");
+    document.getElementById(`pane-text-${id}`).classList.toggle("hidden", slotState.mode !== "text");
+    radios.forEach((radio) => {
+      radio.checked = radio.value === slotState.mode;
+    });
   };
 
   const setFile = (file) => {
     if (!file || state.busy) return;
-    if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
-      showError(`"${file.name}" is not a PDF. Choose a PDF quick start guide.`);
+    if (!ACCEPTED_EXTENSIONS.some((ext) => file.name.toLowerCase().endsWith(ext))) {
+      showError(`"${file.name}" is not a supported file type. Use a PDF, Word (.docx), Markdown or text file.`);
       return;
     }
     clearError();
-    state[key] = file;
+    slotState.file = file;
+    slotState.mode = "file";
     filenameEl.textContent = file.name;
-    setState(true);
+    refresh();
   };
 
   const clearFile = () => {
-    state[key] = null;
+    slotState.file = null;
     filenameEl.textContent = "";
-    input.value = "";
-    setState(false);
+    fileInput.value = "";
+    refresh();
   };
 
-  input.addEventListener("change", (e) => setFile(e.target.files[0]));
+  fileInput.addEventListener("change", (e) => setFile(e.target.files[0]));
   clearBtn.addEventListener("click", clearFile);
+  radios.forEach((radio) =>
+    radio.addEventListener("change", () => {
+      slotState.mode = radio.value;
+      refresh();
+    })
+  );
+  textArea.addEventListener("input", () => {
+    slotState.text = textArea.value;
+    refresh();
+  });
+  nameInput.addEventListener("input", () => {
+    slotState.name = nameInput.value;
+  });
 
   ["dragenter", "dragover"].forEach((evt) =>
     zone.addEventListener(evt, (e) => {
@@ -251,8 +320,8 @@ function wireDropzone(zoneId, inputId, filenameId, clearId, key) {
   return setFile;
 }
 
-const setFileA = wireDropzone("dropzone-a", "file-a", "filename-a", "clear-a", "fileA");
-const setFileB = wireDropzone("dropzone-b", "file-b", "filename-b", "clear-b", "fileB");
+const setFileA = wireSlot("A");
+const setFileB = wireSlot("B");
 
 // ---- Load Sample QSGs ----
 function base64ToFile(base64, filename) {
@@ -364,8 +433,8 @@ function setLoading(isLoading) {
   document.getElementById("synthesize-label").textContent = isLoading ? "Comparing…" : "Compare devices";
   document.getElementById("synthesize-btn").disabled = isLoading;
   document.getElementById("load-samples-btn").disabled = isLoading;
-  ["file-a", "file-b", "clear-a", "clear-b"].forEach((id) => {
-    document.getElementById(id).disabled = isLoading;
+  document.querySelectorAll("#device-slots input, #device-slots textarea, #device-slots button").forEach((el) => {
+    el.disabled = isLoading;
   });
 
   const status = document.getElementById("compare-status");
@@ -392,8 +461,11 @@ function setLoading(isLoading) {
 }
 
 async function synthesize() {
-  if (!state.fileA || !state.fileB) {
-    showError("Add a quick start guide PDF for both Device A and Device B.");
+  const missing = ["a", "b"]
+    .filter((id) => !slotHasContent(state.slots[id]))
+    .map((id) => `Device ${id.toUpperCase()}`);
+  if (missing.length > 0) {
+    showError(`Add a document or paste text for ${missing.join(" and ")}.`);
     return;
   }
   clearError();
@@ -401,9 +473,16 @@ async function synthesize() {
   document.getElementById("results").classList.add("hidden");
   try {
     const formData = new FormData();
-    formData.append("device_a_pdf", state.fileA);
-    formData.append("device_b_pdf", state.fileB);
-    const res = await fetch("/api/v1/compare-pdfs", { method: "POST", body: formData });
+    for (const id of ["a", "b"]) {
+      const slot = state.slots[id];
+      if (slot.mode === "file") {
+        formData.append(`device_${id}_file`, slot.file);
+      } else {
+        formData.append(`device_${id}_text`, slot.text);
+        if (slot.name.trim()) formData.append(`device_${id}_name`, slot.name.trim());
+      }
+    }
+    const res = await fetch("/api/v1/compare", { method: "POST", body: formData });
     const data = await readJson(res);
     if (!res.ok) throw new Error(describeFailure(res, data, "The comparison failed."));
     setExportTarget(data.history_id);

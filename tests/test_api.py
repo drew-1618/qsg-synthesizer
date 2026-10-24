@@ -187,6 +187,165 @@ class TestComparePdfs:
         assert response.status_code == 413
 
 
+class TestCompareDocuments:
+    """POST /api/v1/compare: each side is an uploaded file or pasted text."""
+
+    def _sample(self, name):
+        return (SAMPLE_DOCS_DIR / name).read_bytes()
+
+    def test_two_markdown_files(self):
+        response = client.post(
+            "/api/v1/compare",
+            files={
+                "device_a_file": (
+                    "a.md",
+                    self._sample("device_a_qsg.md"),
+                    "text/markdown",
+                ),
+                "device_b_file": (
+                    "b.md",
+                    self._sample("device_b_qsg.md"),
+                    "text/markdown",
+                ),
+            },
+        )
+        assert response.status_code == 200
+        assert "history_id" in response.json()
+
+    def test_two_pasted_texts_with_names(self):
+        response = client.post(
+            "/api/v1/compare",
+            data={
+                "device_a_text": self._sample("device_a_qsg.md").decode(),
+                "device_a_name": "Our guide",
+                "device_b_text": self._sample("device_b_qsg.md").decode(),
+            },
+        )
+        assert response.status_code == 200
+
+    def test_file_and_pasted_text_can_be_mixed(self):
+        response = client.post(
+            "/api/v1/compare",
+            data={"device_b_text": self._sample("device_b_qsg.md").decode()},
+            files={
+                "device_a_file": (
+                    "a.pdf",
+                    self._sample("device_a_qsg.pdf"),
+                    "application/pdf",
+                )
+            },
+        )
+        assert response.status_code == 200
+
+    def test_docx_upload_is_accepted(self):
+        import io
+
+        import docx
+
+        document = docx.Document()
+        for line in self._sample("device_a_qsg.md").decode().splitlines():
+            document.add_paragraph(line)
+        buffer = io.BytesIO()
+        document.save(buffer)
+        response = client.post(
+            "/api/v1/compare",
+            data={"device_b_text": self._sample("device_b_qsg.md").decode()},
+            files={
+                "device_a_file": (
+                    "a.docx",
+                    buffer.getvalue(),
+                    "application/octet-stream",
+                )
+            },
+        )
+        assert response.status_code == 200
+
+    def test_file_and_text_for_the_same_side_is_422(self):
+        response = client.post(
+            "/api/v1/compare",
+            data={
+                "device_a_text": self._sample("device_a_qsg.md").decode(),
+                "device_b_text": self._sample("device_b_qsg.md").decode(),
+            },
+            files={
+                "device_a_file": (
+                    "a.md",
+                    self._sample("device_a_qsg.md"),
+                    "text/markdown",
+                )
+            },
+        )
+        assert response.status_code == 422
+        assert "Device A" in response.json()["detail"]
+
+    def test_missing_side_is_422(self):
+        response = client.post(
+            "/api/v1/compare",
+            data={"device_a_text": self._sample("device_a_qsg.md").decode()},
+        )
+        assert response.status_code == 422
+        assert "Device B" in response.json()["detail"]
+
+    def test_blank_pasted_text_counts_as_missing(self):
+        response = client.post(
+            "/api/v1/compare",
+            data={
+                "device_a_text": "   \n  ",
+                "device_b_text": self._sample("device_b_qsg.md").decode(),
+            },
+        )
+        assert response.status_code == 422
+
+    def test_unsupported_extension_is_400_with_hint(self):
+        response = client.post(
+            "/api/v1/compare",
+            data={"device_b_text": self._sample("device_b_qsg.md").decode()},
+            files={
+                "device_a_file": ("deck.pptx", b"x" * 100, "application/octet-stream")
+            },
+        )
+        assert response.status_code == 400
+        assert "not a supported file type" in response.json()["detail"]
+        assert "Word (.docx)" in response.json()["detail"]
+
+    def test_corrupt_docx_is_400_naming_the_file_kind(self):
+        response = client.post(
+            "/api/v1/compare",
+            data={"device_b_text": self._sample("device_b_qsg.md").decode()},
+            files={
+                "device_a_file": ("a.docx", b"not a zip", "application/octet-stream")
+            },
+        )
+        assert response.status_code == 400
+        assert "could not be read as a Word document" in response.json()["detail"]
+
+    def test_too_little_pasted_text_is_422_and_not_saved(self):
+        response = client.post(
+            "/api/v1/compare",
+            data={
+                "device_a_text": "too short",
+                "device_b_text": self._sample("device_b_qsg.md").decode(),
+            },
+        )
+        assert response.status_code == 422
+        assert client.get("/api/v1/history").json()["items"] == []
+
+    def test_compare_pdfs_still_rejects_other_formats(self):
+        response = client.post(
+            "/api/v1/compare-pdfs",
+            files={
+                "device_a_pdf": ("a.md", b"# hi", "text/markdown"),
+                "device_b_pdf": (
+                    "b.pdf",
+                    self._sample("device_b_qsg.pdf"),
+                    "application/pdf",
+                ),
+            },
+        )
+        assert response.status_code == 400
+        assert "is not a PDF file" in response.json()["detail"]
+
+
 class TestPdfUploadErrors:
     def test_corrupt_pdf_returns_400(self):
         response = client.post(

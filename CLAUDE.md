@@ -31,8 +31,11 @@ docker compose up --build                        # requires a .env file (cp .env
   log the attempted username, never the password.
 
 ## Pipeline (how a request flows)
-`POST /api/v1/compare-pdfs` (or `/compare-text`) in `app/main.py`:
-1. `app/tools/pdf_parser.py` turns PDF bytes into Markdown via pymupdf4llm and strips boilerplate.
+`POST /api/v1/compare` (the UI's endpoint; each side is an upload or pasted text), or the older
+`/compare-pdfs` / `/compare-text`, in `app/main.py`:
+1. `app/tools/document_parser.py` turns a PDF, `.docx`, Markdown or text upload into Markdown
+   (PDFs via `pdf_parser.py` / pymupdf4llm; `.docx` is walked in body order with a zip-bomb guard)
+   and every format goes through `text_cleaning.clean_text()` to strip boilerplate.
 2. `orchestrator.extract_device_spec()` runs once per device:
    - `extract_qsg_fields` produces a raw `QSGExtraction` (`app/models/schemas.py`) via an LLM
      (Anthropic or Gemini, chosen by `_select_llm_provider` / `LLM_PROVIDER`), using
