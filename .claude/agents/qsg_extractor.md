@@ -50,6 +50,16 @@ Read the supplied document text and extract only these fields:
   ports and provisioning (e.g. `"USB 3.0 port for external storage"`,
   `"2x FXS ports for analog phone service (VoIP)"`, `"Mesh Wi-Fi support"`).
   Omit anything not explicitly stated.
+- `step_count`: the number of distinct numbered/sequential setup steps in the
+  document, as a non-negative integer, or `null` if the document has no
+  discernible procedure.
+- `setup_difficulty`: exactly one of `"easy"`, `"moderate"`, `"hard"` — your
+  judgment of how hard the documented setup is for a first-time installer —
+  or `null` if the document gives too little to judge.
+- `strengths`: a list of short strings naming what the document/device makes
+  easy about setup. Use only what the document states.
+- `gaps`: a list of short strings naming what the document leaves out or
+  makes hard (missing default credentials, unexplained LED states, etc.).
 
 ## Hard constraints
 

@@ -496,6 +496,49 @@ class TestLlmFailureModes:
         (_, source), _ = self._run_gemini('{"device_name": 5, "led_indicators": "x"}')
         assert source == "heuristic"
 
+    def test_gemini_assessment_is_carried_to_device_spec(self):
+        payload = {
+            **_FAKE_EXTRACTION,
+            "step_count": 6,
+            "setup_difficulty": "moderate",
+            "strengths": ["QR onboarding"],
+            "gaps": ["No default credentials listed"],
+        }
+        (extraction, source), _ = self._run_gemini(json.dumps(payload))
+        spec = orchestrator._normalize_to_device_spec(extraction)
+        assert source == "llm"
+        assert (spec.step_count, spec.setup_difficulty) == (6, "moderate")
+        assert spec.strengths == ["QR onboarding"]
+        assert spec.gaps == ["No default credentials listed"]
+
+    def test_gemini_malformed_assessment_is_dropped_not_fatal(self):
+        payload = {
+            **_FAKE_EXTRACTION,
+            "step_count": "lots",
+            "setup_difficulty": "impossible",
+            "strengths": ["QR onboarding"],
+        }
+        (extraction, source), _ = self._run_gemini(json.dumps(payload))
+        assert source == "llm"
+        assert extraction.device_name == "NovaFiber GX400"
+        assert extraction.step_count is None
+        assert extraction.setup_difficulty is None
+        assert extraction.strengths == ["QR onboarding"]
+
+    def test_gemini_negative_step_count_is_dropped(self):
+        (extraction, source), _ = self._run_gemini(
+            json.dumps({**_FAKE_EXTRACTION, "step_count": -3})
+        )
+        assert source == "llm" and extraction.step_count is None
+
+    def test_gemini_json_array_falls_back(self):
+        (_, source), _ = self._run_gemini("[1, 2, 3]")
+        assert source == "heuristic"
+
+    def test_gemini_empty_text_falls_back(self):
+        (_, source), _ = self._run_gemini(None)
+        assert source == "heuristic"
+
     def test_gemini_non_json_falls_back(self):
         (_, source), _ = self._run_gemini("Sorry, I can't help with that.")
         assert source == "heuristic"
