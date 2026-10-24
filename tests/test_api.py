@@ -199,6 +199,35 @@ class TestPdfUploadErrors:
         assert "could not be read as a PDF" in response.json()["detail"]
 
 
+class TestEmptyDocuments:
+    def test_image_only_pdf_returns_422_and_is_not_saved(self):
+        import pymupdf
+
+        doc = pymupdf.open()
+        doc.new_page()
+        blank_pdf = doc.tobytes()
+        doc.close()
+
+        response = client.post(
+            "/api/v1/compare-pdfs",
+            files={
+                "device_a_pdf": ("a.pdf", blank_pdf, "application/pdf"),
+                "device_b_pdf": ("b.pdf", blank_pdf, "application/pdf"),
+            },
+        )
+        assert response.status_code == 422
+        assert "no extractable text" in response.json()["detail"]
+        assert client.get("/api/v1/history").json()["total"] == 0
+
+    def test_whitespace_only_text_returns_422_and_is_not_saved(self):
+        response = client.post(
+            "/api/v1/compare-text",
+            json={"device_a_text": " \n\t ", "device_b_text": "x"},
+        )
+        assert response.status_code == 422
+        assert client.get("/api/v1/history").json()["total"] == 0
+
+
 class TestHistory:
     def _post_comparison(self):
         device_a_text = (SAMPLE_DOCS_DIR / "device_a_qsg.md").read_text(

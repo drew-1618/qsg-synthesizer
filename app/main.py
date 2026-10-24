@@ -54,6 +54,7 @@ STATIC_DIR = BASE_DIR / "app" / "static"
 SAMPLE_DOCS_DIR = BASE_DIR / "sample_docs"
 
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20MB per PDF
+MIN_TEXT_CHARS = 50  # below this (ignoring whitespace) there is nothing to extract from
 MAX_TEXT_CHARS = 2_000_000  # cap for compare-text's raw device_*_text fields
 
 # Compare endpoints run the extraction+synthesis pipeline (the expensive
@@ -161,11 +162,26 @@ class CompareTextRequest(BaseModel):
     dependencies=[Depends(compare_rate_limiter)],
 )
 def compare_text(payload: CompareTextRequest) -> BattlecardResponse:
+    _require_text(payload.device_a_text, payload.device_a_name)
+    _require_text(payload.device_b_text, payload.device_b_name)
     device_a = extract_device_spec(payload.device_a_text, payload.device_a_name)
     device_b = extract_device_spec(payload.device_b_text, payload.device_b_name)
     battlecard = synthesize_battlecard(device_a, device_b)
     history.save_comparison(battlecard)
     return battlecard
+
+
+def _require_text(text: str, name: str) -> str:
+    """Reject documents with no usable text rather than scoring an empty device."""
+    if len("".join(text.split())) < MIN_TEXT_CHARS:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"'{name}' contains no extractable text "
+                "(is it a scanned or image-only document?)."
+            ),
+        )
+    return text
 
 
 def _read_pdf_upload(upload: UploadFile) -> str:
@@ -181,7 +197,7 @@ def _read_pdf_upload(upload: UploadFile) -> str:
             detail=f"'{upload.filename}' exceeds the {max_mb}MB upload limit.",
         )
     try:
-        return extract_text_from_pdf(contents)
+        text = extract_text_from_pdf(contents)
     except Exception:
         logger.warning(
             "Could not parse upload '%s' as a PDF", upload.filename, exc_info=True
@@ -189,6 +205,7 @@ def _read_pdf_upload(upload: UploadFile) -> str:
         raise HTTPException(
             status_code=400, detail=f"'{upload.filename}' could not be read as a PDF."
         )
+    return _require_text(text, upload.filename or "upload")
 
 
 @router.post(
