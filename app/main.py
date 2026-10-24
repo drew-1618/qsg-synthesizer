@@ -180,7 +180,15 @@ def _read_pdf_upload(upload: UploadFile) -> str:
             status_code=413,
             detail=f"'{upload.filename}' exceeds the {max_mb}MB upload limit.",
         )
-    return extract_text_from_pdf(contents)
+    try:
+        return extract_text_from_pdf(contents)
+    except Exception:
+        logger.warning(
+            "Could not parse upload '%s' as a PDF", upload.filename, exc_info=True
+        )
+        raise HTTPException(
+            status_code=400, detail=f"'{upload.filename}' could not be read as a PDF."
+        )
 
 
 @router.post(

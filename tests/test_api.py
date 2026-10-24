@@ -186,6 +186,19 @@ class TestComparePdfs:
         assert response.status_code == 413
 
 
+class TestPdfUploadErrors:
+    def test_corrupt_pdf_returns_400(self):
+        response = client.post(
+            "/api/v1/compare-pdfs",
+            files={
+                "device_a_pdf": ("a.pdf", b"not really a pdf", "application/pdf"),
+                "device_b_pdf": ("b.pdf", b"not really a pdf", "application/pdf"),
+            },
+        )
+        assert response.status_code == 400
+        assert "could not be read as a PDF" in response.json()["detail"]
+
+
 class TestHistory:
     def _post_comparison(self):
         device_a_text = (SAMPLE_DOCS_DIR / "device_a_qsg.md").read_text(
