@@ -223,6 +223,32 @@ function setExportTarget(historyId) {
 // now-unsaved battlecard on screen with only its export links disabled.
 function hideResults() {
   document.getElementById("results").classList.add("hidden");
+  showForm();
+}
+
+// While a result is on screen the form collapses into #result-bar, so an empty
+// form never sits above a result it didn't produce. `fromForm` says whether
+// the form still holds the documents behind the result (a fresh compare) or
+// not (opened from history); only then can "Change documents" reopen it.
+function showResultBar(data, { fromForm, createdAt }) {
+  const names = data.comparison_matrix.model_name;
+  document.getElementById("result-bar-title").textContent = `${names.device_a} vs ${names.device_b}`;
+  const mode = data.perspective === "sales" ? "Sales battlecard" : "Neutral comparison";
+  document.getElementById("result-bar-meta").textContent = `${mode} \u00b7 ${formatTimestamp(createdAt)}`;
+  document.getElementById("change-documents-btn").classList.toggle("hidden", !fromForm);
+  document.getElementById("compare-section").classList.add("hidden");
+  document.getElementById("result-bar").classList.remove("hidden");
+}
+
+function showForm() {
+  document.getElementById("result-bar").classList.add("hidden");
+  document.getElementById("compare-section").classList.remove("hidden");
+}
+
+function scrollToForm() {
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  window.scrollTo({ top: 0, behavior: reduceMotion ? "auto" : "smooth" });
+  document.getElementById("file-a").focus({ preventScroll: true });
 }
 
 function escapeHtml(str) {
@@ -688,6 +714,7 @@ async function synthesize() {
     setExportTarget(data.history_id);
     setUrlId(data.history_id);
     await loadHistory();
+    showResultBar(data, { fromForm: true, createdAt: new Date().toISOString() });
     renderResults(data);
   } catch (err) {
     showError(describeException(err, "The comparison failed. Try again."));
@@ -707,9 +734,14 @@ document.getElementById("new-comparison-btn").addEventListener("click", () => {
   setExportTarget(null);
   setUrlId(null);
   renderHistoryList();
-  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  window.scrollTo({ top: 0, behavior: reduceMotion ? "auto" : "smooth" });
-  document.getElementById("file-a").focus({ preventScroll: true });
+  scrollToForm();
+});
+
+// Reopens the form with the documents that produced the result, so one side
+// can be swapped; the result stays below until the next compare.
+document.getElementById("change-documents-btn").addEventListener("click", () => {
+  showForm();
+  scrollToForm();
 });
 
 // ---- History drawer ----
@@ -908,6 +940,7 @@ async function loadHistoryItem(id) {
     const record = await readJson(res);
     if (!res.ok) throw new Error(describeFailure(res, record, "Could not load that comparison."));
     setExportTarget(id);
+    showResultBar(record.battlecard, { fromForm: false, createdAt: record.created_at });
     renderResults(record.battlecard);
     return true;
   } catch (err) {

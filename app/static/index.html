@@ -69,7 +69,7 @@
     </div>
 
     <!-- Compare: choose two guides -->
-    <section aria-labelledby="compare-heading" class="space-y-5">
+    <section id="compare-section" aria-labelledby="compare-heading" class="space-y-5">
       <h2 id="compare-heading" class="font-heading font-semibold text-xl">Add the two documents to compare</h2>
 
       <fieldset id="mode-control" class="space-y-2">
@@ -106,16 +106,32 @@
       <div id="compare-status" role="status" class="min-h-6 text-sm text-ink-muted"></div>
     </section>
 
+    <!-- Stands in for the form while a result is on screen (showResultBar() in app.js) -->
+    <section id="result-bar" aria-label="Current comparison" class="hidden">
+      <div class="flex flex-col sm:flex-row sm:items-center gap-3 rounded-control border border-line bg-plate px-4 py-3">
+        <div class="min-w-0 flex-1">
+          <p id="result-bar-title" class="font-heading font-semibold truncate"></p>
+          <p id="result-bar-meta" class="text-sm text-ink-muted"></p>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <button id="change-documents-btn" type="button"
+                  class="text-sm font-medium bg-plate border border-line hover:bg-plate-hover px-3.5 py-2 rounded-control transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+            Change documents
+          </button>
+          <button id="new-comparison-btn" type="button"
+                  class="text-sm font-medium bg-plate border border-line hover:bg-plate-hover px-3.5 py-2 rounded-control transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+            New comparison
+          </button>
+        </div>
+      </div>
+    </section>
+
     <!-- Results: one comparative surface, rendered by renderResults() in app.js -->
     <section id="results" aria-labelledby="results-heading" class="hidden space-y-10">
 
       <div class="flex flex-wrap items-center justify-between gap-3">
         <h2 id="results-heading" tabindex="-1" class="font-heading font-semibold text-xl focus:outline-none">Results</h2>
         <div class="flex flex-wrap items-center gap-2">
-          <button id="new-comparison-btn" type="button"
-                  class="text-sm font-medium bg-plate border border-line hover:bg-plate-hover px-3.5 py-2 rounded-control transition-colors">
-            New comparison
-          </button>
           <button id="export-md-btn" type="button" disabled
                   class="text-sm font-medium bg-plate border border-line hover:bg-plate-hover px-3.5 py-2 rounded-control transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
             Export Markdown
