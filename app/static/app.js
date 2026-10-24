@@ -777,13 +777,33 @@ function historyLabel(item) {
   return `<span class="block font-medium truncate" title="${plainLabel}">${highlighted}</span>`;
 }
 
+// The card every history entry gets in the drawer. A stack adds the plate
+// peeking out underneath; `trailing` is its runs toggle, or a delete button.
+function historyCard(item, { timestamp, trailing, stacked = false }) {
+  const isCurrent = item.id === currentHistoryId;
+  const layer = stacked
+    ? "relative isolate mb-1 before:absolute before:inset-x-2 before:-bottom-1 before:h-2 before:-z-10 before:rounded-b-control before:border before:border-t-0 before:border-line before:bg-plate"
+    : "";
+  return `
+    <div class="${layer} flex items-center gap-1 rounded-control border ${isCurrent ? "border-action" : "border-line"} bg-plate px-2">
+      <button type="button" data-history-id="${item.id}"${isCurrent ? ' aria-current="true"' : ""}
+              class="flex-1 min-w-0 text-left py-3 rounded-control">
+        ${historyLabel(item)}
+        <span class="block text-ink-muted truncate">${escapeHtml(easierLabel(item))}</span>
+        <span class="block text-ink-muted">${escapeHtml(timestamp)}</span>
+      </button>
+      ${trailing}
+    </div>`;
+}
+
 function singleHistoryRow(item) {
-  return historyRow(item, {
-    title: historyLabel(item),
-    subtitle: `
-      <span class="block text-ink-muted truncate">${escapeHtml(easierLabel(item))}</span>
-      <span class="block text-ink-muted">${escapeHtml(formatTimestamp(item.created_at))}</span>`,
-  });
+  const plainLabel = `${escapeHtml(item.device_a_name)} vs ${escapeHtml(item.device_b_name)}`;
+  const deleteBtn = `
+    <button type="button" data-delete-id="${item.id}" aria-label="Delete comparison: ${plainLabel}, ${escapeHtml(formatTimestamp(item.created_at))}"
+            class="shrink-0 w-9 h-9 inline-flex items-center justify-center rounded-control text-ink-muted hover:text-danger-text hover:bg-plate-hover">
+      &times;
+    </button>`;
+  return `<li>${historyCard(item, { timestamp: formatTimestamp(item.created_at), trailing: deleteBtn })}</li>`;
 }
 
 // Several runs of the same comparison: the newest is shown, the rest fold away.
@@ -812,24 +832,21 @@ function stackedHistoryRows(stack, index) {
          </button>
        </li>`
     : "";
+  const toggle = `
+    <button type="button" data-stack-toggle="${escapeHtml(stack.key)}" aria-expanded="${isExpanded}" aria-controls="${panelId}"
+            class="shrink-0 inline-flex items-center gap-1 h-9 px-2 rounded-control text-sm text-ink-muted hover:text-ink hover:bg-plate-hover">
+      <span class="font-mono tabular-nums">${members.length}</span> runs
+      <svg class="w-4 h-4 transition-transform ${isExpanded ? "rotate-180" : ""}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M6 9l6 6 6-6" />
+      </svg>
+    </button>`;
   return `
-    <li class="py-1">
-      <div class="relative isolate flex items-center gap-1 rounded-control border border-line bg-plate px-2 mb-1
-                  before:absolute before:inset-x-2 before:-bottom-1 before:h-2 before:-z-10 before:rounded-b-control before:border before:border-t-0 before:border-line before:bg-plate">
-        <button type="button" data-history-id="${stack.latest.id}"${stack.latest.id === currentHistoryId ? ' aria-current="true"' : ""}
-                class="flex-1 min-w-0 text-left py-3 rounded-control">
-          ${historyLabel(stack.latest)}
-          <span class="block text-ink-muted truncate">${escapeHtml(easierLabel(stack.latest))}</span>
-          <span class="block text-ink-muted">Latest ${escapeHtml(formatTimestamp(stack.latest.created_at))}</span>
-        </button>
-        <button type="button" data-stack-toggle="${escapeHtml(stack.key)}" aria-expanded="${isExpanded}" aria-controls="${panelId}"
-                class="shrink-0 inline-flex items-center gap-1 h-9 px-2 rounded-control text-sm text-ink-muted hover:text-ink hover:bg-plate-hover">
-          <span class="font-mono tabular-nums">${members.length}</span> runs
-          <svg class="w-4 h-4 transition-transform ${isExpanded ? "rotate-180" : ""}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M6 9l6 6 6-6" />
-          </svg>
-        </button>
-      </div>
+    <li>
+      ${historyCard(stack.latest, {
+        timestamp: `Latest ${formatTimestamp(stack.latest.created_at)}`,
+        trailing: toggle,
+        stacked: true,
+      })}
       <ul id="${panelId}" class="${isExpanded ? "" : "hidden "}mt-2 ml-2 pl-3 border-l border-line">
         ${memberRows}
         ${dedupe}
