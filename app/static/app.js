@@ -1,4 +1,4 @@
-const state = { fileA: null, fileB: null };
+const state = { fileA: null, fileB: null, busy: false };
 let currentHistoryId = null;
 const HISTORY_PAGE_SIZE = 20;
 let historyOffset = 0;
@@ -119,7 +119,7 @@ function renderDeviceSlot(letter) {
           Device ${letter}
         </h3>
         <button type="button" id="clear-${id}"
-                class="hidden text-sm font-medium text-ink-muted hover:text-ink underline underline-offset-2 rounded-control">
+                class="hidden text-sm font-medium text-ink-muted hover:text-ink disabled:opacity-50 disabled:cursor-not-allowed underline underline-offset-2 rounded-control">
           Remove<span class="sr-only"> file for Device ${letter}</span>
         </button>
       </div>
@@ -156,7 +156,7 @@ function wireDropzone(zoneId, inputId, filenameId, clearId, key) {
   };
 
   const setFile = (file) => {
-    if (!file) return;
+    if (!file || state.busy) return;
     if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
       showError(`"${file.name}" is not a PDF. Choose a PDF quick start guide.`);
       return;
@@ -224,11 +224,43 @@ document.getElementById("load-samples-btn").addEventListener("click", async () =
 });
 
 // ---- Compare ----
+// Compare is one request with no server-side progress, so the status line
+// reports only what is known: that it is running, for how long, and that long
+// guides take longer.
+const SLOW_AFTER_SECONDS = 15;
+let loadingTimer;
+
 function setLoading(isLoading) {
+  state.busy = isLoading;
   document.getElementById("synthesize-spinner").classList.toggle("hidden", !isLoading);
   document.getElementById("synthesize-label").textContent = isLoading ? "Comparing…" : "Compare devices";
   document.getElementById("synthesize-btn").disabled = isLoading;
   document.getElementById("load-samples-btn").disabled = isLoading;
+  ["file-a", "file-b", "clear-a", "clear-b"].forEach((id) => {
+    document.getElementById(id).disabled = isLoading;
+  });
+
+  const status = document.getElementById("compare-status");
+  clearInterval(loadingTimer);
+  if (!isLoading) {
+    status.textContent = "";
+    return;
+  }
+  status.innerHTML = `
+    <span class="flex items-start gap-2">
+      <span class="led-dot led-dot--amber led-dot--blinking mt-1.5" aria-hidden="true"></span>
+      <span id="compare-status-text" class="flex-1">Comparing Device A and Device B…</span>
+      <span id="compare-elapsed" class="shrink-0 whitespace-nowrap font-mono tabular-nums" aria-hidden="true">0&nbsp;s</span>
+    </span>`;
+  const started = Date.now();
+  loadingTimer = setInterval(() => {
+    const seconds = Math.floor((Date.now() - started) / 1000);
+    document.getElementById("compare-elapsed").textContent = `${seconds}\u00a0s`;
+    if (seconds === SLOW_AFTER_SECONDS) {
+      document.getElementById("compare-status-text").textContent =
+        "Still comparing. Longer guides take more time.";
+    }
+  }, 1000);
 }
 
 async function synthesize() {
