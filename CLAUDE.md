@@ -57,7 +57,7 @@ Things that span multiple files:
   string in `app/static/app.js`; change both together.
 - Auth (`app/services/auth.py`) is optional Basic Auth via `APP_USERNAME`/`APP_PASSWORD`.
   It applies through the `router` dependency in `main.py`, plus a separate middleware for
-  `/static/*` (StaticFiles is mounted on `app`, outside the router). `/healthz` is
+  `/static/*` and the docs routes `/docs`, `/redoc`, `/openapi.json` (registered on `app`, outside the router). `/healthz` is
   deliberately left open for the Docker/CI health check.
 - `main.py` calls `load_dotenv()` before importing `app.*` because `HISTORY_DIR` is read at
   import time. It skips this under pytest (`PYTEST_VERSION`) so tests never pick up real API

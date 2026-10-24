@@ -80,12 +80,17 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
+# FastAPI registers its docs routes directly on `app`, outside `router`.
+_DOCS_PATHS = {"/docs", "/redoc", "/openapi.json", "/docs/oauth2-redirect"}
+
+
 @app.middleware("http")
 async def guard_static_files(request: Request, call_next):
-    # StaticFiles is mounted directly on `app`, so it never passes through
-    # `router`'s dependencies=[Depends(require_auth)] — gate it here instead,
-    # so a configured Basic Auth also covers the dashboard's JS/CSS.
-    if request.url.path.startswith("/static/"):
+    # StaticFiles and FastAPI's built-in docs routes are registered directly on
+    # `app`, so they never pass through `router`'s dependencies=[Depends(require_auth)]
+    # — gate them here instead, so a configured Basic Auth also covers the
+    # dashboard's JS/CSS and the API docs/schema.
+    if request.url.path.startswith("/static/") or request.url.path in _DOCS_PATHS:
         credentials = await security(request)
         client_host = request.client.host if request.client else "unknown"
         try:

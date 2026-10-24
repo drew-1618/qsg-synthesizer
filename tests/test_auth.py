@@ -82,3 +82,20 @@ def test_static_files_require_auth_once_configured(monkeypatch):
 
     ok = client.get("/static/app.js", auth=("admin", "hunter2"))
     assert ok.status_code == 200
+
+
+def test_api_docs_and_schema_require_auth_once_configured(monkeypatch):
+    monkeypatch.setenv("APP_USERNAME", "admin")
+    monkeypatch.setenv("APP_PASSWORD", "hunter2")
+
+    for path in ("/docs", "/redoc", "/openapi.json"):
+        assert client.get(path).status_code == 401, path
+        assert client.get(path, auth=("admin", "hunter2")).status_code == 200, path
+
+
+def test_api_docs_open_by_default_without_configured_credentials(monkeypatch):
+    monkeypatch.delenv("APP_USERNAME", raising=False)
+    monkeypatch.delenv("APP_PASSWORD", raising=False)
+
+    assert client.get("/docs").status_code == 200
+    assert client.get("/openapi.json").status_code == 200
