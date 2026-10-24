@@ -55,6 +55,7 @@ _TABLE_STYLE = TableStyle(
 _COMPARISON_ROWS = [
     ("Default IP", "default_ip"),
     ("Provisioning Method", "provisioning_method"),
+    ("All Provisioning Methods", "provisioning_methods"),
     ("Required Tools", "required_tools"),
     ("Physical Ports", "ports"),
     ("Wi-Fi Standard", "wifi_standard"),
@@ -71,10 +72,17 @@ def _names(battlecard: BattlecardResponse) -> tuple[str, str]:
     )
 
 
+def _md_cell(text: str) -> str:
+    """Make `text` safe inside a Markdown table cell."""
+    return text.replace("|", "\\|").replace("\r", " ").replace("\n", " ")
+
+
 def _plain_cell(value) -> str:
     if isinstance(value, list):
-        return ", ".join(str(v) for v in value) if value else "None"
-    return str(value) if value not in (None, "") else "Unknown"
+        text = ", ".join(str(v) for v in value) if value else "None"
+    else:
+        text = str(value) if value not in (None, "") else "Unknown"
+    return _md_cell(text)
 
 
 def battlecard_to_markdown(battlecard: BattlecardResponse) -> str:
@@ -92,7 +100,7 @@ def battlecard_to_markdown(battlecard: BattlecardResponse) -> str:
         "",
         "## Side-by-Side Comparison",
         "",
-        f"| Attribute | {name_a} | {name_b} |",
+        f"| Attribute | {_md_cell(name_a)} | {_md_cell(name_b)} |",
         "|---|---|---|",
     ]
     for label, key in _COMPARISON_ROWS:

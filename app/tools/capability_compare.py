@@ -24,29 +24,39 @@ _WIFI_GENERATION_RANK = {
     "ax": 5,
     "be": 6,
 }
-_WIFI_LETTERS_RE = re.compile(r"802\.11\s?([a-z]{1,2})\b", re.IGNORECASE)
+# One "802.11" prefix plus any slash/comma-joined suffixes, e.g. "802.11b/g/n/ac".
+_WIFI_LETTERS_RE = re.compile(
+    r"802\.11\s?([a-z]{1,2}\b(?:\s*[/,&]\s*(?:802\.11\s?)?[a-z]{1,2}\b)*)",
+    re.IGNORECASE,
+)
+_WIFI_SUFFIX_RE = re.compile(r"[a-z]{1,2}", re.IGNORECASE)
 _WIFI_GENERATION_RE = re.compile(r"wi-?fi\s?(\d)e?\b", re.IGNORECASE)
 _WIFI_GENERATION_TO_LETTERS = {"4": "n", "5": "ac", "6": "ax", "7": "be"}
 
-_SPEED_RE = re.compile(r"([\d.]+)\s*(gbps|gbit|mbps|mbit|gb|mb)\b", re.IGNORECASE)
+_SPEED_RE = re.compile(
+    r"(\d+(?:\.\d+)?|\.\d+)\s*(gbps|gbit|mbps|mbit|gb|mb)\b", re.IGNORECASE
+)
 _SPEED_UNIT_MULTIPLIER_MBPS = {"g": 1000.0, "m": 1.0}
 
 
 def rank_wifi_standard(standard: Optional[str]) -> Optional[int]:
     """Relative newness rank for a Wi-Fi standard string (higher = newer),
     or None if no recognizable "802.11<letters>" or "Wi-Fi <generation>"
-    token is present."""
+    token is present. Multi-standard strings ("802.11b/g/n/ac") rank by the
+    newest standard listed."""
     if not standard:
         return None
-    letters_match = _WIFI_LETTERS_RE.search(standard)
-    if letters_match:
-        return _WIFI_GENERATION_RANK.get(letters_match.group(1).lower())
-    generation_match = _WIFI_GENERATION_RE.search(standard)
-    if generation_match:
-        letters = _WIFI_GENERATION_TO_LETTERS.get(generation_match.group(1))
+    ranks = []
+    for chain in _WIFI_LETTERS_RE.findall(standard):
+        for letters in _WIFI_SUFFIX_RE.findall(chain):
+            rank = _WIFI_GENERATION_RANK.get(letters.lower())
+            if rank is not None:
+                ranks.append(rank)
+    for generation in _WIFI_GENERATION_RE.findall(standard):
+        letters = _WIFI_GENERATION_TO_LETTERS.get(generation)
         if letters:
-            return _WIFI_GENERATION_RANK.get(letters)
-    return None
+            ranks.append(_WIFI_GENERATION_RANK[letters])
+    return max(ranks) if ranks else None
 
 
 def parse_speed_mbps(text: Optional[str]) -> Optional[float]:

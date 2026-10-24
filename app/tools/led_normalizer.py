@@ -46,13 +46,14 @@ class LEDState(str, Enum):
     BOOTING = "BOOTING"
     ONLINE = "ONLINE"
     FAULT = "FAULT"
+    OFF = "OFF"
     UNKNOWN = "UNKNOWN"
 
 
 # (normalized_color, normalized_pattern) -> LEDState.
-# Convention followed across telecom QSGs: solid green is nominal, blinking/
-# pulsing amber signals init/boot activity, and red (any pattern) or solid
-# amber signals a fault condition.
+# Convention followed across telecom QSGs: solid green (or white/blue on
+# newer CPE) is nominal, blinking/pulsing signals init/boot activity, and red
+# (any pattern) or solid amber signals a fault condition.
 _STATE_TABLE: Dict[Tuple[Optional[str], Optional[str]], LEDState] = {
     ("green", "solid"): LEDState.ONLINE,
     ("green", "blinking"): LEDState.BOOTING,
@@ -60,6 +61,12 @@ _STATE_TABLE: Dict[Tuple[Optional[str], Optional[str]], LEDState] = {
     ("amber", "blinking"): LEDState.BOOTING,
     ("amber", "pulsing"): LEDState.BOOTING,
     ("amber", "solid"): LEDState.FAULT,
+    ("white", "solid"): LEDState.ONLINE,
+    ("blue", "solid"): LEDState.ONLINE,
+    ("white", "blinking"): LEDState.BOOTING,
+    ("white", "pulsing"): LEDState.BOOTING,
+    ("blue", "blinking"): LEDState.BOOTING,
+    ("blue", "pulsing"): LEDState.BOOTING,
     ("red", "solid"): LEDState.FAULT,
     ("red", "blinking"): LEDState.FAULT,
     ("red", "pulsing"): LEDState.FAULT,
@@ -72,7 +79,8 @@ _DISPLAY_ORDER = {
     LEDState.ONLINE: 0,
     LEDState.BOOTING: 1,
     LEDState.FAULT: 2,
-    LEDState.UNKNOWN: 3,
+    LEDState.OFF: 3,
+    LEDState.UNKNOWN: 4,
 }
 
 
@@ -102,7 +110,7 @@ def normalize_led(description: str) -> NormalizedLED:
     frequency_hz = float(frequency_match.group(1)) if frequency_match else None
 
     if color == "off":
-        state = LEDState.UNKNOWN
+        state = LEDState.OFF
     else:
         state = _STATE_TABLE.get((color, pattern), LEDState.UNKNOWN)
 

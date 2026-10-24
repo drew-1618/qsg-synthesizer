@@ -14,6 +14,7 @@ server, so the two don't share and clobber the same on-disk history.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import uuid
@@ -33,6 +34,8 @@ HISTORY_DIR = _resolve_history_dir(BASE_DIR, os.environ.get("HISTORY_DIR"))
 
 MAX_HISTORY_ENTRIES = 50
 
+logger = logging.getLogger(__name__)
+
 _ID_PATTERN = re.compile(r"^[0-9a-f]{32}$")
 
 
@@ -46,11 +49,20 @@ def save_comparison(battlecard: BattlecardResponse) -> HistoryRecord:
         device_b_name=model_names.get("device_b", "Device B"),
         battlecard=battlecard,
     )
-    (HISTORY_DIR / f"{record.id}.json").write_text(
-        record.model_dump_json(), encoding="utf-8"
-    )
+    _write_atomic(HISTORY_DIR / f"{record.id}.json", record.model_dump_json())
     _prune_oldest()
     return record
+
+
+def _write_atomic(path: Path, content: str) -> None:
+    """Write via a temp file + rename so a crash never leaves a truncated record."""
+    tmp = path.with_suffix(".tmp")
+    try:
+        tmp.write_text(content, encoding="utf-8")
+        os.replace(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 def _prune_oldest() -> None:
@@ -67,22 +79,22 @@ def _load_all_summaries() -> List[HistorySummary]:
     for path in HISTORY_DIR.glob("*.json"):
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            continue
-        summaries.append(
-            HistorySummary(
-                id=data["id"],
-                created_at=data["created_at"],
-                device_a_name=data["device_a_name"],
-                device_b_name=data["device_b_name"],
-                installation_friction_score_device_a=data["battlecard"][
-                    "installation_friction_score_device_a"
-                ],
-                installation_friction_score_device_b=data["battlecard"][
-                    "installation_friction_score_device_b"
-                ],
+            summaries.append(
+                HistorySummary(
+                    id=data["id"],
+                    created_at=data["created_at"],
+                    device_a_name=data["device_a_name"],
+                    device_b_name=data["device_b_name"],
+                    installation_friction_score_device_a=data["battlecard"][
+                        "installation_friction_score_device_a"
+                    ],
+                    installation_friction_score_device_b=data["battlecard"][
+                        "installation_friction_score_device_b"
+                    ],
+                )
             )
-        )
+        except (ValueError, KeyError, TypeError, OSError):
+            logger.warning("Skipping unreadable history record %s", path.name)
     summaries.sort(key=lambda s: s.created_at, reverse=True)
     return summaries
 
@@ -109,11 +121,7 @@ def list_comparisons(
 
 
 def count_comparisons(query: Optional[str] = None) -> int:
-    if query:
-        return len(_filtered_summaries(query))
-    if not HISTORY_DIR.exists():
-        return 0
-    return sum(1 for _ in HISTORY_DIR.glob("*.json"))
+    return len(_filtered_summaries(query))
 
 
 def get_comparison(history_id: str) -> Optional[HistoryRecord]:
@@ -122,7 +130,11 @@ def get_comparison(history_id: str) -> Optional[HistoryRecord]:
     path = HISTORY_DIR / f"{history_id}.json"
     if not path.exists():
         return None
-    return HistoryRecord.model_validate_json(path.read_text(encoding="utf-8"))
+    try:
+        return HistoryRecord.model_validate_json(path.read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        logger.warning("Unreadable history record %s", path.name)
+        return None
 
 
 def delete_comparison(history_id: str) -> bool:

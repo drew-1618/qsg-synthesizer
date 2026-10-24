@@ -82,9 +82,10 @@ function confirmDialog(message, { title = "Are you sure?", confirmLabel = "Confi
     };
     const onOk = () => cleanup(true);
     const onCancel = () => cleanup(false);
+    // Enter is deliberately not handled here: the focused button (Cancel by
+    // default) activates itself natively, so Enter never confirms by accident.
     const onKeydown = (e) => {
       if (e.key === "Escape") cleanup(false);
-      if (e.key === "Enter") cleanup(true);
     };
 
     okBtn.addEventListener("click", onOk);
@@ -215,8 +216,8 @@ async function synthesize() {
     if (!res.ok) {
       throw new Error(data.detail || "Synthesis failed.");
     }
-    const items = await loadHistory();
-    setExportLinks(items && items[0] ? items[0].id : null);
+    await loadHistory();
+    setExportLinks(data.history_id);
     renderResults(data);
   } catch (err) {
     showError(err.message || "Something went wrong while synthesizing the comparison.");
@@ -431,6 +432,16 @@ function provisioningBadge(method) {
   return `<span class="inline-block text-xs font-semibold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800">${escapeHtml(method)}</span>`;
 }
 
+// Primary method first, then any other methods the document lists. Records
+// saved before provisioning_methods existed only have the primary one.
+function provisioningCell(cm, device) {
+  const primary = cm.provisioning_method[device];
+  const others = ((cm.provisioning_methods || {})[device] || []).filter(
+    (method) => method !== primary
+  );
+  return [primary, ...others].map(provisioningBadge).join(" ");
+}
+
 function listOrDash(items) {
   if (!items || items.length === 0) {
     return `<span class="text-slate-400">None</span>`;
@@ -470,7 +481,7 @@ function renderResults(data) {
   const rows = [
     ["Default IP", `${escapeHtml(cm.default_ip.device_a || "Unknown")} ${ipBadge(cm.is_private_ip.device_a)}`,
                     `${escapeHtml(cm.default_ip.device_b || "Unknown")} ${ipBadge(cm.is_private_ip.device_b)}`],
-    ["Provisioning Method", provisioningBadge(cm.provisioning_method.device_a), provisioningBadge(cm.provisioning_method.device_b)],
+    ["Provisioning Method", provisioningCell(cm, "device_a"), provisioningCell(cm, "device_b")],
     ["Required Tools", listOrDash(cm.required_tools.device_a), listOrDash(cm.required_tools.device_b)],
     ["Physical Ports", listOrDash(cm.ports.device_a), listOrDash(cm.ports.device_b)],
     ["Wi-Fi Standard", textOrDash(cm.wifi_standard.device_a), textOrDash(cm.wifi_standard.device_b)],
@@ -498,7 +509,7 @@ function renderResults(data) {
         (led) => `
         <li class="flex items-start gap-2">
           ${ledDot(led)}
-          <span class="text-slate-600">${escapeHtml(led.description)}</span>
+          <span class="text-slate-600">${led.name ? `<span class="font-semibold text-slate-700">${escapeHtml(led.name)}:</span> ` : ""}${escapeHtml(led.description)}</span>
         </li>`
       )
       .join("") || `<li class="text-slate-400">No LED data extracted.</li>`;

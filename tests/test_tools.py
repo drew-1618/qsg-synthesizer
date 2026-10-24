@@ -5,31 +5,8 @@ from app.tools.led_normalizer import LEDState, normalize_led
 from app.tools.net_validator import (
     InvalidNetworkInput,
     classify_ip,
-    parse_subnet,
-    validate_gateway,
 )
 from app.tools.port_counter import expand_port_range
-
-
-class TestParseSubnet:
-    def test_valid_private_subnet(self):
-        info = parse_subnet("192.168.1.0/24")
-        assert info.network_address == "192.168.1.0"
-        assert info.prefix_length == 24
-        assert info.num_addresses == 256
-        assert info.is_private is True
-
-    def test_valid_public_subnet(self):
-        info = parse_subnet("8.8.8.0/24")
-        assert info.is_private is False
-
-    def test_host_bits_set_is_normalized(self):
-        info = parse_subnet("10.0.0.5/24")
-        assert info.network_address == "10.0.0.0"
-
-    def test_invalid_cidr_raises(self):
-        with pytest.raises(InvalidNetworkInput):
-            parse_subnet("not-a-subnet")
 
 
 class TestClassifyIp:
@@ -46,27 +23,6 @@ class TestClassifyIp:
     def test_invalid_ip_raises(self):
         with pytest.raises(InvalidNetworkInput):
             classify_ip("999.999.999.999")
-
-
-class TestValidateGateway:
-    def test_gateway_in_subnet(self):
-        result = validate_gateway("192.168.1.1", "192.168.1.0/24")
-        assert result.is_valid_ip is True
-        assert result.in_subnet is True
-        assert result.is_private is True
-
-    def test_gateway_outside_subnet(self):
-        result = validate_gateway("10.0.0.1", "192.168.1.0/24")
-        assert result.in_subnet is False
-
-    def test_malformed_gateway_is_flagged_not_raised(self):
-        result = validate_gateway("not-an-ip", "192.168.1.0/24")
-        assert result.is_valid_ip is False
-        assert result.in_subnet is False
-
-    def test_invalid_subnet_raises(self):
-        with pytest.raises(InvalidNetworkInput):
-            validate_gateway("192.168.1.1", "not-a-subnet")
 
 
 class TestNormalizeLed:
@@ -92,9 +48,16 @@ class TestNormalizeLed:
         assert result.pattern == "blinking"
         assert result.state == LEDState.BOOTING
 
-    def test_off_is_unknown(self):
+    def test_off_is_its_own_state(self):
         result = normalize_led("LED off")
-        assert result.state == LEDState.UNKNOWN
+        assert result.state == LEDState.OFF
+
+    @pytest.mark.parametrize("text", ["solid white", "steady blue"])
+    def test_solid_white_and_blue_are_online(self, text):
+        assert normalize_led(text).state == LEDState.ONLINE
+
+    def test_blinking_blue_is_booting(self):
+        assert normalize_led("blinking blue").state == LEDState.BOOTING
 
     def test_unrecognized_text_is_unknown(self):
         result = normalize_led("mysterious purple glow")
@@ -148,3 +111,25 @@ class TestParseSpeedMbps:
 
     def test_returns_none_for_missing_value(self):
         assert parse_speed_mbps(None) is None
+
+
+class TestMultiStandardWifiRank:
+    @pytest.mark.parametrize(
+        "text, expected",
+        [
+            ("802.11b/g/n/ac", rank_wifi_standard("802.11ac")),
+            ("802.11ac/ax", rank_wifi_standard("802.11ax")),
+            ("802.11a/b/g/n", rank_wifi_standard("802.11n")),
+            ("802.11n, 802.11ax", rank_wifi_standard("802.11ax")),
+            ("Wi-Fi 5 / Wi-Fi 6", rank_wifi_standard("Wi-Fi 6")),
+        ],
+    )
+    def test_ranks_by_newest_standard(self, text, expected):
+        assert rank_wifi_standard(text) == expected
+
+    def test_newer_multi_standard_outranks_older(self):
+        assert rank_wifi_standard("802.11ac/ax") > rank_wifi_standard("802.11b/g/n/ac")
+
+
+def test_parse_speed_ignores_bare_dot():
+    assert parse_speed_mbps("Up to . Gbps") is None

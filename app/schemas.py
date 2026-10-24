@@ -21,6 +21,7 @@ __all__ = [
     "ProvisioningMethod",
     "DeviceSpec",
     "BattlecardResponse",
+    "CompareResponse",
     "HistorySummary",
     "HistoryRecord",
     "HistoryPage",
@@ -35,6 +36,9 @@ class ProvisioningMethod(str, Enum):
 
 
 class LEDStatus(BaseModel):
+    # Which physical LED this describes (e.g. "Power"); None for records
+    # saved before names were carried through.
+    name: Optional[str] = None
     state: LEDState
     color: Optional[str] = None
     pattern: Optional[str] = None
@@ -49,6 +53,10 @@ class DeviceSpec(BaseModel):
     default_ip: Optional[str] = None
     is_private_ip: bool = False
     provisioning_method: ProvisioningMethod
+    # Every method the document lists, as the raw extractor's labels
+    # (e.g. "QR/Mobile App"); `provisioning_method` is the primary one
+    # used for scoring.
+    provisioning_methods: List[str] = Field(default_factory=list)
     required_tools: List[str] = Field(default_factory=list)
     led_states: List[LEDStatus] = Field(default_factory=list)
     ports: List[str] = Field(default_factory=list)
@@ -56,6 +64,8 @@ class DeviceSpec(BaseModel):
     wan_speed: Optional[str] = None
     form_factor: Optional[str] = None
     capabilities: List[str] = Field(default_factory=list)
+    # "llm" or "heuristic"; set by the orchestrator, not the document
+    extraction_source: Optional[str] = None
 
 
 class BattlecardResponse(BaseModel):
@@ -67,6 +77,15 @@ class BattlecardResponse(BaseModel):
     key_advantages_device_a: List[str]
     key_advantages_device_b: List[str]
     sales_talk_track: str
+    # None on history records saved before provenance was tracked
+    extraction_source_device_a: Optional[str] = None
+    extraction_source_device_b: Optional[str] = None
+
+
+class CompareResponse(BattlecardResponse):
+    """A fresh comparison plus the ID of the history record it was saved as."""
+
+    history_id: str
 
 
 class HistorySummary(BaseModel):

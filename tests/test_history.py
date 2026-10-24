@@ -70,3 +70,36 @@ class TestResolveHistoryDir:
         assert history._resolve_history_dir(Path("/repo"), "") == Path(
             "/repo/data/history"
         )
+
+
+def test_save_leaves_no_temp_files():
+    history.save_comparison(_make_battlecard())
+    assert [p.suffix for p in history.HISTORY_DIR.iterdir()] == [".json"]
+
+
+def test_failed_write_keeps_existing_record_and_cleans_temp(monkeypatch):
+    record = history.save_comparison(_make_battlecard())
+    path = history.HISTORY_DIR / f"{record.id}.json"
+    original = path.read_text(encoding="utf-8")
+
+    def boom(src, dst):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(history.os, "replace", boom)
+    try:
+        history._write_atomic(path, "partial")
+    except OSError:
+        pass
+    assert path.read_text(encoding="utf-8") == original
+    assert not list(history.HISTORY_DIR.glob("*.tmp"))
+
+
+def test_corrupt_and_incomplete_records_are_skipped_and_not_counted():
+    good = history.save_comparison(_make_battlecard())
+    (history.HISTORY_DIR / ("a" * 32 + ".json")).write_text('{"id": "x"')
+    (history.HISTORY_DIR / ("b" * 32 + ".json")).write_text('{"id": "b"}')
+
+    assert [s.id for s in history.list_comparisons()] == [good.id]
+    assert history.count_comparisons() == 1
+    assert history.get_comparison("a" * 32) is None
+    assert history.get_comparison("b" * 32) is None

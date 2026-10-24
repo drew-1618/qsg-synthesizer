@@ -38,11 +38,11 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from app.logging_config import configure_logging
-from app.schemas import BattlecardResponse, HistoryPage, HistoryRecord
+from app.schemas import CompareResponse, DeviceSpec, HistoryPage, HistoryRecord
 from app.services import export as export_service
 from app.services import history
 from app.services.auth import require_auth, security, verify_credentials
-from app.services.orchestrator import extract_device_spec, synthesize_battlecard
+from app.services.orchestrator import extract_device_specs, synthesize_battlecard
 from app.services.rate_limiter import RateLimiter
 from app.tools.pdf_parser import extract_text_from_pdf
 
@@ -54,6 +54,7 @@ STATIC_DIR = BASE_DIR / "app" / "static"
 SAMPLE_DOCS_DIR = BASE_DIR / "sample_docs"
 
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20MB per PDF
+MIN_TEXT_CHARS = 50  # below this (ignoring whitespace) there is nothing to extract from
 MAX_TEXT_CHARS = 2_000_000  # cap for compare-text's raw device_*_text fields
 
 # Compare endpoints run the extraction+synthesis pipeline (the expensive
@@ -79,12 +80,17 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
+# FastAPI registers its docs routes directly on `app`, outside `router`.
+_DOCS_PATHS = {"/docs", "/redoc", "/openapi.json", "/docs/oauth2-redirect"}
+
+
 @app.middleware("http")
 async def guard_static_files(request: Request, call_next):
-    # StaticFiles is mounted directly on `app`, so it never passes through
-    # `router`'s dependencies=[Depends(require_auth)] — gate it here instead,
-    # so a configured Basic Auth also covers the dashboard's JS/CSS.
-    if request.url.path.startswith("/static/"):
+    # StaticFiles and FastAPI's built-in docs routes are registered directly on
+    # `app`, so they never pass through `router`'s dependencies=[Depends(require_auth)]
+    # — gate them here instead, so a configured Basic Auth also covers the
+    # dashboard's JS/CSS and the API docs/schema.
+    if request.url.path.startswith("/static/") or request.url.path in _DOCS_PATHS:
         credentials = await security(request)
         client_host = request.client.host if request.client else "unknown"
         try:
@@ -157,15 +163,38 @@ class CompareTextRequest(BaseModel):
 
 @router.post(
     "/api/v1/compare-text",
-    response_model=BattlecardResponse,
+    response_model=CompareResponse,
     dependencies=[Depends(compare_rate_limiter)],
 )
-def compare_text(payload: CompareTextRequest) -> BattlecardResponse:
-    device_a = extract_device_spec(payload.device_a_text, payload.device_a_name)
-    device_b = extract_device_spec(payload.device_b_text, payload.device_b_name)
+def compare_text(payload: CompareTextRequest) -> CompareResponse:
+    _require_text(payload.device_a_text, payload.device_a_name)
+    _require_text(payload.device_b_text, payload.device_b_name)
+    device_a, device_b = extract_device_specs(
+        payload.device_a_text,
+        payload.device_a_name,
+        payload.device_b_text,
+        payload.device_b_name,
+    )
+    return _synthesize_and_save(device_a, device_b)
+
+
+def _synthesize_and_save(device_a: DeviceSpec, device_b: DeviceSpec) -> CompareResponse:
     battlecard = synthesize_battlecard(device_a, device_b)
-    history.save_comparison(battlecard)
-    return battlecard
+    record = history.save_comparison(battlecard)
+    return CompareResponse(**battlecard.model_dump(), history_id=record.id)
+
+
+def _require_text(text: str, name: str) -> str:
+    """Reject documents with no usable text rather than scoring an empty device."""
+    if len("".join(text.split())) < MIN_TEXT_CHARS:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"'{name}' contains no extractable text "
+                "(is it a scanned or image-only document?)."
+            ),
+        )
+    return text
 
 
 def _read_pdf_upload(upload: UploadFile) -> str:
@@ -180,31 +209,38 @@ def _read_pdf_upload(upload: UploadFile) -> str:
             status_code=413,
             detail=f"'{upload.filename}' exceeds the {max_mb}MB upload limit.",
         )
-    return extract_text_from_pdf(contents)
+    try:
+        text = extract_text_from_pdf(contents)
+    except Exception:
+        logger.warning(
+            "Could not parse upload '%s' as a PDF", upload.filename, exc_info=True
+        )
+        raise HTTPException(
+            status_code=400, detail=f"'{upload.filename}' could not be read as a PDF."
+        )
+    return _require_text(text, upload.filename or "upload")
 
 
 @router.post(
     "/api/v1/compare-pdfs",
-    response_model=BattlecardResponse,
+    response_model=CompareResponse,
     dependencies=[Depends(compare_rate_limiter)],
 )
 def compare_pdfs(
     device_a_pdf: UploadFile = File(...),
     device_b_pdf: UploadFile = File(...),
-) -> BattlecardResponse:
+) -> CompareResponse:
     device_a_text = _read_pdf_upload(device_a_pdf)
     device_b_text = _read_pdf_upload(device_b_pdf)
 
-    device_a = extract_device_spec(
-        device_a_text, device_a_pdf.filename or "device_a.pdf"
-    )
-    device_b = extract_device_spec(
-        device_b_text, device_b_pdf.filename or "device_b.pdf"
+    device_a, device_b = extract_device_specs(
+        device_a_text,
+        device_a_pdf.filename or "device_a.pdf",
+        device_b_text,
+        device_b_pdf.filename or "device_b.pdf",
     )
 
-    battlecard = synthesize_battlecard(device_a, device_b)
-    history.save_comparison(battlecard)
-    return battlecard
+    return _synthesize_and_save(device_a, device_b)
 
 
 @router.get("/api/v1/history", response_model=HistoryPage)

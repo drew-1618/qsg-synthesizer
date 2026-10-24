@@ -186,6 +186,88 @@ class TestComparePdfs:
         assert response.status_code == 413
 
 
+class TestPdfUploadErrors:
+    def test_corrupt_pdf_returns_400(self):
+        response = client.post(
+            "/api/v1/compare-pdfs",
+            files={
+                "device_a_pdf": ("a.pdf", b"not really a pdf", "application/pdf"),
+                "device_b_pdf": ("b.pdf", b"not really a pdf", "application/pdf"),
+            },
+        )
+        assert response.status_code == 400
+        assert "could not be read as a PDF" in response.json()["detail"]
+
+    def test_encrypted_pdf_returns_400(self):
+        import pymupdf
+
+        doc = pymupdf.open()
+        doc.new_page().insert_text((72, 72), "Quick start guide")
+        locked = doc.tobytes(
+            encryption=pymupdf.PDF_ENCRYPT_AES_256, user_pw="x", owner_pw="y"
+        )
+        doc.close()
+        response = client.post(
+            "/api/v1/compare-pdfs",
+            files={
+                "device_a_pdf": ("a.pdf", locked, "application/pdf"),
+                "device_b_pdf": ("b.pdf", locked, "application/pdf"),
+            },
+        )
+        assert response.status_code == 400
+        assert client.get("/api/v1/history").json()["total"] == 0
+
+
+class TestHistoryId:
+    def test_compare_text_returns_id_of_saved_record(self):
+        text = (SAMPLE_DOCS_DIR / "device_a_qsg.md").read_text(encoding="utf-8")
+        first = client.post(
+            "/api/v1/compare-text",
+            json={"device_a_text": text, "device_b_text": text},
+        ).json()
+        # A newer record must not change which record the first response points at.
+        client.post(
+            "/api/v1/compare-text",
+            json={"device_a_text": text, "device_b_text": text},
+        )
+        record = client.get(f"/api/v1/history/{first['history_id']}").json()
+        assert record["id"] == first["history_id"]
+        assert client.get("/api/v1/history").json()["total"] == 2
+
+    def test_compare_pdfs_returns_history_id(self):
+        data = TestComparePdfs()._post().json()
+        assert client.get(f"/api/v1/history/{data['history_id']}").status_code == 200
+
+
+class TestEmptyDocuments:
+    def test_image_only_pdf_returns_422_and_is_not_saved(self):
+        import pymupdf
+
+        doc = pymupdf.open()
+        doc.new_page()
+        blank_pdf = doc.tobytes()
+        doc.close()
+
+        response = client.post(
+            "/api/v1/compare-pdfs",
+            files={
+                "device_a_pdf": ("a.pdf", blank_pdf, "application/pdf"),
+                "device_b_pdf": ("b.pdf", blank_pdf, "application/pdf"),
+            },
+        )
+        assert response.status_code == 422
+        assert "no extractable text" in response.json()["detail"]
+        assert client.get("/api/v1/history").json()["total"] == 0
+
+    def test_whitespace_only_text_returns_422_and_is_not_saved(self):
+        response = client.post(
+            "/api/v1/compare-text",
+            json={"device_a_text": " \n\t ", "device_b_text": "x"},
+        )
+        assert response.status_code == 422
+        assert client.get("/api/v1/history").json()["total"] == 0
+
+
 class TestHistory:
     def _post_comparison(self):
         device_a_text = (SAMPLE_DOCS_DIR / "device_a_qsg.md").read_text(
@@ -246,7 +328,7 @@ class TestHistory:
 
     def test_history_item_roundtrips_full_battlecard(self):
         battlecard = self._post_comparison().json()
-        history_id = client.get("/api/v1/history").json()["items"][0]["id"]
+        history_id = battlecard.pop("history_id")
 
         response = client.get(f"/api/v1/history/{history_id}")
         assert response.status_code == 200

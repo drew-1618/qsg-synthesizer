@@ -53,7 +53,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements.txt -r requirements-dev.txt
 
       - name: Run tests
         run: pytest -q
@@ -78,6 +78,28 @@ jobs:
           done
           echo "Container did not become healthy in time"
           exit 1
+
+      - name: Run a comparison against the container
+        run: |
+          python3 - <<'PY'
+          import json, urllib.request
+          from pathlib import Path
+
+          docs = Path("sample_docs")
+          payload = {
+              "device_a_text": (docs / "device_a_qsg.md").read_text(encoding="utf-8"),
+              "device_b_text": (docs / "device_b_qsg.md").read_text(encoding="utf-8"),
+          }
+          req = urllib.request.Request(
+              "http://localhost:8000/api/v1/compare-text",
+              data=json.dumps(payload).encode(),
+              headers={"Content-Type": "application/json"},
+          )
+          body = json.load(urllib.request.urlopen(req, timeout=30))
+          assert body["history_id"], body
+          assert 1 <= body["installation_friction_score_device_a"] <= 10, body
+          print("Comparison OK:", body["history_id"])
+          PY
 
       - name: Dump container logs
         if: always()

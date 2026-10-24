@@ -11,10 +11,9 @@ Two stages, matching the two isolated subagents in `.claude/agents/`:
    API call) we fall back to a deterministic regex/heuristic parser, so
    local staging and the test suite never fail hard on missing credentials.
 2. Synthesis: two normalized `DeviceSpec` objects in, one `BattlecardResponse`
-   out. This stage is fully deterministic/rule-based rather than routed
-   through `battlecard_analyst` (that subagent's contract is free-form
-   markdown prose, which doesn't map cleanly onto typed response fields like
-   integer friction scores).
+   out. This stage is fully deterministic/rule-based: an LLM's free-form
+   prose doesn't map cleanly onto typed response fields like integer friction
+   scores.
 
 Raw extraction never validates or classifies IPs/LEDs itself — that
 normalization always goes through `app/tools/net_validator.py` and
@@ -27,6 +26,7 @@ import json
 import logging
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
@@ -34,17 +34,13 @@ from app.models.schemas import (
     CablingPort,
     LEDIndicator,
     QSGExtraction,
-)
-from app.models.schemas import (
-    ProvisioningMethod as RawProvisioningMethod,
+    RawProvisioningMethod,
 )
 from app.schemas import (
     BattlecardResponse,
     DeviceSpec,
     LEDStatus,
-)
-from app.schemas import (
-    ProvisioningMethod as ApiProvisioningMethod,
+    ProvisioningMethod,
 )
 from app.tools.capability_compare import parse_speed_mbps, rank_wifi_standard
 from app.tools.led_normalizer import LEDState, led_sort_key, normalize_led
@@ -66,8 +62,18 @@ except ImportError:  # pragma: no cover - exercised only when package absent
 logger = logging.getLogger(__name__)
 
 _AGENTS_DIR = Path(__file__).resolve().parents[2] / ".claude" / "agents"
-_ANTHROPIC_EXTRACTOR_MODEL = "claude-haiku-4-5-20251001"
+_ANTHROPIC_EXTRACTOR_MODEL = "claude-haiku-5-5"
 _GEMINI_EXTRACTOR_MODEL = "gemini-2.5-flash"
+
+# Bounds on the LLM call: untrusted PDF text must not be able to run up an
+# unbounded bill or tie up a worker thread on a hung connection.
+MAX_LLM_INPUT_CHARS = 100_000
+_LLM_MAX_OUTPUT_TOKENS = 4096
+_LLM_TIMEOUT_SECONDS = 60.0
+_EXTRACTION_TOOL_NAME = "record_qsg_extraction"
+
+EXTRACTION_SOURCE_LLM = "llm"
+EXTRACTION_SOURCE_HEURISTIC = "heuristic"
 
 _PROVIDER_ANTHROPIC = "anthropic"
 _PROVIDER_GEMINI = "gemini"
@@ -103,6 +109,18 @@ _IPV4_RE = re.compile(
     r"\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b"
 )
 
+_DEFAULT_IP_CONTEXT_RE = re.compile(
+    r"default|gateway|management|log\s?in|browse|navigate|admin", re.IGNORECASE
+)
+
+# A sentence matching this describes the device acting as a DHCP *server* for
+# LAN clients, which says nothing about how the device itself is provisioned.
+_DHCP_SERVER_RE = re.compile(
+    r"dhcp (?:server|pool|range)|lan clients?"
+    r"|(?:serves?|assigns?|hands? out)\b.*\bdhcp",
+    re.IGNORECASE,
+)
+
 _PROVISIONING_KEYWORD_PATTERNS = [
     (re.compile(r"tr-?069", re.IGNORECASE), RawProvisioningMethod.TR069),
     (re.compile(r"\bdhcp\b", re.IGNORECASE), RawProvisioningMethod.DHCP),
@@ -127,16 +145,16 @@ _NEGATION_TRIGGERS = (
 )
 
 _RAW_TO_API_PROVISIONING = {
-    RawProvisioningMethod.TR069: ApiProvisioningMethod.TR069,
-    RawProvisioningMethod.DHCP: ApiProvisioningMethod.DHCP,
-    RawProvisioningMethod.WEB_GUI: ApiProvisioningMethod.WEB_GUI,
-    RawProvisioningMethod.CONSOLE: ApiProvisioningMethod.CONSOLE,
+    RawProvisioningMethod.TR069: ProvisioningMethod.TR069,
+    RawProvisioningMethod.DHCP: ProvisioningMethod.DHCP,
+    RawProvisioningMethod.WEB_GUI: ProvisioningMethod.WEB_GUI,
+    RawProvisioningMethod.CONSOLE: ProvisioningMethod.CONSOLE,
 }
 # Methods outside DeviceSpec's 4-value enum map to the closest analogue when
 # nothing else is available to pick as the "primary" method.
 _PRIMARY_FALLBACK_MAP = {
-    RawProvisioningMethod.QR_MOBILE_APP: ApiProvisioningMethod.WEB_GUI,
-    RawProvisioningMethod.OTHER: ApiProvisioningMethod.CONSOLE,
+    RawProvisioningMethod.QR_MOBILE_APP: ProvisioningMethod.WEB_GUI,
+    RawProvisioningMethod.OTHER: ProvisioningMethod.CONSOLE,
 }
 
 
@@ -224,9 +242,25 @@ def _detect_device_name(text: str) -> str:
     return "Unknown Device"
 
 
+def _is_netmask(candidate: str) -> bool:
+    """True for a contiguous-bits subnet mask like 255.255.255.0 (or 0.0.0.0)."""
+    bits = "".join(f"{int(octet):08b}" for octet in candidate.split("."))
+    return "01" not in bits
+
+
 def _detect_default_ip(text: str) -> Optional[str]:
-    match = _IPV4_RE.search(text)
-    return match.group(0) if match else None
+    """Pick the device's default address: the first IPv4 that isn't a subnet
+    mask, preferring one on a line that says it's the device's own address."""
+    fallback: Optional[str] = None
+    for line in text.splitlines():
+        for match in _IPV4_RE.finditer(line):
+            candidate = match.group(0)
+            if _is_netmask(candidate):
+                continue
+            if _DEFAULT_IP_CONTEXT_RE.search(line):
+                return candidate
+            fallback = fallback or candidate
+    return fallback
 
 
 def _detect_provisioning_methods(text: str) -> list[RawProvisioningMethod]:
@@ -239,9 +273,14 @@ def _detect_provisioning_methods(text: str) -> list[RawProvisioningMethod]:
         if any(trigger in lowered for trigger in _NEGATION_TRIGGERS):
             continue
         for pattern, method in _PROVISIONING_KEYWORD_PATTERNS:
-            if method not in seen and pattern.search(sentence):
-                seen.add(method)
-                ordered.append(method)
+            if method in seen or not pattern.search(sentence):
+                continue
+            if method == RawProvisioningMethod.DHCP and _DHCP_SERVER_RE.search(
+                sentence
+            ):
+                continue
+            seen.add(method)
+            ordered.append(method)
     return ordered
 
 
@@ -325,40 +364,75 @@ def _provider_ready(provider: str) -> bool:
     return False
 
 
+def _llm_user_content(document_text: str, source_document: str) -> str:
+    if len(document_text) > MAX_LLM_INPUT_CHARS:
+        logger.warning(
+            "Truncating %r from %d to %d chars for LLM extraction",
+            source_document,
+            len(document_text),
+            MAX_LLM_INPUT_CHARS,
+        )
+        document_text = document_text[:MAX_LLM_INPUT_CHARS]
+    return f"Source document: {source_document}\n\n{document_text}"
+
+
+def _parse_json_payload(raw: str) -> dict:
+    """Parse a model's JSON reply, tolerating a surrounding ```json fence."""
+    text = raw.strip()
+    fenced = re.match(r"^```(?:json)?\s*(.*?)\s*```$", text, re.DOTALL)
+    if fenced:
+        text = fenced.group(1)
+    return json.loads(text)
+
+
 def _extract_via_anthropic(document_text: str, source_document: str) -> QSGExtraction:
-    client = anthropic.Anthropic()
+    client = anthropic.Anthropic(timeout=_LLM_TIMEOUT_SECONDS, max_retries=1)
     system_prompt = _load_agent_system_prompt("qsg_extractor.md")
+    # Forcing a tool call makes the API return schema-shaped JSON instead of
+    # free text we'd have to parse.
     response = client.messages.create(
         model=_ANTHROPIC_EXTRACTOR_MODEL,
-        max_tokens=2000,
+        max_tokens=_LLM_MAX_OUTPUT_TOKENS,
         system=system_prompt,
+        tools=[
+            {
+                "name": _EXTRACTION_TOOL_NAME,
+                "description": "Record the fields extracted from the document.",
+                "input_schema": QSGExtraction.model_json_schema(),
+            }
+        ],
+        tool_choice={"type": "tool", "name": _EXTRACTION_TOOL_NAME},
         messages=[
             {
                 "role": "user",
-                "content": f"Source document: {source_document}\n\n{document_text}",
+                "content": _llm_user_content(document_text, source_document),
             }
         ],
     )
-    payload = "".join(
-        getattr(block, "text", "")
-        for block in response.content
-        if getattr(block, "type", None) == "text"
-    )
-    return QSGExtraction.model_validate(json.loads(payload))
+    if getattr(response, "stop_reason", None) == "max_tokens":
+        raise ValueError("LLM output truncated at max_tokens")
+    for block in response.content:
+        if getattr(block, "type", None) == "tool_use":
+            return QSGExtraction.model_validate(getattr(block, "input"))
+    raise ValueError("LLM response contained no tool_use block")
 
 
 def _extract_via_gemini(document_text: str, source_document: str) -> QSGExtraction:
-    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+    client = genai.Client(
+        api_key=os.environ["GEMINI_API_KEY"],
+        http_options=gemini_types.HttpOptions(timeout=int(_LLM_TIMEOUT_SECONDS * 1000)),
+    )
     system_prompt = _load_agent_system_prompt("qsg_extractor.md")
     response = client.models.generate_content(
         model=_GEMINI_EXTRACTOR_MODEL,
-        contents=f"Source document: {source_document}\n\n{document_text}",
+        contents=_llm_user_content(document_text, source_document),
         config=gemini_types.GenerateContentConfig(
             system_instruction=system_prompt,
             response_mime_type="application/json",
+            max_output_tokens=_LLM_MAX_OUTPUT_TOKENS,
         ),
     )
-    return QSGExtraction.model_validate(json.loads(response.text))
+    return QSGExtraction.model_validate(_parse_json_payload(response.text))
 
 
 _PROVIDER_EXTRACTORS = {
@@ -368,13 +442,22 @@ _PROVIDER_EXTRACTORS = {
 
 
 def extract_qsg_fields(document_text: str, source_document: str) -> QSGExtraction:
+    return _extract_with_source(document_text, source_document)[0]
+
+
+def _extract_with_source(
+    document_text: str, source_document: str
+) -> tuple[QSGExtraction, str]:
     """Extract raw QSG fields via a configured LLM provider (Anthropic or
     Gemini — see `_select_llm_provider`) when available, otherwise via a
     deterministic heuristic parser."""
     provider = _select_llm_provider()
     if provider and _provider_ready(provider):
         try:
-            return _PROVIDER_EXTRACTORS[provider](document_text, source_document)
+            return (
+                _PROVIDER_EXTRACTORS[provider](document_text, source_document),
+                EXTRACTION_SOURCE_LLM,
+            )
         except Exception:
             # never fail hard on a flaky/unreachable API - fall back, but
             # log it so a persistently failing key doesn't go unnoticed
@@ -396,19 +479,22 @@ def extract_qsg_fields(document_text: str, source_document: str) -> QSGExtractio
             "No LLM provider configured; using heuristic parser for %r",
             source_document,
         )
-    return _heuristic_extract_qsg(document_text, source_document)
+    return (
+        _heuristic_extract_qsg(document_text, source_document),
+        EXTRACTION_SOURCE_HEURISTIC,
+    )
 
 
 def _select_primary_provisioning_method(
     methods: list[RawProvisioningMethod],
-) -> ApiProvisioningMethod:
+) -> ProvisioningMethod:
     for method in methods:
         if method in _RAW_TO_API_PROVISIONING:
             return _RAW_TO_API_PROVISIONING[method]
     for method in methods:
         if method in _PRIMARY_FALLBACK_MAP:
             return _PRIMARY_FALLBACK_MAP[method]
-    return ApiProvisioningMethod.CONSOLE
+    return ProvisioningMethod.CONSOLE
 
 
 def _normalize_to_device_spec(extraction: QSGExtraction) -> DeviceSpec:
@@ -424,6 +510,7 @@ def _normalize_to_device_spec(extraction: QSGExtraction) -> DeviceSpec:
         normalized = normalize_led(led.raw_description)
         led_states.append(
             LEDStatus(
+                name=led.led_name,
                 state=normalized.state,
                 color=normalized.color,
                 pattern=normalized.pattern,
@@ -437,7 +524,10 @@ def _normalize_to_device_spec(extraction: QSGExtraction) -> DeviceSpec:
     for port in extraction.cabling_ports:
         label, count = expand_port_range(port.port_name)
         name = f"{count}x {label}" if count > 1 else port.port_name
-        ports.append(f"{name} ({port.port_type})")
+        entry = f"{name} ({port.port_type})"
+        if port.notes:
+            entry += f" - {port.notes}"
+        ports.append(entry)
 
     return DeviceSpec(
         model_name=extraction.device_name,
@@ -446,6 +536,7 @@ def _normalize_to_device_spec(extraction: QSGExtraction) -> DeviceSpec:
         provisioning_method=_select_primary_provisioning_method(
             extraction.provisioning_methods
         ),
+        provisioning_methods=[m.value for m in extraction.provisioning_methods],
         required_tools=extraction.required_tools,
         led_states=led_states,
         ports=ports,
@@ -459,15 +550,27 @@ def _normalize_to_device_spec(extraction: QSGExtraction) -> DeviceSpec:
 def extract_device_spec(document_text: str, source_document: str) -> DeviceSpec:
     """Full pipeline for one document: raw extraction, then deterministic
     IP/LED normalization into a clean `DeviceSpec`."""
-    extraction = extract_qsg_fields(document_text, source_document)
-    return _normalize_to_device_spec(extraction)
+    extraction, source = _extract_with_source(document_text, source_document)
+    spec = _normalize_to_device_spec(extraction)
+    spec.extraction_source = source
+    return spec
+
+
+def extract_device_specs(
+    text_a: str, name_a: str, text_b: str, name_b: str
+) -> tuple[DeviceSpec, DeviceSpec]:
+    """Run both extractions concurrently; the LLM calls are I/O-bound."""
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        future_a = pool.submit(extract_device_spec, text_a, name_a)
+        future_b = pool.submit(extract_device_spec, text_b, name_b)
+        return future_a.result(), future_b.result()
 
 
 # ---------------------------------------------------------------------------
 # Stage 2: synthesis
 # ---------------------------------------------------------------------------
 
-_REMOTE_PROVISIONING_METHODS = {ApiProvisioningMethod.TR069, ApiProvisioningMethod.DHCP}
+_REMOTE_PROVISIONING_METHODS = {ProvisioningMethod.TR069, ProvisioningMethod.DHCP}
 
 # Exact text app.js matches on to render these as a neutral "nothing found"
 # line instead of a highlighted risk/advantage — keep the two in sync.
@@ -484,7 +587,7 @@ def _compute_friction_score(spec: DeviceSpec) -> int:
     score += min(len(spec.required_tools), 4)
     if spec.provisioning_method not in _REMOTE_PROVISIONING_METHODS:
         score += 3
-    if spec.provisioning_method == ApiProvisioningMethod.CONSOLE:
+    if spec.provisioning_method == ProvisioningMethod.CONSOLE:
         score += 2
     return max(1, min(10, score))
 
@@ -506,6 +609,10 @@ def _build_comparison_matrix(device_a: DeviceSpec, device_b: DeviceSpec) -> dict
         "provisioning_method": {
             "device_a": device_a.provisioning_method.value,
             "device_b": device_b.provisioning_method.value,
+        },
+        "provisioning_methods": {
+            "device_a": device_a.provisioning_methods,
+            "device_b": device_b.provisioning_methods,
         },
         "required_tools": {
             "device_a": device_a.required_tools,
@@ -537,7 +644,7 @@ def _build_comparison_matrix(device_a: DeviceSpec, device_b: DeviceSpec) -> dict
 
 def _build_key_risks(spec: DeviceSpec) -> list[str]:
     risks = []
-    if spec.provisioning_method == ApiProvisioningMethod.CONSOLE:
+    if spec.provisioning_method == ProvisioningMethod.CONSOLE:
         risks.append(
             "Requires a technician with a laptop and terminal emulator on-site "
             "for initial console setup."
@@ -615,7 +722,14 @@ def _build_key_advantages(
 def _build_sales_talk_track(
     device_a: DeviceSpec, score_a: int, device_b: DeviceSpec, score_b: int
 ) -> str:
-    if score_a <= score_b:
+    if score_a == score_b:
+        return (
+            f"{device_a.model_name} and {device_b.model_name} are tied on "
+            f"install effort (Installation Friction Index {score_a} each). "
+            f"Differentiate on the capability and spec advantages above "
+            f"rather than on field labor."
+        )
+    if score_a < score_b:
         winner, w_score, loser, l_score = (
             device_a.model_name,
             score_a,
@@ -641,8 +755,8 @@ def synthesize_battlecard(
     device_a: DeviceSpec, device_b: DeviceSpec
 ) -> BattlecardResponse:
     """Deterministically compare two normalized `DeviceSpec` objects into a
-    `BattlecardResponse`. Rule-based rather than LLM-routed: `battlecard_analyst`
-    produces free-form markdown, which doesn't map onto these typed fields."""
+    `BattlecardResponse`. Rule-based rather than LLM-routed, since free-form
+    prose doesn't map onto these typed fields."""
     score_a = _compute_friction_score(device_a)
     score_b = _compute_friction_score(device_b)
     advantages_a, advantages_b = _build_key_advantages(device_a, device_b)
@@ -655,4 +769,6 @@ def synthesize_battlecard(
         key_advantages_device_a=advantages_a,
         key_advantages_device_b=advantages_b,
         sales_talk_track=_build_sales_talk_track(device_a, score_a, device_b, score_b),
+        extraction_source_device_a=device_a.extraction_source,
+        extraction_source_device_b=device_b.extraction_source,
     )
