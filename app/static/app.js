@@ -16,7 +16,10 @@ function storedTheme() {
 
 function applyTheme(theme) {
   document.documentElement.dataset.theme = theme;
-  themeToggle.setAttribute("aria-pressed", String(theme === "dark"));
+  // The button names the action, and its icon (swapped in CSS) shows the target mode.
+  const label = `Switch to ${theme === "dark" ? "light" : "dark"} theme`;
+  themeToggle.setAttribute("aria-label", label);
+  themeToggle.title = label;
   document.querySelector('meta[name="theme-color"]').content = THEME_BAR_COLORS[theme];
 }
 
