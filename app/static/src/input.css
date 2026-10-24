@@ -1,3 +1,198 @@
 @import "tailwindcss";
 @source "../index.html";
 @source "../app.js";
+
+/* Self-hosted so the dashboard renders identically offline and in the Docker image. */
+@font-face {
+  font-family: "Archivo";
+  font-style: normal;
+  font-weight: 100 900;
+  font-stretch: 62% 125%;
+  font-display: swap;
+  src: url("/static/fonts/archivo-latin-wdth.woff2") format("woff2-variations");
+}
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 100 700;
+  font-display: swap;
+  src: url("/static/fonts/ibm-plex-sans-latin-wght.woff2") format("woff2-variations");
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url("/static/fonts/jetbrains-mono-latin-wght.woff2") format("woff2-variations");
+}
+
+/*
+ * Design tokens. Color roles:
+ *   panel / plate  page background and raised surface (device plastic)
+ *   ink            text; ink-muted is >= 4.5:1 on panel and plate
+ *   line           borders and dividers
+ *   bezel          header and device strip (dark)
+ *   action         primary buttons and links
+ *   danger         destructive buttons and error text (white on it is >= 4.5:1)
+ *   led-*          status system: friction, risks, LED legend. Never decorative.
+ * Spacing uses Tailwind's default 4px scale (--spacing: 0.25rem at a 16px root).
+ */
+@theme {
+  --color-panel: #eef0ee;
+  --color-plate: #f9faf8;
+  --color-ink: #1c2127;
+  --color-ink-muted: #56616b;
+  --color-line: #c9d0cb;
+  --color-bezel: #2b333b;
+  --color-bezel-ink: #e7ebe8;
+  --color-action: #0d6b6b;
+  --color-action-hover: #0a5656;
+  --color-danger: #b3261e;
+  --color-danger-hover: #8f1d17;
+  --color-led-green: #2e9e5b;
+  --color-led-amber: #e0a100;
+  --color-led-red: #d6403a;
+  --color-led-blue: #2f6fd6;
+  --color-led-white: #e2e8f0;
+  --color-led-off: #cbd5e1;
+  --color-led-unknown: #94a3b8;
+
+  --font-heading: "Archivo", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", monospace;
+
+  --radius-control: 0.375rem;
+}
+
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+  html {
+    font-size: 16px;
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    background-color: var(--color-panel);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    line-height: 1.5;
+  }
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-heading);
+    text-wrap: balance;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-action);
+    outline-offset: 2px;
+  }
+  /* Anchored sections must clear the sticky header. */
+  [id] {
+    scroll-margin-top: 5rem;
+  }
+  button,
+  a,
+  [role="button"] {
+    touch-action: manipulation;
+  }
+}
+
+@layer components {
+  .skip-link {
+    position: absolute;
+    left: 1rem;
+    top: -4rem;
+    z-index: 60;
+    padding: 0.5rem 1rem;
+    border-radius: var(--radius-control);
+    background-color: var(--color-bezel);
+    color: var(--color-bezel-ink);
+    font-weight: 600;
+  }
+  .skip-link:focus {
+    top: 1rem;
+  }
+
+  .dropzone.dragover {
+    border-color: var(--color-action);
+    background-color: var(--color-plate);
+  }
+
+  .spinner {
+    border: 3px solid rgb(255 255 255 / 0.35);
+    border-top-color: #fff;
+    border-radius: 9999px;
+    width: 1rem;
+    height: 1rem;
+    animation: spin 0.7s linear infinite;
+  }
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .confirm-pop {
+      animation: confirmPop 0.15s ease-out;
+    }
+  }
+  @keyframes confirmPop {
+    from {
+      opacity: 0;
+      transform: scale(0.96);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+
+  .led-dot {
+    display: inline-block;
+    width: 0.6rem;
+    height: 0.6rem;
+    margin-top: 0.3rem;
+    border-radius: 9999px;
+    flex-shrink: 0;
+    box-shadow: 0 0 0 1px rgb(0 0 0 / 0.06);
+  }
+  .led-dot--green { background-color: var(--color-led-green); }
+  .led-dot--amber { background-color: var(--color-led-amber); }
+  .led-dot--red { background-color: var(--color-led-red); }
+  .led-dot--blue { background-color: var(--color-led-blue); }
+  .led-dot--white { background-color: var(--color-led-white); }
+  .led-dot--off { background-color: var(--color-led-off); }
+  .led-dot--unknown { background-color: var(--color-led-unknown); }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .led-dot--blinking {
+      animation: ledBlink 1.4s steps(1, end) infinite;
+    }
+    .led-dot--pulsing {
+      animation: ledPulse 1.6s ease-in-out infinite;
+    }
+  }
+  @keyframes ledBlink {
+    0%, 49% { opacity: 1; }
+    50%, 100% { opacity: 0.15; }
+  }
+  @keyframes ledPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.25; }
+  }
+
+  /* LED guide: dots sit on the dark bezel and glow like the real indicators. */
+  .led-panel .led-dot {
+    width: 0.875rem;
+    height: 0.875rem;
+    box-shadow: 0 0 0 1px rgb(255 255 255 / 0.15);
+  }
+  .led-panel .led-dot--green { box-shadow: 0 0 10px 2px color-mix(in srgb, var(--color-led-green) 55%, transparent); }
+  .led-panel .led-dot--amber { box-shadow: 0 0 10px 2px color-mix(in srgb, var(--color-led-amber) 55%, transparent); }
+  .led-panel .led-dot--red { box-shadow: 0 0 10px 2px color-mix(in srgb, var(--color-led-red) 55%, transparent); }
+  .led-panel .led-dot--blue { box-shadow: 0 0 10px 2px color-mix(in srgb, var(--color-led-blue) 55%, transparent); }
+  .led-panel .led-dot--white { box-shadow: 0 0 10px 2px color-mix(in srgb, var(--color-led-white) 45%, transparent); }
+}
