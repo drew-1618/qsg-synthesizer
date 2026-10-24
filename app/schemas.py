@@ -129,6 +129,8 @@ class HistorySummary(BaseModel):
     installation_friction_score_device_a: Optional[int] = None
     installation_friction_score_device_b: Optional[int] = None
     perspective: Optional[Perspective] = None
+    # Hash of both input documents; None on records saved before it was tracked.
+    input_fingerprint: Optional[str] = None
 
 
 class HistoryRecord(BaseModel):
@@ -137,10 +139,30 @@ class HistoryRecord(BaseModel):
     device_a_name: str
     device_b_name: str
     battlecard: BattlecardResponse
+    input_fingerprint: Optional[str] = None
+
+
+class HistoryStack(BaseModel):
+    """Comparisons of the same device pair in the same mode, newest first."""
+
+    key: str
+    latest: HistorySummary
+    others: List[HistorySummary] = Field(default_factory=list)
+    # Older entries made from the same documents as a newer entry in the stack.
+    redundant_ids: List[str] = Field(default_factory=list)
 
 
 class HistoryPage(BaseModel):
     items: List[HistorySummary]
     total: int
+    limit: int
+    offset: int
+
+
+class HistoryStackPage(BaseModel):
+    items: List[HistoryStack]
+    # Stacks matching the query; `record_total` counts the records in them.
+    total: int
+    record_total: int
     limit: int
     offset: int

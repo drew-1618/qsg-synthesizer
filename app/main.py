@@ -18,6 +18,7 @@ if "PYTEST_VERSION" not in os.environ:
     load_dotenv()
 
 import base64
+import hashlib
 import logging
 from pathlib import Path
 from typing import Literal, Optional
@@ -44,6 +45,7 @@ from app.schemas import (
     DeviceSpec,
     HistoryPage,
     HistoryRecord,
+    HistoryStackPage,
     Perspective,
 )
 from app.services import export as export_service
@@ -187,16 +189,23 @@ def compare_text(payload: CompareTextRequest) -> CompareResponse:
         payload.device_b_text,
         payload.device_b_name,
     )
-    return _synthesize_and_save(device_a, device_b)
+    fingerprint = _input_fingerprint(payload.device_a_text, payload.device_b_text)
+    return _synthesize_and_save(device_a, device_b, fingerprint)
+
+
+def _input_fingerprint(text_a: str, text_b: str) -> str:
+    """Identifies a comparison's inputs, so history can spot exact reruns."""
+    return hashlib.sha256(f"{text_a}\0{text_b}".encode("utf-8")).hexdigest()
 
 
 def _synthesize_and_save(
     device_a: DeviceSpec,
     device_b: DeviceSpec,
+    input_fingerprint: str,
     perspective: Optional[Perspective] = None,
 ) -> CompareResponse:
     battlecard = synthesize_battlecard(device_a, device_b, perspective)
-    record = history.save_comparison(battlecard)
+    record = history.save_comparison(battlecard, input_fingerprint=input_fingerprint)
     return CompareResponse(**battlecard.model_dump(), history_id=record.id)
 
 
@@ -265,7 +274,8 @@ def compare_pdfs(
         device_b_pdf.filename or "device_b.pdf",
     )
 
-    return _synthesize_and_save(device_a, device_b)
+    fingerprint = _input_fingerprint(device_a_text, device_b_text)
+    return _synthesize_and_save(device_a, device_b, fingerprint)
 
 
 def _resolve_document(
@@ -309,7 +319,8 @@ def compare_documents(
         "Device B", device_b_file, device_b_text, device_b_name
     )
     device_a, device_b = extract_device_specs(text_a, source_a, text_b, source_b)
-    return _synthesize_and_save(device_a, device_b, mode)
+    fingerprint = _input_fingerprint(text_a, text_b)
+    return _synthesize_and_save(device_a, device_b, fingerprint, mode)
 
 
 @router.get("/api/v1/history", response_model=HistoryPage)
@@ -321,6 +332,24 @@ def get_history(
     return HistoryPage(
         items=history.list_comparisons(limit=limit, offset=offset, query=q),
         total=history.count_comparisons(query=q),
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/api/v1/history/stacks", response_model=HistoryStackPage)
+def get_history_stacks(
+    limit: int = Query(20, ge=1, le=history.MAX_HISTORY_ENTRIES),
+    offset: int = Query(0, ge=0),
+    q: Optional[str] = Query(None, max_length=200),
+) -> HistoryStackPage:
+    stacks, total, record_total = history.list_stacks(
+        limit=limit, offset=offset, query=q
+    )
+    return HistoryStackPage(
+        items=stacks,
+        total=total,
+        record_total=record_total,
         limit=limit,
         offset=offset,
     )
@@ -405,6 +434,16 @@ def delete_history_item(history_id: str) -> Response:
             status_code=404, detail=f"History item '{history_id}' not found."
         )
     return Response(status_code=204)
+
+
+@router.delete("/api/v1/history/{history_id}/copies")
+def delete_history_copies(history_id: str) -> dict:
+    deleted = history.delete_older_copies(history_id)
+    if deleted is None:
+        raise HTTPException(
+            status_code=404, detail=f"History item '{history_id}' not found."
+        )
+    return {"deleted": deleted}
 
 
 @router.delete("/api/v1/history")

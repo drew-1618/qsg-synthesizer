@@ -521,6 +521,38 @@ class TestHistoryId:
         assert client.get(f"/api/v1/history/{data['history_id']}").status_code == 200
 
 
+class TestHistoryStacks:
+    def _post(self):
+        return TestHistory()._post_comparison().json()
+
+    def test_rerun_of_same_documents_stacks_with_one_redundant_copy(self):
+        first = self._post()
+        second = self._post()
+
+        page = client.get("/api/v1/history/stacks").json()
+        assert (page["total"], page["record_total"]) == (1, 2)
+        stack = page["items"][0]
+        assert stack["latest"]["id"] == second["history_id"]
+        assert stack["redundant_ids"] == [first["history_id"]]
+
+    def test_delete_copies_endpoint(self):
+        self._post()
+        second = self._post()
+
+        response = client.delete(f"/api/v1/history/{second['history_id']}/copies")
+        assert response.json() == {"deleted": 1}
+        assert client.get("/api/v1/history").json()["total"] == 1
+
+    def test_delete_copies_of_unknown_record_returns_404(self):
+        assert client.delete(f"/api/v1/history/{'c' * 32}/copies").status_code == 404
+
+    def test_stack_routes_require_auth_once_configured(self, monkeypatch):
+        monkeypatch.setenv("APP_USERNAME", "admin")
+        monkeypatch.setenv("APP_PASSWORD", "hunter2")
+        assert client.get("/api/v1/history/stacks").status_code == 401
+        assert client.delete(f"/api/v1/history/{'c' * 32}/copies").status_code == 401
+
+
 class TestEmptyDocuments:
     def test_image_only_pdf_returns_422_and_is_not_saved(self):
         import pymupdf

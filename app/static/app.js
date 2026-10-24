@@ -57,7 +57,9 @@ applyTheme(document.documentElement.dataset.theme === "dark" ? "dark" : "light")
 let currentHistoryId = null;
 const HISTORY_PAGE_SIZE = 20;
 let historyOffset = 0;
-let historyItems = [];
+// Stacks group comparisons of the same device pair and mode (see history.py).
+let historyStacks = [];
+const expandedStacks = new Set();
 let historySearch = "";
 
 const EXPORT_FORMATS = {
@@ -608,12 +610,96 @@ function setUrlId(id, { replace = false } = {}) {
   history[replace ? "replaceState" : "pushState"]({}, "", url);
 }
 
+// A row that opens one comparison, plus its delete button.
+function historyRow(item, { title, subtitle }) {
+  const plainLabel = `${escapeHtml(item.device_a_name)} vs ${escapeHtml(item.device_b_name)}`;
+  const isCurrent = item.id === currentHistoryId;
+  return `
+    <li class="flex items-center gap-1">
+      <button type="button" data-history-id="${item.id}"${isCurrent ? ' aria-current="true"' : ""}
+              class="flex-1 min-w-0 text-left py-3 px-2 -mx-2 rounded-control hover:bg-plate transition-colors ${isCurrent ? "bg-plate" : ""}">
+        ${title}
+        ${subtitle}
+      </button>
+      <button type="button" data-delete-id="${item.id}" aria-label="Delete comparison: ${plainLabel}, ${escapeHtml(formatTimestamp(item.created_at))}"
+              class="shrink-0 w-9 h-9 inline-flex items-center justify-center rounded-control text-ink-muted hover:text-danger-text hover:bg-plate">
+        &times;
+      </button>
+    </li>`;
+}
+
+function historyLabel(item) {
+  const plainLabel = `${escapeHtml(item.device_a_name)} vs ${escapeHtml(item.device_b_name)}`;
+  const highlighted = `${highlightMatch(item.device_a_name, historySearch)} vs ${highlightMatch(item.device_b_name, historySearch)}`;
+  return `<span class="block font-medium truncate" title="${plainLabel}">${highlighted}</span>`;
+}
+
+function singleHistoryRow(item) {
+  return historyRow(item, {
+    title: historyLabel(item),
+    subtitle: `
+      <span class="block text-ink-muted truncate">${escapeHtml(easierLabel(item))}</span>
+      <span class="block text-ink-muted">${escapeHtml(formatTimestamp(item.created_at))}</span>`,
+  });
+}
+
+// Several runs of the same comparison: the newest is shown, the rest fold away.
+function stackedHistoryRows(stack, index) {
+  const members = [stack.latest, ...stack.others];
+  const redundant = new Set(stack.redundant_ids);
+  const isExpanded =
+    expandedStacks.has(stack.key) || stack.others.some((item) => item.id === currentHistoryId);
+  const panelId = `history-stack-${index}`;
+  const memberRows = members
+    .map((item) =>
+      historyRow(item, {
+        title: `<span class="block font-medium">${escapeHtml(formatTimestamp(item.created_at))}</span>`,
+        subtitle: `
+          <span class="block text-ink-muted truncate">${escapeHtml(easierLabel(item))}</span>
+          ${redundant.has(item.id) ? '<span class="block text-ink-muted">Same documents as a newer run</span>' : ""}`,
+      })
+    )
+    .join("");
+  const copies = stack.redundant_ids.length;
+  const dedupe = copies
+    ? `<li class="pt-1 pb-2">
+         <button type="button" data-dedupe-id="${stack.latest.id}" data-dedupe-count="${copies}"
+                 class="text-sm font-medium text-ink-muted hover:text-danger-text underline underline-offset-2 rounded-control">
+           Delete ${copies} older ${copies === 1 ? "copy" : "copies"}
+         </button>
+       </li>`
+    : "";
+  return `
+    <li class="py-1">
+      <div class="relative isolate flex items-center gap-1 rounded-control border border-line bg-plate px-2 mb-1
+                  before:absolute before:inset-x-2 before:-bottom-1 before:h-2 before:-z-10 before:rounded-b-control before:border before:border-t-0 before:border-line before:bg-plate">
+        <button type="button" data-history-id="${stack.latest.id}"${stack.latest.id === currentHistoryId ? ' aria-current="true"' : ""}
+                class="flex-1 min-w-0 text-left py-3 rounded-control">
+          ${historyLabel(stack.latest)}
+          <span class="block text-ink-muted truncate">${escapeHtml(easierLabel(stack.latest))}</span>
+          <span class="block text-ink-muted">Latest ${escapeHtml(formatTimestamp(stack.latest.created_at))}</span>
+        </button>
+        <button type="button" data-stack-toggle="${escapeHtml(stack.key)}" aria-expanded="${isExpanded}" aria-controls="${panelId}"
+                class="shrink-0 inline-flex items-center gap-1 h-9 px-2 rounded-control text-sm text-ink-muted hover:text-ink hover:bg-plate-hover">
+          <span class="font-mono tabular-nums">${members.length}</span> runs
+          <svg class="w-4 h-4 transition-transform ${isExpanded ? "rotate-180" : ""}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M6 9l6 6 6-6" />
+          </svg>
+        </button>
+      </div>
+      <ul id="${panelId}" class="${isExpanded ? "" : "hidden "}mt-2 ml-2 pl-3 border-l border-line">
+        ${memberRows}
+        ${dedupe}
+      </ul>
+    </li>`;
+}
+
 function renderHistoryList() {
   const list = document.getElementById("history-list");
   const empty = document.getElementById("history-empty");
   const clearAllBtn = document.getElementById("clear-history-btn");
-  clearAllBtn.classList.toggle("hidden", historyItems.length === 0);
-  if (historyItems.length === 0) {
+  clearAllBtn.classList.toggle("hidden", historyStacks.length === 0);
+  if (historyStacks.length === 0) {
     list.innerHTML = "";
     empty.textContent = historySearch
       ? "No comparisons match that search."
@@ -622,25 +708,8 @@ function renderHistoryList() {
     return;
   }
   empty.classList.add("hidden");
-  list.innerHTML = historyItems
-    .map((item) => {
-      const plainLabel = `${escapeHtml(item.device_a_name)} vs ${escapeHtml(item.device_b_name)}`;
-      const highlightedLabel = `${highlightMatch(item.device_a_name, historySearch)} vs ${highlightMatch(item.device_b_name, historySearch)}`;
-      const isCurrent = item.id === currentHistoryId;
-      return `
-        <li class="flex items-center gap-1">
-          <button type="button" data-history-id="${item.id}"${isCurrent ? ' aria-current="true"' : ""}
-                  class="flex-1 min-w-0 text-left py-3 px-2 -mx-2 rounded-control hover:bg-plate transition-colors ${isCurrent ? "bg-plate" : ""}">
-            <span class="block font-medium truncate" title="${plainLabel}">${highlightedLabel}</span>
-            <span class="block text-ink-muted truncate">${escapeHtml(easierLabel(item))}</span>
-            <span class="block text-ink-muted">${escapeHtml(formatTimestamp(item.created_at))}</span>
-          </button>
-          <button type="button" data-delete-id="${item.id}" aria-label="Delete comparison: ${plainLabel}"
-                  class="shrink-0 w-9 h-9 inline-flex items-center justify-center rounded-control text-ink-muted hover:text-danger-text hover:bg-plate">
-            &times;
-          </button>
-        </li>`;
-    })
+  list.innerHTML = historyStacks
+    .map((stack, i) => (stack.others.length ? stackedHistoryRows(stack, i) : singleHistoryRow(stack.latest)))
     .join("");
 }
 
@@ -650,18 +719,18 @@ async function loadHistory({ append = false } = {}) {
   const offset = append ? historyOffset : 0;
   const q = historySearch ? `&q=${encodeURIComponent(historySearch)}` : "";
   try {
-    const res = await fetch(`/api/v1/history?limit=${HISTORY_PAGE_SIZE}&offset=${offset}${q}`);
+    const res = await fetch(`/api/v1/history/stacks?limit=${HISTORY_PAGE_SIZE}&offset=${offset}${q}`);
     if (!res.ok) throw new Error();
     const page = await res.json();
-    historyItems = append ? historyItems.concat(page.items) : page.items;
+    historyStacks = append ? historyStacks.concat(page.items) : page.items;
     historyOffset = offset + page.items.length;
     if (!historySearch) {
-      historyTotalAll = page.total;
+      historyTotalAll = page.record_total;
       updateHistoryCount();
     }
     renderHistoryList();
     loadMoreBtn.classList.toggle("hidden", historyOffset >= page.total);
-    return historyItems;
+    return historyStacks;
   } catch {
     document.getElementById("history-list").innerHTML = "";
     document.getElementById("clear-history-btn").classList.add("hidden");
@@ -716,7 +785,54 @@ async function deleteHistoryItem(id) {
   }
 }
 
+// Deletes the older runs made from the same documents as a newer run in the
+// stack; runs from different documents are kept.
+async function deleteOlderCopies(id, count) {
+  const noun = count === 1 ? "copy" : "copies";
+  const ok = await confirmDialog(
+    `This deletes ${count} older ${noun} made from the same documents and keeps the newest. It can\u2019t be undone.`,
+    { title: `Delete ${count} older ${noun}?`, confirmLabel: `Delete ${noun}` }
+  );
+  if (!ok) return;
+  const stack = historyStacks.find((s) => s.latest.id === id);
+  const removed = new Set(stack ? stack.redundant_ids : []);
+  try {
+    const res = await fetch(`/api/v1/history/${id}/copies`, { method: "DELETE" });
+    if (!res.ok && res.status !== 404) {
+      throw new Error(describeFailure(res, await readJson(res), "Could not delete the older copies."));
+    }
+    if (removed.has(currentHistoryId)) {
+      setExportTarget(null);
+      hideResults();
+      setUrlId(null, { replace: true });
+    }
+    await loadHistory();
+  } catch (err) {
+    showError(describeException(err, "Could not delete the older copies."));
+  }
+}
+
+function toggleStack(button) {
+  const key = button.dataset.stackToggle;
+  const expand = button.getAttribute("aria-expanded") !== "true";
+  if (expand) expandedStacks.add(key);
+  else expandedStacks.delete(key);
+  button.setAttribute("aria-expanded", String(expand));
+  button.querySelector("svg").classList.toggle("rotate-180", expand);
+  document.getElementById(button.getAttribute("aria-controls")).classList.toggle("hidden", !expand);
+}
+
 document.getElementById("history-list").addEventListener("click", (e) => {
+  const toggleBtn = e.target.closest("[data-stack-toggle]");
+  if (toggleBtn) {
+    toggleStack(toggleBtn);
+    return;
+  }
+  const dedupeBtn = e.target.closest("[data-dedupe-id]");
+  if (dedupeBtn) {
+    deleteOlderCopies(dedupeBtn.dataset.dedupeId, Number(dedupeBtn.dataset.dedupeCount));
+    return;
+  }
   const deleteBtn = e.target.closest("[data-delete-id]");
   if (deleteBtn) {
     deleteHistoryItem(deleteBtn.dataset.deleteId);

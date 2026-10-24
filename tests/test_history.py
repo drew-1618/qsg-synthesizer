@@ -115,3 +115,72 @@ def test_records_saved_before_perspectives_still_load():
 
     assert history.get_comparison(record.id).battlecard.perspective is None
     assert history.list_comparisons()[0].perspective is None
+
+
+class TestStacks:
+    def test_same_pair_and_mode_stack_newest_first(self):
+        old = history.save_comparison(_make_battlecard(), input_fingerprint="f1")
+        other = history.save_comparison(_make_battlecard("X", "Y"))
+        new = history.save_comparison(_make_battlecard(), input_fingerprint="f2")
+
+        stacks, total, record_total = history.list_stacks()
+        assert (total, record_total) == (2, 3)
+        assert stacks[0].latest.id == new.id
+        assert [s.id for s in stacks[0].others] == [old.id]
+        assert stacks[1].latest.id == other.id and stacks[1].others == []
+
+    def test_names_match_case_insensitively_but_order_and_mode_matter(self):
+        history.save_comparison(_make_battlecard("Router", "Modem"))
+        history.save_comparison(_make_battlecard("router ", "MODEM"))
+        history.save_comparison(_make_battlecard("Modem", "Router"))
+        sales = _make_battlecard("Router", "Modem")
+        sales.perspective = "sales"
+        history.save_comparison(sales)
+
+        stacks, total, _ = history.list_stacks()
+        assert total == 3
+        assert sorted(len(s.others) for s in stacks) == [0, 0, 1]
+
+    def test_only_older_exact_copies_are_redundant(self):
+        oldest = history.save_comparison(_make_battlecard(), input_fingerprint="same")
+        history.save_comparison(_make_battlecard(), input_fingerprint="different")
+        history.save_comparison(_make_battlecard())  # legacy: no fingerprint
+        history.save_comparison(_make_battlecard())
+        history.save_comparison(_make_battlecard(), input_fingerprint="same")
+
+        stack = history.list_stacks()[0][0]
+        assert stack.redundant_ids == [oldest.id]
+
+    def test_pages_by_stack(self):
+        for i in range(3):
+            history.save_comparison(_make_battlecard(name_a=f"Device {i}"))
+            history.save_comparison(_make_battlecard(name_a=f"Device {i}"))
+
+        page, total, record_total = history.list_stacks(limit=2, offset=2)
+        assert (total, record_total) == (3, 6)
+        assert [s.latest.device_a_name for s in page] == ["Device 0"]
+        assert len(page[0].others) == 1
+
+    def test_search_filters_records_before_stacking(self):
+        history.save_comparison(_make_battlecard("Alpha", "Beta"))
+        history.save_comparison(_make_battlecard("Gamma", "Delta"))
+
+        page, total, _ = history.list_stacks(query="gam")
+        assert total == 1 and page[0].latest.device_a_name == "Gamma"
+
+    def test_delete_older_copies_keeps_newest_and_different_documents(self):
+        history.save_comparison(_make_battlecard(), input_fingerprint="same")
+        different = history.save_comparison(
+            _make_battlecard(), input_fingerprint="different"
+        )
+        newest = history.save_comparison(_make_battlecard(), input_fingerprint="same")
+        unrelated = history.save_comparison(
+            _make_battlecard("X", "Y"), input_fingerprint="same"
+        )
+
+        assert history.delete_older_copies(newest.id) == 1
+        remaining = {s.id for s in history.list_comparisons()}
+        assert remaining == {different.id, newest.id, unrelated.id}
+
+    def test_delete_older_copies_of_unknown_record(self):
+        assert history.delete_older_copies("c" * 32) is None
