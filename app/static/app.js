@@ -82,9 +82,10 @@ function confirmDialog(message, { title = "Are you sure?", confirmLabel = "Confi
     };
     const onOk = () => cleanup(true);
     const onCancel = () => cleanup(false);
+    // Enter is deliberately not handled here: the focused button (Cancel by
+    // default) activates itself natively, so Enter never confirms by accident.
     const onKeydown = (e) => {
       if (e.key === "Escape") cleanup(false);
-      if (e.key === "Enter") cleanup(true);
     };
 
     okBtn.addEventListener("click", onOk);
