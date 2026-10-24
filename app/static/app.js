@@ -61,7 +61,7 @@ function highlightMatch(text, query) {
 // ---- Confirmation dialog (replaces window.confirm) ----
 // A native modal <dialog>: it joins the top layer (so it can open over the
 // history drawer), traps focus, and Esc cancels it.
-function confirmDialog(message, { title = "Are you sure?", confirmLabel = "Confirm" } = {}) {
+function confirmDialog(message, { title = "Confirm action", confirmLabel = "Confirm" } = {}) {
   const dialog = document.getElementById("confirm-dialog");
   const okBtn = document.getElementById("confirm-ok-btn");
   const cancelBtn = document.getElementById("confirm-cancel-btn");
@@ -87,12 +87,42 @@ function confirmDialog(message, { title = "Are you sure?", confirmLabel = "Confi
 
 // ---- Error banner ----
 function showError(message) {
-  const banner = document.getElementById("error-banner");
-  banner.textContent = message;
-  banner.classList.remove("hidden");
+  document.getElementById("error-message").textContent = message;
+  document.getElementById("error-banner").classList.remove("hidden");
 }
 function clearError() {
   document.getElementById("error-banner").classList.add("hidden");
+}
+document.getElementById("error-dismiss").addEventListener("click", clearError);
+
+// Every failure message says what went wrong and what to do next. The server's
+// own detail is kept when it is specific; generic cases get a next step here.
+const NETWORK_ERROR = "Could not reach the server. Check your connection and try again.";
+
+async function readJson(res) {
+  try {
+    return await res.json();
+  } catch {
+    return {};
+  }
+}
+
+function describeFailure(res, data, fallback) {
+  const detail = typeof data.detail === "string" ? data.detail : "";
+  if (res.status === 429) {
+    const wait = Number(res.headers.get("Retry-After")) || 60;
+    return `Too many requests. Wait ${wait} seconds and try again.`;
+  }
+  if (res.status >= 500) return "The server hit an error. Try again in a moment.";
+  if (res.status === 413) return `${detail || "That file is too large."} Choose a smaller file.`;
+  if (res.status === 422) return `${detail || "That document could not be read."} Use a PDF with selectable text.`;
+  if (res.status === 404) return `${detail || fallback} It may have been deleted. Open History to pick another.`;
+  if (res.status === 400) return `${detail || fallback} Choose a different PDF.`;
+  return detail || fallback;
+}
+
+function describeException(err, fallback) {
+  return err instanceof TypeError ? NETWORK_ERROR : err.message || fallback;
 }
 
 // ---- Device slots ----
@@ -201,13 +231,13 @@ document.getElementById("load-samples-btn").addEventListener("click", async () =
   clearError();
   try {
     const res = await fetch("/api/v1/samples");
-    if (!res.ok) throw new Error("Could not load sample QSGs.");
-    const data = await res.json();
+    const data = await readJson(res);
+    if (!res.ok) throw new Error(describeFailure(res, data, "Could not load the sample guides."));
     setFileA(base64ToFile(data.device_a.content_base64, data.device_a.filename));
     setFileB(base64ToFile(data.device_b.content_base64, data.device_b.filename));
     await synthesize();
   } catch (err) {
-    showError(err.message || "Could not load sample QSGs.");
+    showError(describeException(err, "Could not load the sample guides."));
   } finally {
     loadSamplesBtn.disabled = false;
   }
@@ -266,16 +296,14 @@ async function synthesize() {
     formData.append("device_a_pdf", state.fileA);
     formData.append("device_b_pdf", state.fileB);
     const res = await fetch("/api/v1/compare-pdfs", { method: "POST", body: formData });
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(data.detail || "Synthesis failed.");
-    }
+    const data = await readJson(res);
+    if (!res.ok) throw new Error(describeFailure(res, data, "The comparison failed."));
     setExportLinks(data.history_id);
     setUrlId(data.history_id);
     await loadHistory();
     renderResults(data);
   } catch (err) {
-    showError(err.message || "Something went wrong while synthesizing the comparison.");
+    showError(describeException(err, "The comparison failed. Try again."));
   } finally {
     setLoading(false);
   }
@@ -350,7 +378,7 @@ function renderHistoryList() {
             <span class="block text-ink-muted">${escapeHtml(formatTimestamp(item.created_at))}</span>
           </button>
           <button type="button" data-delete-id="${item.id}" aria-label="Delete comparison: ${plainLabel}"
-                  class="shrink-0 w-9 h-9 inline-flex items-center justify-center rounded-control text-ink-muted hover:text-led-red hover:bg-plate">
+                  class="shrink-0 w-9 h-9 inline-flex items-center justify-center rounded-control text-ink-muted hover:text-danger hover:bg-plate">
             &times;
           </button>
         </li>`;
@@ -390,13 +418,13 @@ async function loadHistoryItem(id) {
   clearError();
   try {
     const res = await fetch(`/api/v1/history/${id}`);
-    const record = await res.json();
-    if (!res.ok) throw new Error(record.detail || "Could not load that comparison.");
+    const record = await readJson(res);
+    if (!res.ok) throw new Error(describeFailure(res, record, "Could not load that comparison."));
     setExportLinks(id);
     renderResults(record.battlecard);
     return true;
   } catch (err) {
-    showError(err.message || "Could not load that comparison.");
+    showError(describeException(err, "Could not load that comparison."));
     return false;
   }
 }
@@ -409,14 +437,16 @@ async function openHistoryItem(id) {
 }
 
 async function deleteHistoryItem(id) {
-  const ok = await confirmDialog("Delete this comparison from history?", {
-    title: "Delete comparison?",
-    confirmLabel: "Delete",
+  const ok = await confirmDialog("This removes it from history and can\u2019t be undone.", {
+    title: "Delete this comparison?",
+    confirmLabel: "Delete comparison",
   });
   if (!ok) return;
   try {
     const res = await fetch(`/api/v1/history/${id}`, { method: "DELETE" });
-    if (!res.ok && res.status !== 404) throw new Error("Could not delete that comparison.");
+    if (!res.ok && res.status !== 404) {
+      throw new Error(describeFailure(res, await readJson(res), "Could not delete that comparison."));
+    }
     if (id === currentHistoryId) {
       setExportLinks(null);
       hideResults();
@@ -424,7 +454,7 @@ async function deleteHistoryItem(id) {
     }
     await loadHistory();
   } catch (err) {
-    showError(err.message || "Could not delete that comparison.");
+    showError(describeException(err, "Could not delete that comparison."));
   }
 }
 
@@ -439,20 +469,20 @@ document.getElementById("history-list").addEventListener("click", (e) => {
 });
 
 document.getElementById("clear-history-btn").addEventListener("click", async () => {
-  const ok = await confirmDialog("Clear all comparison history? This cannot be undone.", {
-    title: "Clear all history?",
-    confirmLabel: "Clear all",
+  const ok = await confirmDialog("This removes every saved comparison and can\u2019t be undone.", {
+    title: "Clear history?",
+    confirmLabel: "Clear history",
   });
   if (!ok) return;
   try {
     const res = await fetch("/api/v1/history", { method: "DELETE" });
-    if (!res.ok) throw new Error("Could not clear history.");
+    if (!res.ok) throw new Error(describeFailure(res, await readJson(res), "Could not clear history."));
     setExportLinks(null);
     hideResults();
     setUrlId(null, { replace: true });
     await loadHistory();
   } catch (err) {
-    showError(err.message || "Could not clear history.");
+    showError(describeException(err, "Could not clear history."));
   }
 });
 
@@ -503,7 +533,7 @@ document.getElementById("copy-btn").addEventListener("click", async () => {
     btn.textContent = "Copied";
     setTimeout(() => (btn.textContent = original), 1500);
   } catch {
-    showError("Could not copy to clipboard.");
+    showError("Could not copy. Select the talk track text and copy it manually.");
   }
 });
 

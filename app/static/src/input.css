@@ -33,6 +33,7 @@
  *   line           borders and dividers
  *   bezel          header and device strip (dark)
  *   action         primary buttons and links
+ *   danger         destructive buttons and error text (white on it is >= 4.5:1)
  *   led-*          status system: friction, risks, LED legend. Never decorative.
  * Spacing uses Tailwind's default 4px scale (--spacing: 0.25rem at a 16px root).
  */
@@ -46,6 +47,8 @@
   --color-bezel-ink: #e7ebe8;
   --color-action: #0d6b6b;
   --color-action-hover: #0a5656;
+  --color-danger: #b3261e;
+  --color-danger-hover: #8f1d17;
   --color-led-green: #2e9e5b;
   --color-led-amber: #e0a100;
   --color-led-red: #d6403a;
@@ -131,8 +134,10 @@
     }
   }
 
-  .confirm-pop {
-    animation: confirmPop 0.15s ease-out;
+  @media (prefers-reduced-motion: no-preference) {
+    .confirm-pop {
+      animation: confirmPop 0.15s ease-out;
+    }
   }
   @keyframes confirmPop {
     from {

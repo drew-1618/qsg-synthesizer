@@ -36,8 +36,17 @@
 
   <main id="main" class="max-w-6xl mx-auto px-4 py-8 space-y-8">
 
-    <!-- Error banner -->
-    <div id="error-banner" role="alert" aria-live="polite" class="hidden rounded-lg border border-red-200 bg-red-50 text-red-700 px-4 py-3 text-sm"></div>
+    <!-- Error banner: sticks below the header so it is seen wherever the page is scrolled -->
+    <div id="error-banner" role="alert" class="hidden sticky top-20 z-10">
+      <div class="flex items-start gap-3 rounded-control border border-danger bg-plate px-4 py-3 text-sm">
+        <span class="led-dot led-dot--red mt-1.5" aria-hidden="true"></span>
+        <p id="error-message" class="flex-1 break-words"></p>
+        <button id="error-dismiss" type="button"
+                class="shrink-0 font-medium underline underline-offset-2 rounded-control">
+          Dismiss<span class="sr-only"> error</span>
+        </button>
+      </div>
+    </div>
 
     <!-- Compare: choose two guides -->
     <section aria-labelledby="compare-heading" class="space-y-5">
@@ -166,16 +175,16 @@
 
   <!-- Confirmation dialog (replaces window.confirm across the app) -->
   <dialog id="confirm-dialog" aria-labelledby="confirm-title" aria-describedby="confirm-message"
-          class="confirm-pop m-auto w-full max-w-sm p-6 bg-white rounded-xl border border-slate-200 shadow-xl backdrop:bg-ink/40">
-    <p id="confirm-title" class="text-base font-semibold text-slate-900">Are you sure?</p>
-    <p id="confirm-message" class="text-sm text-slate-500 mt-1.5"></p>
-    <div class="flex items-center justify-end gap-2 mt-5">
+          class="confirm-pop m-auto w-full max-w-sm p-6 bg-plate text-ink rounded-control border border-line backdrop:bg-ink/40">
+    <h2 id="confirm-title" class="font-heading font-semibold text-lg">Confirm action</h2>
+    <p id="confirm-message" class="text-ink-muted mt-2"></p>
+    <div class="flex items-center justify-end gap-2 mt-6">
       <button id="confirm-cancel-btn" type="button"
-              class="text-base font-medium text-slate-600 hover:bg-slate-100 px-4 py-2.5 rounded-lg transition-colors">
+              class="font-medium px-4 py-2.5 rounded-control border border-line bg-plate hover:bg-white transition-colors">
         Cancel
       </button>
       <button id="confirm-ok-btn" type="button"
-              class="text-base font-semibold text-white bg-red-600 hover:bg-red-700 px-4 py-2.5 rounded-lg transition-colors">
+              class="font-semibold text-white bg-danger hover:bg-danger-hover px-4 py-2.5 rounded-control transition-colors">
         Confirm
       </button>
     </div>

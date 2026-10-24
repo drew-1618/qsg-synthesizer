@@ -87,14 +87,16 @@ everything else stays quiet. Sentence case, no all-caps labels, no tinted-card-f
   (headings, `font-heading`) + IBM Plex Sans (body) + JetBrains Mono only for IPs and port names.
   Not Inter. To update, reinstall from `@fontsource-variable/*` and copy the woff2 files.
 - Palette (Tailwind `@theme` tokens in `input.css`): `panel` #eef0ee, `plate` #f9faf8, `ink`
-  #1c2127, `ink-muted` #56616b, `line` #c9d0cb, `bezel` #2b333b, `action` #0d6b6b, plus
+  #1c2127, `ink-muted` #56616b, `line` #c9d0cb, `bezel` #2b333b, `action` #0d6b6b, `danger` #b3261e (destructive
+  actions, error borders), plus
   `led-green/amber/red/blue` for status only. Use the tokens, never raw hex in markup or JS.
 - Spacing: 4px base scale (Tailwind default at a 16px root); avoid arbitrary values.
 - Mobile-first, test at 375px width.
 - No `src/components/` dir here (vanilla JS, no build step beyond Tailwind). Build reusable UI as
   small render helpers in `app/static/app.js` / shared markup in `index.html`, and avoid one-off
-  inline `style=` attributes. Allowed exceptions: values computed at runtime (friction bar width,
+  inline `style=` attributes. Allowed exception: values computed at runtime (the
   LED animation duration).
 - Rebuild CSS with `npm run build:css` after changing classes or theme tokens.
-- Redesign is in progress screen by screen (foundations done; next: header, compare, results,
-  history, dialogs). Markup not yet migrated still uses default slate/indigo classes.
+- Dialogs are native `<dialog>` elements (history drawer, `confirmDialog()`), so focus trap, Esc
+  and top-layer stacking come from the browser. Error text should say what happened and what to do
+  next (`describeFailure()` in `app.js`); the open comparison is mirrored in the URL as `?id=`.
