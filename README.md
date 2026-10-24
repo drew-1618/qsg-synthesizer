@@ -20,7 +20,7 @@ as Markdown or PDF.
    usable key (or if the API call fails), a deterministic regex/heuristic
    parser produces the same shape, so the app and test suite never fail
    hard on missing credentials.
-2. **Normalization** — IP validation/classification (`app/tools/net_validator.py`)
+2. **Normalization** — IP classification (`app/tools/net_validator.py`)
    and LED-state normalization (`app/tools/led_normalizer.py`) are always
    deterministic, never LLM-guessed.
 3. **Synthesis** — two normalized `DeviceSpec`s are compared into a

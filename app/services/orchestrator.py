@@ -11,10 +11,9 @@ Two stages, matching the two isolated subagents in `.claude/agents/`:
    API call) we fall back to a deterministic regex/heuristic parser, so
    local staging and the test suite never fail hard on missing credentials.
 2. Synthesis: two normalized `DeviceSpec` objects in, one `BattlecardResponse`
-   out. This stage is fully deterministic/rule-based rather than routed
-   through `battlecard_analyst` (that subagent's contract is free-form
-   markdown prose, which doesn't map cleanly onto typed response fields like
-   integer friction scores).
+   out. This stage is fully deterministic/rule-based: an LLM's free-form
+   prose doesn't map cleanly onto typed response fields like integer friction
+   scores.
 
 Raw extraction never validates or classifies IPs/LEDs itself — that
 normalization always goes through `app/tools/net_validator.py` and
@@ -35,17 +34,13 @@ from app.models.schemas import (
     CablingPort,
     LEDIndicator,
     QSGExtraction,
-)
-from app.models.schemas import (
-    ProvisioningMethod as RawProvisioningMethod,
+    RawProvisioningMethod,
 )
 from app.schemas import (
     BattlecardResponse,
     DeviceSpec,
     LEDStatus,
-)
-from app.schemas import (
-    ProvisioningMethod as ApiProvisioningMethod,
+    ProvisioningMethod,
 )
 from app.tools.capability_compare import parse_speed_mbps, rank_wifi_standard
 from app.tools.led_normalizer import LEDState, led_sort_key, normalize_led
@@ -150,16 +145,16 @@ _NEGATION_TRIGGERS = (
 )
 
 _RAW_TO_API_PROVISIONING = {
-    RawProvisioningMethod.TR069: ApiProvisioningMethod.TR069,
-    RawProvisioningMethod.DHCP: ApiProvisioningMethod.DHCP,
-    RawProvisioningMethod.WEB_GUI: ApiProvisioningMethod.WEB_GUI,
-    RawProvisioningMethod.CONSOLE: ApiProvisioningMethod.CONSOLE,
+    RawProvisioningMethod.TR069: ProvisioningMethod.TR069,
+    RawProvisioningMethod.DHCP: ProvisioningMethod.DHCP,
+    RawProvisioningMethod.WEB_GUI: ProvisioningMethod.WEB_GUI,
+    RawProvisioningMethod.CONSOLE: ProvisioningMethod.CONSOLE,
 }
 # Methods outside DeviceSpec's 4-value enum map to the closest analogue when
 # nothing else is available to pick as the "primary" method.
 _PRIMARY_FALLBACK_MAP = {
-    RawProvisioningMethod.QR_MOBILE_APP: ApiProvisioningMethod.WEB_GUI,
-    RawProvisioningMethod.OTHER: ApiProvisioningMethod.CONSOLE,
+    RawProvisioningMethod.QR_MOBILE_APP: ProvisioningMethod.WEB_GUI,
+    RawProvisioningMethod.OTHER: ProvisioningMethod.CONSOLE,
 }
 
 
@@ -492,14 +487,14 @@ def _extract_with_source(
 
 def _select_primary_provisioning_method(
     methods: list[RawProvisioningMethod],
-) -> ApiProvisioningMethod:
+) -> ProvisioningMethod:
     for method in methods:
         if method in _RAW_TO_API_PROVISIONING:
             return _RAW_TO_API_PROVISIONING[method]
     for method in methods:
         if method in _PRIMARY_FALLBACK_MAP:
             return _PRIMARY_FALLBACK_MAP[method]
-    return ApiProvisioningMethod.CONSOLE
+    return ProvisioningMethod.CONSOLE
 
 
 def _normalize_to_device_spec(extraction: QSGExtraction) -> DeviceSpec:
@@ -575,7 +570,7 @@ def extract_device_specs(
 # Stage 2: synthesis
 # ---------------------------------------------------------------------------
 
-_REMOTE_PROVISIONING_METHODS = {ApiProvisioningMethod.TR069, ApiProvisioningMethod.DHCP}
+_REMOTE_PROVISIONING_METHODS = {ProvisioningMethod.TR069, ProvisioningMethod.DHCP}
 
 # Exact text app.js matches on to render these as a neutral "nothing found"
 # line instead of a highlighted risk/advantage — keep the two in sync.
@@ -592,7 +587,7 @@ def _compute_friction_score(spec: DeviceSpec) -> int:
     score += min(len(spec.required_tools), 4)
     if spec.provisioning_method not in _REMOTE_PROVISIONING_METHODS:
         score += 3
-    if spec.provisioning_method == ApiProvisioningMethod.CONSOLE:
+    if spec.provisioning_method == ProvisioningMethod.CONSOLE:
         score += 2
     return max(1, min(10, score))
 
@@ -649,7 +644,7 @@ def _build_comparison_matrix(device_a: DeviceSpec, device_b: DeviceSpec) -> dict
 
 def _build_key_risks(spec: DeviceSpec) -> list[str]:
     risks = []
-    if spec.provisioning_method == ApiProvisioningMethod.CONSOLE:
+    if spec.provisioning_method == ProvisioningMethod.CONSOLE:
         risks.append(
             "Requires a technician with a laptop and terminal emulator on-site "
             "for initial console setup."
@@ -760,8 +755,8 @@ def synthesize_battlecard(
     device_a: DeviceSpec, device_b: DeviceSpec
 ) -> BattlecardResponse:
     """Deterministically compare two normalized `DeviceSpec` objects into a
-    `BattlecardResponse`. Rule-based rather than LLM-routed: `battlecard_analyst`
-    produces free-form markdown, which doesn't map onto these typed fields."""
+    `BattlecardResponse`. Rule-based rather than LLM-routed, since free-form
+    prose doesn't map onto these typed fields."""
     score_a = _compute_friction_score(device_a)
     score_b = _compute_friction_score(device_b)
     advantages_a, advantages_b = _build_key_advantages(device_a, device_b)

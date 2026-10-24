@@ -42,14 +42,12 @@ docker compose up --build                        # requires a .env file (cp .env
    - `_normalize_to_device_spec` converts it into the API-facing `DeviceSpec` (`app/schemas.py`)
      using the deterministic tools in `app/tools/`.
 3. `synthesize_battlecard()` is fully rule-based (friction score, risks, advantages, talk track).
-   `.claude/agents/battlecard_analyst.md` is not used at runtime.
 4. `app/services/history.py` saves the result as `data/history/<uuid hex>.json` (capped at 50);
    the export endpoints (`app/services/export.py`) render from those saved records.
 
 Things that span multiple files:
-- Two schema layers with a same-named `ProvisioningMethod` enum: the raw 6-value one in
-  `app/models/schemas.py` and the 4-value API one in `app/schemas.py`. The orchestrator
-  imports them as `RawProvisioningMethod` / `ApiProvisioningMethod`.
+- Two schema layers with two provisioning enums: the raw 6-value `RawProvisioningMethod` in
+  `app/models/schemas.py` and the 4-value API `ProvisioningMethod` in `app/schemas.py`.
 - `.claude/agents/*.md` are read at runtime, so the Dockerfile copies `.claude/`, and
   `.dockerignore` must not exclude `*.md` there. `sample_docs/*.pdf` likewise ship in the
   image for `GET /api/v1/samples`, and the tests read `sample_docs/*.md|pdf`.

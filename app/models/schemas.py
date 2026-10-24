@@ -14,7 +14,7 @@ from typing import List, Optional
 from pydantic import BaseModel, Field
 
 
-class ProvisioningMethod(str, Enum):
+class RawProvisioningMethod(str, Enum):
     TR069 = "TR-069"
     DHCP = "DHCP"
     WEB_GUI = "Web GUI"
@@ -38,7 +38,7 @@ class QSGExtraction(BaseModel):
     device_name: str
     source_document: str
     default_ip: Optional[str] = None
-    provisioning_methods: List[ProvisioningMethod] = Field(default_factory=list)
+    provisioning_methods: List[RawProvisioningMethod] = Field(default_factory=list)
     required_tools: List[str] = Field(default_factory=list)
     cabling_ports: List[CablingPort] = Field(default_factory=list)
     led_indicators: List[LEDIndicator] = Field(default_factory=list)
