@@ -323,11 +323,19 @@ function wireSlot(letter) {
   );
   zone.addEventListener("drop", (e) => setFile(e.dataTransfer.files[0]));
 
-  return setFile;
+  // Back to an empty upload slot, as on first load.
+  const reset = () => {
+    Object.assign(slotState, emptySlot());
+    textArea.value = "";
+    nameInput.value = "";
+    clearFile();
+  };
+
+  return { setFile, reset };
 }
 
-const setFileA = wireSlot("A");
-const setFileB = wireSlot("B");
+const slotA = wireSlot("A");
+const slotB = wireSlot("B");
 
 // ---- Comparison mode ----
 // Sales: side A is the user's own device and B the competitor's, and the talk
@@ -385,8 +393,8 @@ document.getElementById("load-samples-btn").addEventListener("click", async () =
     const res = await fetch("/api/v1/samples");
     const data = await readJson(res);
     if (!res.ok) throw new Error(describeFailure(res, data, "Could not load the sample guides."));
-    setFileA(base64ToFile(data.device_a.content_base64, data.device_a.filename));
-    setFileB(base64ToFile(data.device_b.content_base64, data.device_b.filename));
+    slotA.setFile(base64ToFile(data.device_a.content_base64, data.device_a.filename));
+    slotB.setFile(base64ToFile(data.device_b.content_base64, data.device_b.filename));
     await synthesize();
   } catch (err) {
     showError(describeException(err, "Could not load the sample guides."));
@@ -544,6 +552,20 @@ async function synthesize() {
 }
 
 document.getElementById("synthesize-btn").addEventListener("click", synthesize);
+
+// The result is already saved in history, so starting over needs no confirmation.
+document.getElementById("new-comparison-btn").addEventListener("click", () => {
+  slotA.reset();
+  slotB.reset();
+  clearError();
+  hideResults();
+  setExportTarget(null);
+  setUrlId(null);
+  renderHistoryList();
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  window.scrollTo({ top: 0, behavior: reduceMotion ? "auto" : "smooth" });
+  document.getElementById("file-a").focus({ preventScroll: true });
+});
 
 // ---- History drawer ----
 const HISTORY_ID_PATTERN = /^[0-9a-f]{32}$/;
