@@ -64,6 +64,12 @@ class DeviceSpec(BaseModel):
     wan_speed: Optional[str] = None
     form_factor: Optional[str] = None
     capabilities: List[str] = Field(default_factory=list)
+    # LLM assessment of the setup experience; unset for heuristic extraction
+    # and for records saved before these were tracked.
+    step_count: Optional[int] = None
+    setup_difficulty: Optional[str] = None
+    strengths: List[str] = Field(default_factory=list)
+    gaps: List[str] = Field(default_factory=list)
     # "llm" or "heuristic"; set by the orchestrator, not the document
     extraction_source: Optional[str] = None
 

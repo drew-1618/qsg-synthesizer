@@ -30,7 +30,10 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
+from pydantic import ValidationError
+
 from app.models.schemas import (
+    ASSESSMENT_FIELDS,
     CablingPort,
     LEDIndicator,
     QSGExtraction,
@@ -382,7 +385,29 @@ def _parse_json_payload(raw: str) -> dict:
     fenced = re.match(r"^```(?:json)?\s*(.*?)\s*```$", text, re.DOTALL)
     if fenced:
         text = fenced.group(1)
-    return json.loads(text)
+    payload = json.loads(text)
+    if not isinstance(payload, dict):
+        raise ValueError(f"LLM reply was {type(payload).__name__}, not a JSON object")
+    return payload
+
+
+def _validate_extraction(payload: object) -> QSGExtraction:
+    """Validate a model's payload against `QSGExtraction`.
+
+    A malformed assessment (step count, difficulty, strengths, gaps) only
+    costs those fields: they are dropped with a warning so the otherwise
+    good extraction survives. Any other violation raises, and the caller
+    falls back to the heuristic parser."""
+    try:
+        return QSGExtraction.model_validate(payload)
+    except ValidationError as exc:
+        bad = {err["loc"][0] for err in exc.errors() if err["loc"]}
+        if not isinstance(payload, dict) or not bad <= ASSESSMENT_FIELDS:
+            raise
+        logger.warning("Dropping malformed LLM assessment fields: %s", sorted(bad))
+        return QSGExtraction.model_validate(
+            {k: v for k, v in payload.items() if k not in bad}
+        )
 
 
 def _extract_via_anthropic(document_text: str, source_document: str) -> QSGExtraction:
@@ -413,7 +438,7 @@ def _extract_via_anthropic(document_text: str, source_document: str) -> QSGExtra
         raise ValueError("LLM output truncated at max_tokens")
     for block in response.content:
         if getattr(block, "type", None) == "tool_use":
-            return QSGExtraction.model_validate(getattr(block, "input"))
+            return _validate_extraction(getattr(block, "input"))
     raise ValueError("LLM response contained no tool_use block")
 
 
@@ -432,7 +457,9 @@ def _extract_via_gemini(document_text: str, source_document: str) -> QSGExtracti
             max_output_tokens=_LLM_MAX_OUTPUT_TOKENS,
         ),
     )
-    return QSGExtraction.model_validate(_parse_json_payload(response.text))
+    if not response.text:
+        raise ValueError("Gemini response contained no text")
+    return _validate_extraction(_parse_json_payload(response.text))
 
 
 _PROVIDER_EXTRACTORS = {
@@ -544,6 +571,12 @@ def _normalize_to_device_spec(extraction: QSGExtraction) -> DeviceSpec:
         wan_speed=extraction.wan_speed,
         form_factor=extraction.form_factor,
         capabilities=extraction.capabilities,
+        step_count=extraction.step_count,
+        setup_difficulty=(
+            extraction.setup_difficulty.value if extraction.setup_difficulty else None
+        ),
+        strengths=extraction.strengths,
+        gaps=extraction.gaps,
     )
 
 

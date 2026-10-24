@@ -23,6 +23,12 @@ class RawProvisioningMethod(str, Enum):
     OTHER = "Other"
 
 
+class SetupDifficulty(str, Enum):
+    EASY = "easy"
+    MODERATE = "moderate"
+    HARD = "hard"
+
+
 class CablingPort(BaseModel):
     port_name: str
     port_type: str
@@ -46,3 +52,13 @@ class QSGExtraction(BaseModel):
     wan_speed: Optional[str] = None
     form_factor: Optional[str] = None
     capabilities: List[str] = Field(default_factory=list)
+    # The model's assessment of the setup experience. Optional: heuristic
+    # extraction can't judge these, and a malformed assessment is dropped
+    # rather than discarding the rest of the extraction.
+    step_count: Optional[int] = Field(default=None, ge=0, le=200)
+    setup_difficulty: Optional[SetupDifficulty] = None
+    strengths: List[str] = Field(default_factory=list)
+    gaps: List[str] = Field(default_factory=list)
+
+
+ASSESSMENT_FIELDS = frozenset({"step_count", "setup_difficulty", "strengths", "gaps"})
