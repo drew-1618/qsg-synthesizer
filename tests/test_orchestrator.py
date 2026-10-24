@@ -2,6 +2,7 @@ import json
 import logging
 from unittest.mock import MagicMock, patch
 
+from app.services import orchestrator
 from app.services.orchestrator import (
     NO_ADVANTAGES_MESSAGE,
     NO_RISKS_MESSAGE,
@@ -26,11 +27,12 @@ _FAKE_EXTRACTION = {
 
 
 def _fake_anthropic_response(payload: dict) -> MagicMock:
-    text_block = MagicMock()
-    text_block.type = "text"
-    text_block.text = json.dumps(payload)
+    tool_block = MagicMock()
+    tool_block.type = "tool_use"
+    tool_block.input = payload
     response = MagicMock()
-    response.content = [text_block]
+    response.content = [tool_block]
+    response.stop_reason = "tool_use"
     return response
 
 
@@ -52,7 +54,7 @@ class TestExtractViaAnthropic:
             assert result.provisioning_methods == ["TR-069"]
             mock_client.messages.create.assert_called_once()
             _, kwargs = mock_client.messages.create.call_args
-            assert kwargs["model"] == "claude-haiku-4-5-20251001"
+            assert kwargs["model"] == "claude-haiku-5-5"
             assert "bounded document-extraction subagent" in kwargs["system"]
             assert "some document text" in kwargs["messages"][0]["content"]
 
@@ -338,3 +340,125 @@ class TestLedStateSorting:
         )
         assert booting.pattern == "blinking"
         assert booting.frequency_hz == 2.0
+
+
+class TestHeuristicContext:
+    def test_default_ip_skips_subnet_mask(self):
+        text = "# Dev\n\nSubnet mask 255.255.255.0, gateway 192.168.1.1\n"
+        assert _heuristic_extract_qsg(text, "d.md").default_ip == "192.168.1.1"
+
+    def test_default_ip_prefers_device_address_line(self):
+        text = "# Dev\n\nUplink peer 10.0.0.9\nDefault IP: 192.168.0.1\n"
+        assert _heuristic_extract_qsg(text, "d.md").default_ip == "192.168.0.1"
+
+    def test_dhcp_server_is_not_a_provisioning_method(self):
+        text = "# Dev\n\nBuilt-in DHCP server for LAN clients. Setup is console only.\n"
+        methods = _heuristic_extract_qsg(text, "d.md").provisioning_methods
+        assert [m.value for m in methods] == ["Console"]
+
+
+class TestTiedTalkTrack:
+    def test_tie_does_not_claim_a_winner(self):
+        text = "# Same\n\nProvision over the web GUI.\n"
+        a = extract_device_spec(text, "a.md")
+        b = extract_device_spec(text.replace("Same", "Other"), "b.md")
+        track = synthesize_battlecard(a, b).sales_talk_track
+        assert "tied" in track
+        assert "meaningfully less" not in track
+
+
+class TestLlmHardening:
+    def _run_anthropic(self, response, text="doc"):
+        with (
+            patch.dict("os.environ", {"ANTHROPIC_API_KEY": "k"}),
+            patch("app.services.orchestrator.anthropic") as mock_anthropic,
+        ):
+            client = MagicMock()
+            client.messages.create.return_value = response
+            mock_anthropic.Anthropic.return_value = client
+            result = orchestrator._extract_with_source(text, "d.md")
+            return result, client, mock_anthropic
+
+    def test_anthropic_forces_tool_use_and_sets_timeout(self):
+        (result, source), client, mock_anthropic = self._run_anthropic(
+            _fake_anthropic_response(_FAKE_EXTRACTION)
+        )
+        assert source == "llm"
+        _, kwargs = client.messages.create.call_args
+        assert kwargs["tool_choice"]["type"] == "tool"
+        assert kwargs["tools"][0]["name"] == kwargs["tool_choice"]["name"]
+        assert mock_anthropic.Anthropic.call_args.kwargs["timeout"] > 0
+
+    def test_truncated_output_falls_back_to_heuristic(self):
+        response = _fake_anthropic_response(_FAKE_EXTRACTION)
+        response.stop_reason = "max_tokens"
+        (_, source), _, _ = self._run_anthropic(response)
+        assert source == "heuristic"
+
+    def test_missing_tool_block_falls_back_to_heuristic(self):
+        text_block = MagicMock()
+        text_block.type = "text"
+        response = MagicMock(content=[text_block], stop_reason="end_turn")
+        (_, source), _, _ = self._run_anthropic(response)
+        assert source == "heuristic"
+
+    def test_oversized_input_is_truncated(self):
+        big = "x" * (orchestrator.MAX_LLM_INPUT_CHARS + 5000)
+        _, client, _ = self._run_anthropic(
+            _fake_anthropic_response(_FAKE_EXTRACTION), text=big
+        )
+        content = client.messages.create.call_args.kwargs["messages"][0]["content"]
+        assert len(content) < orchestrator.MAX_LLM_INPUT_CHARS + 200
+
+    def test_fenced_json_is_parsed(self):
+        payload = orchestrator._parse_json_payload('```json\n{"a": 1}\n```')
+        assert payload == {"a": 1}
+
+    def test_heuristic_source_and_matrix_provenance(self):
+        a = extract_device_spec(_DEVICE_A_TEXT, "a.md")
+        b = extract_device_spec(_DEVICE_B_TEXT, "b.md")
+        assert a.extraction_source == "heuristic"
+        card = synthesize_battlecard(a, b)
+        assert card.extraction_source_device_a == "heuristic"
+        assert card.extraction_source_device_b == "heuristic"
+
+    def test_extract_device_specs_keeps_order(self):
+        a, b = orchestrator.extract_device_specs(
+            _DEVICE_A_TEXT, "a.md", _DEVICE_B_TEXT, "b.md"
+        )
+        assert a == extract_device_spec(_DEVICE_A_TEXT, "a.md")
+        assert b == extract_device_spec(_DEVICE_B_TEXT, "b.md")
+
+
+class TestCarriedThroughFields:
+    def _spec(self, **overrides):
+        payload = {
+            **_FAKE_EXTRACTION,
+            "provisioning_methods": ["QR/Mobile App", "Web GUI"],
+            "led_indicators": [
+                {"led_name": "Power", "raw_description": "solid green when on"}
+            ],
+            "cabling_ports": [
+                {"port_name": "WAN", "port_type": "RJ45", "notes": "PoE in"}
+            ],
+            **overrides,
+        }
+        return orchestrator._normalize_to_device_spec(
+            orchestrator.QSGExtraction.model_validate(payload)
+        )
+
+    def test_led_name_is_kept(self):
+        assert self._spec().led_states[0].name == "Power"
+
+    def test_full_provisioning_list_is_kept(self):
+        spec = self._spec()
+        assert spec.provisioning_methods == ["QR/Mobile App", "Web GUI"]
+
+    def test_qr_only_still_shows_qr_in_matrix(self):
+        a = self._spec(provisioning_methods=["QR/Mobile App"])
+        b = self._spec()
+        cm = synthesize_battlecard(a, b).comparison_matrix
+        assert cm["provisioning_methods"]["device_a"] == ["QR/Mobile App"]
+
+    def test_port_notes_are_kept(self):
+        assert self._spec().ports == ["WAN (RJ45) - PoE in"]

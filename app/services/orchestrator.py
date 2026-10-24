@@ -27,6 +27,7 @@ import json
 import logging
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
@@ -66,8 +67,18 @@ except ImportError:  # pragma: no cover - exercised only when package absent
 logger = logging.getLogger(__name__)
 
 _AGENTS_DIR = Path(__file__).resolve().parents[2] / ".claude" / "agents"
-_ANTHROPIC_EXTRACTOR_MODEL = "claude-haiku-4-5-20251001"
+_ANTHROPIC_EXTRACTOR_MODEL = "claude-haiku-5-5"
 _GEMINI_EXTRACTOR_MODEL = "gemini-2.5-flash"
+
+# Bounds on the LLM call: untrusted PDF text must not be able to run up an
+# unbounded bill or tie up a worker thread on a hung connection.
+MAX_LLM_INPUT_CHARS = 100_000
+_LLM_MAX_OUTPUT_TOKENS = 4096
+_LLM_TIMEOUT_SECONDS = 60.0
+_EXTRACTION_TOOL_NAME = "record_qsg_extraction"
+
+EXTRACTION_SOURCE_LLM = "llm"
+EXTRACTION_SOURCE_HEURISTIC = "heuristic"
 
 _PROVIDER_ANTHROPIC = "anthropic"
 _PROVIDER_GEMINI = "gemini"
@@ -101,6 +112,18 @@ _BULLET_PREFIX_RE = re.compile(r"^[-*]\s+")
 _TITLE_SUFFIX_RE = re.compile(r"\s*[—-]\s*quick start guide\s*$", re.IGNORECASE)
 _IPV4_RE = re.compile(
     r"\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b"
+)
+
+_DEFAULT_IP_CONTEXT_RE = re.compile(
+    r"default|gateway|management|log\s?in|browse|navigate|admin", re.IGNORECASE
+)
+
+# A sentence matching this describes the device acting as a DHCP *server* for
+# LAN clients, which says nothing about how the device itself is provisioned.
+_DHCP_SERVER_RE = re.compile(
+    r"dhcp (?:server|pool|range)|lan clients?"
+    r"|(?:serves?|assigns?|hands? out)\b.*\bdhcp",
+    re.IGNORECASE,
 )
 
 _PROVISIONING_KEYWORD_PATTERNS = [
@@ -224,9 +247,25 @@ def _detect_device_name(text: str) -> str:
     return "Unknown Device"
 
 
+def _is_netmask(candidate: str) -> bool:
+    """True for a contiguous-bits subnet mask like 255.255.255.0 (or 0.0.0.0)."""
+    bits = "".join(f"{int(octet):08b}" for octet in candidate.split("."))
+    return "01" not in bits
+
+
 def _detect_default_ip(text: str) -> Optional[str]:
-    match = _IPV4_RE.search(text)
-    return match.group(0) if match else None
+    """Pick the device's default address: the first IPv4 that isn't a subnet
+    mask, preferring one on a line that says it's the device's own address."""
+    fallback: Optional[str] = None
+    for line in text.splitlines():
+        for match in _IPV4_RE.finditer(line):
+            candidate = match.group(0)
+            if _is_netmask(candidate):
+                continue
+            if _DEFAULT_IP_CONTEXT_RE.search(line):
+                return candidate
+            fallback = fallback or candidate
+    return fallback
 
 
 def _detect_provisioning_methods(text: str) -> list[RawProvisioningMethod]:
@@ -239,9 +278,14 @@ def _detect_provisioning_methods(text: str) -> list[RawProvisioningMethod]:
         if any(trigger in lowered for trigger in _NEGATION_TRIGGERS):
             continue
         for pattern, method in _PROVISIONING_KEYWORD_PATTERNS:
-            if method not in seen and pattern.search(sentence):
-                seen.add(method)
-                ordered.append(method)
+            if method in seen or not pattern.search(sentence):
+                continue
+            if method == RawProvisioningMethod.DHCP and _DHCP_SERVER_RE.search(
+                sentence
+            ):
+                continue
+            seen.add(method)
+            ordered.append(method)
     return ordered
 
 
@@ -325,40 +369,75 @@ def _provider_ready(provider: str) -> bool:
     return False
 
 
+def _llm_user_content(document_text: str, source_document: str) -> str:
+    if len(document_text) > MAX_LLM_INPUT_CHARS:
+        logger.warning(
+            "Truncating %r from %d to %d chars for LLM extraction",
+            source_document,
+            len(document_text),
+            MAX_LLM_INPUT_CHARS,
+        )
+        document_text = document_text[:MAX_LLM_INPUT_CHARS]
+    return f"Source document: {source_document}\n\n{document_text}"
+
+
+def _parse_json_payload(raw: str) -> dict:
+    """Parse a model's JSON reply, tolerating a surrounding ```json fence."""
+    text = raw.strip()
+    fenced = re.match(r"^```(?:json)?\s*(.*?)\s*```$", text, re.DOTALL)
+    if fenced:
+        text = fenced.group(1)
+    return json.loads(text)
+
+
 def _extract_via_anthropic(document_text: str, source_document: str) -> QSGExtraction:
-    client = anthropic.Anthropic()
+    client = anthropic.Anthropic(timeout=_LLM_TIMEOUT_SECONDS, max_retries=1)
     system_prompt = _load_agent_system_prompt("qsg_extractor.md")
+    # Forcing a tool call makes the API return schema-shaped JSON instead of
+    # free text we'd have to parse.
     response = client.messages.create(
         model=_ANTHROPIC_EXTRACTOR_MODEL,
-        max_tokens=2000,
+        max_tokens=_LLM_MAX_OUTPUT_TOKENS,
         system=system_prompt,
+        tools=[
+            {
+                "name": _EXTRACTION_TOOL_NAME,
+                "description": "Record the fields extracted from the document.",
+                "input_schema": QSGExtraction.model_json_schema(),
+            }
+        ],
+        tool_choice={"type": "tool", "name": _EXTRACTION_TOOL_NAME},
         messages=[
             {
                 "role": "user",
-                "content": f"Source document: {source_document}\n\n{document_text}",
+                "content": _llm_user_content(document_text, source_document),
             }
         ],
     )
-    payload = "".join(
-        getattr(block, "text", "")
-        for block in response.content
-        if getattr(block, "type", None) == "text"
-    )
-    return QSGExtraction.model_validate(json.loads(payload))
+    if getattr(response, "stop_reason", None) == "max_tokens":
+        raise ValueError("LLM output truncated at max_tokens")
+    for block in response.content:
+        if getattr(block, "type", None) == "tool_use":
+            return QSGExtraction.model_validate(getattr(block, "input"))
+    raise ValueError("LLM response contained no tool_use block")
 
 
 def _extract_via_gemini(document_text: str, source_document: str) -> QSGExtraction:
-    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+    client = genai.Client(
+        api_key=os.environ["GEMINI_API_KEY"],
+        http_options=gemini_types.HttpOptions(timeout=int(_LLM_TIMEOUT_SECONDS * 1000)),
+    )
     system_prompt = _load_agent_system_prompt("qsg_extractor.md")
     response = client.models.generate_content(
         model=_GEMINI_EXTRACTOR_MODEL,
-        contents=f"Source document: {source_document}\n\n{document_text}",
+        contents=_llm_user_content(document_text, source_document),
         config=gemini_types.GenerateContentConfig(
             system_instruction=system_prompt,
             response_mime_type="application/json",
+            max_output_tokens=_LLM_MAX_OUTPUT_TOKENS,
         ),
     )
-    return QSGExtraction.model_validate(json.loads(response.text))
+    return QSGExtraction.model_validate(_parse_json_payload(response.text))
 
 
 _PROVIDER_EXTRACTORS = {
@@ -368,13 +447,22 @@ _PROVIDER_EXTRACTORS = {
 
 
 def extract_qsg_fields(document_text: str, source_document: str) -> QSGExtraction:
+    return _extract_with_source(document_text, source_document)[0]
+
+
+def _extract_with_source(
+    document_text: str, source_document: str
+) -> tuple[QSGExtraction, str]:
     """Extract raw QSG fields via a configured LLM provider (Anthropic or
     Gemini — see `_select_llm_provider`) when available, otherwise via a
     deterministic heuristic parser."""
     provider = _select_llm_provider()
     if provider and _provider_ready(provider):
         try:
-            return _PROVIDER_EXTRACTORS[provider](document_text, source_document)
+            return (
+                _PROVIDER_EXTRACTORS[provider](document_text, source_document),
+                EXTRACTION_SOURCE_LLM,
+            )
         except Exception:
             # never fail hard on a flaky/unreachable API - fall back, but
             # log it so a persistently failing key doesn't go unnoticed
@@ -396,7 +484,10 @@ def extract_qsg_fields(document_text: str, source_document: str) -> QSGExtractio
             "No LLM provider configured; using heuristic parser for %r",
             source_document,
         )
-    return _heuristic_extract_qsg(document_text, source_document)
+    return (
+        _heuristic_extract_qsg(document_text, source_document),
+        EXTRACTION_SOURCE_HEURISTIC,
+    )
 
 
 def _select_primary_provisioning_method(
@@ -424,6 +515,7 @@ def _normalize_to_device_spec(extraction: QSGExtraction) -> DeviceSpec:
         normalized = normalize_led(led.raw_description)
         led_states.append(
             LEDStatus(
+                name=led.led_name,
                 state=normalized.state,
                 color=normalized.color,
                 pattern=normalized.pattern,
@@ -437,7 +529,10 @@ def _normalize_to_device_spec(extraction: QSGExtraction) -> DeviceSpec:
     for port in extraction.cabling_ports:
         label, count = expand_port_range(port.port_name)
         name = f"{count}x {label}" if count > 1 else port.port_name
-        ports.append(f"{name} ({port.port_type})")
+        entry = f"{name} ({port.port_type})"
+        if port.notes:
+            entry += f" - {port.notes}"
+        ports.append(entry)
 
     return DeviceSpec(
         model_name=extraction.device_name,
@@ -446,6 +541,7 @@ def _normalize_to_device_spec(extraction: QSGExtraction) -> DeviceSpec:
         provisioning_method=_select_primary_provisioning_method(
             extraction.provisioning_methods
         ),
+        provisioning_methods=[m.value for m in extraction.provisioning_methods],
         required_tools=extraction.required_tools,
         led_states=led_states,
         ports=ports,
@@ -459,8 +555,20 @@ def _normalize_to_device_spec(extraction: QSGExtraction) -> DeviceSpec:
 def extract_device_spec(document_text: str, source_document: str) -> DeviceSpec:
     """Full pipeline for one document: raw extraction, then deterministic
     IP/LED normalization into a clean `DeviceSpec`."""
-    extraction = extract_qsg_fields(document_text, source_document)
-    return _normalize_to_device_spec(extraction)
+    extraction, source = _extract_with_source(document_text, source_document)
+    spec = _normalize_to_device_spec(extraction)
+    spec.extraction_source = source
+    return spec
+
+
+def extract_device_specs(
+    text_a: str, name_a: str, text_b: str, name_b: str
+) -> tuple[DeviceSpec, DeviceSpec]:
+    """Run both extractions concurrently; the LLM calls are I/O-bound."""
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        future_a = pool.submit(extract_device_spec, text_a, name_a)
+        future_b = pool.submit(extract_device_spec, text_b, name_b)
+        return future_a.result(), future_b.result()
 
 
 # ---------------------------------------------------------------------------
@@ -506,6 +614,10 @@ def _build_comparison_matrix(device_a: DeviceSpec, device_b: DeviceSpec) -> dict
         "provisioning_method": {
             "device_a": device_a.provisioning_method.value,
             "device_b": device_b.provisioning_method.value,
+        },
+        "provisioning_methods": {
+            "device_a": device_a.provisioning_methods,
+            "device_b": device_b.provisioning_methods,
         },
         "required_tools": {
             "device_a": device_a.required_tools,
@@ -615,7 +727,14 @@ def _build_key_advantages(
 def _build_sales_talk_track(
     device_a: DeviceSpec, score_a: int, device_b: DeviceSpec, score_b: int
 ) -> str:
-    if score_a <= score_b:
+    if score_a == score_b:
+        return (
+            f"{device_a.model_name} and {device_b.model_name} are tied on "
+            f"install effort (Installation Friction Index {score_a} each). "
+            f"Differentiate on the capability and spec advantages above "
+            f"rather than on field labor."
+        )
+    if score_a < score_b:
         winner, w_score, loser, l_score = (
             device_a.model_name,
             score_a,
@@ -655,4 +774,6 @@ def synthesize_battlecard(
         key_advantages_device_a=advantages_a,
         key_advantages_device_b=advantages_b,
         sales_talk_track=_build_sales_talk_track(device_a, score_a, device_b, score_b),
+        extraction_source_device_a=device_a.extraction_source,
+        extraction_source_device_b=device_b.extraction_source,
     )

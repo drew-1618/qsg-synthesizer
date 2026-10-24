@@ -55,6 +55,7 @@ _TABLE_STYLE = TableStyle(
 _COMPARISON_ROWS = [
     ("Default IP", "default_ip"),
     ("Provisioning Method", "provisioning_method"),
+    ("All Provisioning Methods", "provisioning_methods"),
     ("Required Tools", "required_tools"),
     ("Physical Ports", "ports"),
     ("Wi-Fi Standard", "wifi_standard"),

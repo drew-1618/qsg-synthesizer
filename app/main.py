@@ -42,7 +42,7 @@ from app.schemas import CompareResponse, DeviceSpec, HistoryPage, HistoryRecord
 from app.services import export as export_service
 from app.services import history
 from app.services.auth import require_auth, security, verify_credentials
-from app.services.orchestrator import extract_device_spec, synthesize_battlecard
+from app.services.orchestrator import extract_device_specs, synthesize_battlecard
 from app.services.rate_limiter import RateLimiter
 from app.tools.pdf_parser import extract_text_from_pdf
 
@@ -169,8 +169,12 @@ class CompareTextRequest(BaseModel):
 def compare_text(payload: CompareTextRequest) -> CompareResponse:
     _require_text(payload.device_a_text, payload.device_a_name)
     _require_text(payload.device_b_text, payload.device_b_name)
-    device_a = extract_device_spec(payload.device_a_text, payload.device_a_name)
-    device_b = extract_device_spec(payload.device_b_text, payload.device_b_name)
+    device_a, device_b = extract_device_specs(
+        payload.device_a_text,
+        payload.device_a_name,
+        payload.device_b_text,
+        payload.device_b_name,
+    )
     return _synthesize_and_save(device_a, device_b)
 
 
@@ -229,11 +233,11 @@ def compare_pdfs(
     device_a_text = _read_pdf_upload(device_a_pdf)
     device_b_text = _read_pdf_upload(device_b_pdf)
 
-    device_a = extract_device_spec(
-        device_a_text, device_a_pdf.filename or "device_a.pdf"
-    )
-    device_b = extract_device_spec(
-        device_b_text, device_b_pdf.filename or "device_b.pdf"
+    device_a, device_b = extract_device_specs(
+        device_a_text,
+        device_a_pdf.filename or "device_a.pdf",
+        device_b_text,
+        device_b_pdf.filename or "device_b.pdf",
     )
 
     return _synthesize_and_save(device_a, device_b)
