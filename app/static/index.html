@@ -112,8 +112,17 @@
         <div class="min-w-0 flex-1">
           <p id="result-bar-title" class="font-heading font-semibold truncate"></p>
           <p id="result-bar-meta" class="text-sm text-ink-muted"></p>
+          <p id="result-bar-note" class="hidden text-sm text-ink-muted">Saved before documents were kept, so it can&rsquo;t be rerun.</p>
         </div>
         <div class="flex flex-wrap items-center gap-2">
+          <!-- Toggled as a wrapper: the button's inline-flex would override `hidden` -->
+          <div id="rerun-control">
+            <button id="rerun-btn" type="button" title="Read the same documents again with the AI chosen in Settings"
+                    class="inline-flex items-center gap-2 text-sm font-medium bg-plate border border-line hover:bg-plate-hover px-3.5 py-2 rounded-control transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+              <span id="rerun-spinner" class="spinner hidden"></span>
+              <span id="rerun-label">Rerun</span>
+            </button>
+          </div>
           <button id="change-documents-btn" type="button"
                   class="text-sm font-medium bg-plate border border-line hover:bg-plate-hover px-3.5 py-2 rounded-control transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
             Change documents

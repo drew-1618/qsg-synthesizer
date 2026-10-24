@@ -66,7 +66,14 @@ docker compose up --build                        # requires a .env file (cp .env
    stores `input_fingerprint` (a sha256 of both input texts). The drawer loads
    `GET /api/v1/history/stacks`, which groups records by device pair and mode (`_stack_key`) and
    marks older runs of identical documents as `redundant_ids`, which
-   `DELETE /api/v1/history/{id}/copies` removes.
+   `DELETE /api/v1/history/{id}/copies` removes. The two input texts are kept as
+   `data/history/sources/<sha256>.txt` (one file per distinct text, listed in
+   `HistoryRecord.sources`, deleted once no record uses them after a short grace period) so
+   `POST /api/v1/history/{id}/rerun` can read them again with the request's `X-LLM-*` settings
+   and the record's mode; older records without sources get a 409.
+   In the UI, a result on screen replaces the form with `#result-bar` (`showResultBar()`):
+   Rerun, Change documents (only after a fresh compare, when the form still holds the files)
+   and New comparison.
 
 Things that span multiple files:
 - Comparison perspective: `BattlecardResponse.perspective` is `"sales"` (side A is the user's own

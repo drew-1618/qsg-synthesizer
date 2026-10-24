@@ -133,6 +133,14 @@ class HistorySummary(BaseModel):
     input_fingerprint: Optional[str] = None
 
 
+class SourceDocument(BaseModel):
+    """A comparison input as the pipeline read it; the text itself is stored
+    once per distinct content, under its hash (see history.py)."""
+
+    name: str
+    text_sha256: str
+
+
 class HistoryRecord(BaseModel):
     id: str
     created_at: datetime
@@ -140,6 +148,8 @@ class HistoryRecord(BaseModel):
     device_b_name: str
     battlecard: BattlecardResponse
     input_fingerprint: Optional[str] = None
+    # [device A, device B]; empty on records saved before sources were kept.
+    sources: List[SourceDocument] = Field(default_factory=list)
 
 
 class HistoryStack(BaseModel):

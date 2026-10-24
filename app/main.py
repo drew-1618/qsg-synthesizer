@@ -197,8 +197,11 @@ def compare_text(payload: CompareTextRequest) -> CompareResponse:
         payload.device_b_text,
         payload.device_b_name,
     )
-    fingerprint = _input_fingerprint(payload.device_a_text, payload.device_b_text)
-    return _synthesize_and_save(device_a, device_b, fingerprint)
+    sources = [
+        (payload.device_a_name, payload.device_a_text),
+        (payload.device_b_name, payload.device_b_text),
+    ]
+    return _synthesize_and_save(device_a, device_b, sources)
 
 
 def _input_fingerprint(text_a: str, text_b: str) -> str:
@@ -209,11 +212,17 @@ def _input_fingerprint(text_a: str, text_b: str) -> str:
 def _synthesize_and_save(
     device_a: DeviceSpec,
     device_b: DeviceSpec,
-    input_fingerprint: str,
+    sources: list[tuple[str, str]],
     perspective: Optional[Perspective] = None,
 ) -> CompareResponse:
+    """`sources` are the (name, text) inputs, A then B, kept for reruns."""
     battlecard = synthesize_battlecard(device_a, device_b, perspective)
-    record = history.save_comparison(battlecard, input_fingerprint=input_fingerprint)
+    (_, text_a), (_, text_b) = sources
+    record = history.save_comparison(
+        battlecard,
+        input_fingerprint=_input_fingerprint(text_a, text_b),
+        sources=sources,
+    )
     return CompareResponse(**battlecard.model_dump(), history_id=record.id)
 
 
@@ -274,16 +283,15 @@ def compare_pdfs(
 ) -> CompareResponse:
     device_a_text = _read_document_upload(device_a_pdf, pdf_only=True)
     device_b_text = _read_document_upload(device_b_pdf, pdf_only=True)
+    name_a = device_a_pdf.filename or "device_a.pdf"
+    name_b = device_b_pdf.filename or "device_b.pdf"
 
     device_a, device_b = extract_device_specs(
-        device_a_text,
-        device_a_pdf.filename or "device_a.pdf",
-        device_b_text,
-        device_b_pdf.filename or "device_b.pdf",
+        device_a_text, name_a, device_b_text, name_b
     )
-
-    fingerprint = _input_fingerprint(device_a_text, device_b_text)
-    return _synthesize_and_save(device_a, device_b, fingerprint)
+    return _synthesize_and_save(
+        device_a, device_b, [(name_a, device_a_text), (name_b, device_b_text)]
+    )
 
 
 def _resolve_document(
@@ -364,8 +372,9 @@ def compare_documents(
         "Device B", device_b_file, device_b_text, device_b_name
     )
     device_a, device_b = extract_device_specs(text_a, source_a, text_b, source_b, llm)
-    fingerprint = _input_fingerprint(text_a, text_b)
-    return _synthesize_and_save(device_a, device_b, fingerprint, mode)
+    return _synthesize_and_save(
+        device_a, device_b, [(source_a, text_a), (source_b, text_b)], mode
+    )
 
 
 @router.get("/api/v1/history", response_model=HistoryPage)
@@ -479,6 +488,36 @@ def delete_history_item(history_id: str) -> Response:
             status_code=404, detail=f"History item '{history_id}' not found."
         )
     return Response(status_code=204)
+
+
+@router.post(
+    "/api/v1/history/{history_id}/rerun",
+    response_model=CompareResponse,
+    dependencies=[Depends(compare_rate_limiter)],
+)
+def rerun_history_item(
+    history_id: str,
+    llm_provider: Optional[str] = Header(None, alias="X-LLM-Provider"),
+    llm_api_key: Optional[str] = Header(None, alias="X-LLM-API-Key"),
+) -> CompareResponse:
+    """Read a saved comparison's documents again (with the request's AI
+    settings) and save the result as a new record."""
+    llm = _llm_override(llm_provider, llm_api_key)
+    record = _get_history_record_or_404(history_id)
+    sources = history.load_sources(record)
+    if sources is None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This comparison was saved before documents were kept, so it "
+                "can't be rerun. Upload the documents again to compare them."
+            ),
+        )
+    (name_a, text_a), (name_b, text_b) = sources
+    device_a, device_b = extract_device_specs(text_a, name_a, text_b, name_b, llm)
+    return _synthesize_and_save(
+        device_a, device_b, sources, record.battlecard.perspective
+    )
 
 
 @router.delete("/api/v1/history/{history_id}/copies")

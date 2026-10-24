@@ -230,12 +230,15 @@ function hideResults() {
 // form never sits above a result it didn't produce. `fromForm` says whether
 // the form still holds the documents behind the result (a fresh compare) or
 // not (opened from history); only then can "Change documents" reopen it.
-function showResultBar(data, { fromForm, createdAt }) {
+// `canRerun` is false for records saved before their documents were kept.
+function showResultBar(data, { fromForm, createdAt, canRerun = true }) {
   const names = data.comparison_matrix.model_name;
   document.getElementById("result-bar-title").textContent = `${names.device_a} vs ${names.device_b}`;
   const mode = data.perspective === "sales" ? "Sales battlecard" : "Neutral comparison";
   document.getElementById("result-bar-meta").textContent = `${mode} \u00b7 ${formatTimestamp(createdAt)}`;
   document.getElementById("change-documents-btn").classList.toggle("hidden", !fromForm);
+  document.getElementById("rerun-control").classList.toggle("hidden", !canRerun);
+  document.getElementById("result-bar-note").classList.toggle("hidden", canRerun);
   document.getElementById("compare-section").classList.add("hidden");
   document.getElementById("result-bar").classList.remove("hidden");
 }
@@ -737,6 +740,38 @@ document.getElementById("new-comparison-btn").addEventListener("click", () => {
   scrollToForm();
 });
 
+// Reads the open comparison's saved documents again with the AI chosen in
+// Settings; the new result is saved and lands in the same history stack.
+async function rerun() {
+  if (state.busy || !currentHistoryId) return;
+  const bar = document.getElementById("result-bar");
+  const setRerunning = (on) => {
+    state.busy = on;
+    bar.querySelectorAll("button").forEach((btn) => (btn.disabled = on));
+    document.getElementById("rerun-spinner").classList.toggle("hidden", !on);
+    document.getElementById("rerun-label").textContent = on ? "Rerunning\u2026" : "Rerun";
+  };
+  clearError();
+  setRerunning(true);
+  try {
+    const res = await fetch(`/api/v1/history/${currentHistoryId}/rerun`, { method: "POST", headers: llmHeaders() });
+    const data = await readJson(res);
+    if (!res.ok) throw new Error(describeFailure(res, data, "The rerun failed."));
+    const fromForm = !document.getElementById("change-documents-btn").classList.contains("hidden");
+    setExportTarget(data.history_id);
+    setUrlId(data.history_id);
+    await loadHistory();
+    showResultBar(data, { fromForm, createdAt: new Date().toISOString() });
+    renderResults(data);
+  } catch (err) {
+    showError(describeException(err, "The rerun failed. Try again."));
+  } finally {
+    setRerunning(false);
+  }
+}
+
+document.getElementById("rerun-btn").addEventListener("click", rerun);
+
 // Reopens the form with the documents that produced the result, so one side
 // can be swapped; the result stays below until the next compare.
 document.getElementById("change-documents-btn").addEventListener("click", () => {
@@ -940,7 +975,11 @@ async function loadHistoryItem(id) {
     const record = await readJson(res);
     if (!res.ok) throw new Error(describeFailure(res, record, "Could not load that comparison."));
     setExportTarget(id);
-    showResultBar(record.battlecard, { fromForm: false, createdAt: record.created_at });
+    showResultBar(record.battlecard, {
+      fromForm: false,
+      createdAt: record.created_at,
+      canRerun: (record.sources || []).length === 2,
+    });
     renderResults(record.battlecard);
     return true;
   } catch (err) {

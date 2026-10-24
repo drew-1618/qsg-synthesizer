@@ -199,3 +199,64 @@ class TestSettingsEndpoint:
         monkeypatch.setenv("APP_USERNAME", "admin")
         monkeypatch.setenv("APP_PASSWORD", "hunter2")
         assert client.get("/api/v1/settings").status_code == 401
+
+
+class TestRerun:
+    def test_rerun_reads_saved_documents_with_the_requested_ai(self):
+        with patch.dict("os.environ", NO_SERVER_KEYS):
+            first = _compare({}).json()
+        assert first["extraction_source_device_a"] == "heuristic"
+
+        with (
+            patch.dict("os.environ", NO_SERVER_KEYS),
+            patch("app.services.orchestrator.anthropic") as mock_anthropic,
+        ):
+            _anthropic_mock(mock_anthropic)
+            response = client.post(
+                f"/api/v1/history/{first['history_id']}/rerun",
+                headers={"X-LLM-Provider": "anthropic", "X-LLM-API-Key": USER_KEY},
+            )
+
+        data = response.json()
+        assert response.status_code == 200
+        assert data["extraction_source_device_a"] == "llm"
+        assert data["history_id"] != first["history_id"]
+        assert data["perspective"] == first["perspective"] == "sales"
+        stack = client.get("/api/v1/history/stacks").json()
+        assert stack["record_total"] == 2
+
+    def test_rerun_keeps_the_saved_mode(self):
+        with patch.dict("os.environ", NO_SERVER_KEYS):
+            first = client.post(
+                "/api/v1/compare",
+                data={
+                    "device_a_text": (SAMPLE_DOCS_DIR / "device_a_qsg.md").read_text(
+                        "utf-8"
+                    ),
+                    "device_b_text": (SAMPLE_DOCS_DIR / "device_b_qsg.md").read_text(
+                        "utf-8"
+                    ),
+                    "mode": "neutral",
+                },
+            ).json()
+            rerun = client.post(f"/api/v1/history/{first['history_id']}/rerun").json()
+        assert rerun["perspective"] == "neutral"
+
+    def test_record_without_saved_documents_returns_409(self):
+        record = history.save_comparison(
+            history.get_comparison(_compare({}).json()["history_id"]).battlecard
+        )
+        response = client.post(f"/api/v1/history/{record.id}/rerun")
+        assert response.status_code == 409
+        assert "Upload the documents again" in response.json()["detail"]
+
+    def test_unknown_record_returns_404(self):
+        assert client.post(f"/api/v1/history/{'c' * 32}/rerun").status_code == 404
+
+    def test_bad_ai_header_is_rejected(self):
+        first = _compare({}).json()
+        response = client.post(
+            f"/api/v1/history/{first['history_id']}/rerun",
+            headers={"X-LLM-Provider": "openai"},
+        )
+        assert response.status_code == 422

@@ -184,3 +184,75 @@ class TestStacks:
 
     def test_delete_older_copies_of_unknown_record(self):
         assert history.delete_older_copies("c" * 32) is None
+
+
+class TestSources:
+    def _sources_dir(self):
+        return history.HISTORY_DIR / "sources"
+
+    def _age_sources(self):
+        # Texts younger than the grace period are never treated as orphans.
+        import os
+        import time
+
+        old = time.time() - history._ORPHAN_GRACE_SECONDS - 1
+        for path in self._sources_dir().glob("*.txt"):
+            os.utime(path, (old, old))
+
+    def test_sources_round_trip(self):
+        record = history.save_comparison(
+            _make_battlecard(), sources=[("a.pdf", "text A"), ("b.md", "text B")]
+        )
+        loaded = history.load_sources(history.get_comparison(record.id))
+        assert loaded == [("a.pdf", "text A"), ("b.md", "text B")]
+
+    def test_identical_texts_are_stored_once(self):
+        for _ in range(3):
+            history.save_comparison(
+                _make_battlecard(), sources=[("a", "same"), ("b", "same")]
+            )
+        assert len(list(self._sources_dir().glob("*.txt"))) == 1
+
+    def test_records_without_sources_cannot_be_reloaded(self):
+        record = history.save_comparison(_make_battlecard())
+        assert history.load_sources(record) is None
+
+    def test_missing_or_tampered_source_returns_none(self):
+        record = history.save_comparison(
+            _make_battlecard(), sources=[("a", "text A"), ("b", "text B")]
+        )
+        record.sources[0].text_sha256 = "../" + "0" * 61
+        assert history.load_sources(record) is None
+
+    def test_delete_removes_texts_no_record_uses(self):
+        shared = history.save_comparison(
+            _make_battlecard(), sources=[("a", "shared"), ("b", "only first")]
+        )
+        history.save_comparison(
+            _make_battlecard(), sources=[("a", "shared"), ("b", "only second")]
+        )
+        self._age_sources()
+
+        history.delete_comparison(shared.id)
+        assert len(list(self._sources_dir().glob("*.txt"))) == 2
+
+    def test_recent_texts_survive_cleanup(self):
+        record = history.save_comparison(
+            _make_battlecard(), sources=[("a", "fresh"), ("b", "fresh too")]
+        )
+        history.delete_comparison(record.id)
+        assert len(list(self._sources_dir().glob("*.txt"))) == 2
+
+    def test_pruning_removes_orphaned_texts(self, monkeypatch):
+        monkeypatch.setattr(history, "MAX_HISTORY_ENTRIES", 1)
+        history.save_comparison(_make_battlecard(), sources=[("a", "1"), ("b", "2")])
+        self._age_sources()
+        history.save_comparison(_make_battlecard(), sources=[("a", "3"), ("b", "4")])
+        self._age_sources()
+        history.save_comparison(_make_battlecard(), sources=[("a", "5"), ("b", "6")])
+        assert len(list(self._sources_dir().glob("*.txt"))) == 2
+
+    def test_clear_history_removes_all_texts(self):
+        history.save_comparison(_make_battlecard(), sources=[("a", "x"), ("b", "y")])
+        history.clear_history()
+        assert not self._sources_dir().exists()
