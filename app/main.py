@@ -38,7 +38,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from app.logging_config import configure_logging
-from app.schemas import BattlecardResponse, HistoryPage, HistoryRecord
+from app.schemas import CompareResponse, DeviceSpec, HistoryPage, HistoryRecord
 from app.services import export as export_service
 from app.services import history
 from app.services.auth import require_auth, security, verify_credentials
@@ -158,17 +158,21 @@ class CompareTextRequest(BaseModel):
 
 @router.post(
     "/api/v1/compare-text",
-    response_model=BattlecardResponse,
+    response_model=CompareResponse,
     dependencies=[Depends(compare_rate_limiter)],
 )
-def compare_text(payload: CompareTextRequest) -> BattlecardResponse:
+def compare_text(payload: CompareTextRequest) -> CompareResponse:
     _require_text(payload.device_a_text, payload.device_a_name)
     _require_text(payload.device_b_text, payload.device_b_name)
     device_a = extract_device_spec(payload.device_a_text, payload.device_a_name)
     device_b = extract_device_spec(payload.device_b_text, payload.device_b_name)
+    return _synthesize_and_save(device_a, device_b)
+
+
+def _synthesize_and_save(device_a: DeviceSpec, device_b: DeviceSpec) -> CompareResponse:
     battlecard = synthesize_battlecard(device_a, device_b)
-    history.save_comparison(battlecard)
-    return battlecard
+    record = history.save_comparison(battlecard)
+    return CompareResponse(**battlecard.model_dump(), history_id=record.id)
 
 
 def _require_text(text: str, name: str) -> str:
@@ -210,13 +214,13 @@ def _read_pdf_upload(upload: UploadFile) -> str:
 
 @router.post(
     "/api/v1/compare-pdfs",
-    response_model=BattlecardResponse,
+    response_model=CompareResponse,
     dependencies=[Depends(compare_rate_limiter)],
 )
 def compare_pdfs(
     device_a_pdf: UploadFile = File(...),
     device_b_pdf: UploadFile = File(...),
-) -> BattlecardResponse:
+) -> CompareResponse:
     device_a_text = _read_pdf_upload(device_a_pdf)
     device_b_text = _read_pdf_upload(device_b_pdf)
 
@@ -227,9 +231,7 @@ def compare_pdfs(
         device_b_text, device_b_pdf.filename or "device_b.pdf"
     )
 
-    battlecard = synthesize_battlecard(device_a, device_b)
-    history.save_comparison(battlecard)
-    return battlecard
+    return _synthesize_and_save(device_a, device_b)
 
 
 @router.get("/api/v1/history", response_model=HistoryPage)

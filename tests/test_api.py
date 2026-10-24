@@ -199,6 +199,27 @@ class TestPdfUploadErrors:
         assert "could not be read as a PDF" in response.json()["detail"]
 
 
+class TestHistoryId:
+    def test_compare_text_returns_id_of_saved_record(self):
+        text = (SAMPLE_DOCS_DIR / "device_a_qsg.md").read_text(encoding="utf-8")
+        first = client.post(
+            "/api/v1/compare-text",
+            json={"device_a_text": text, "device_b_text": text},
+        ).json()
+        # A newer record must not change which record the first response points at.
+        client.post(
+            "/api/v1/compare-text",
+            json={"device_a_text": text, "device_b_text": text},
+        )
+        record = client.get(f"/api/v1/history/{first['history_id']}").json()
+        assert record["id"] == first["history_id"]
+        assert client.get("/api/v1/history").json()["total"] == 2
+
+    def test_compare_pdfs_returns_history_id(self):
+        data = TestComparePdfs()._post().json()
+        assert client.get(f"/api/v1/history/{data['history_id']}").status_code == 200
+
+
 class TestEmptyDocuments:
     def test_image_only_pdf_returns_422_and_is_not_saved(self):
         import pymupdf
@@ -288,7 +309,7 @@ class TestHistory:
 
     def test_history_item_roundtrips_full_battlecard(self):
         battlecard = self._post_comparison().json()
-        history_id = client.get("/api/v1/history").json()["items"][0]["id"]
+        history_id = battlecard.pop("history_id")
 
         response = client.get(f"/api/v1/history/{history_id}")
         assert response.status_code == 200

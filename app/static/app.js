@@ -215,8 +215,8 @@ async function synthesize() {
     if (!res.ok) {
       throw new Error(data.detail || "Synthesis failed.");
     }
-    const items = await loadHistory();
-    setExportLinks(items && items[0] ? items[0].id : null);
+    await loadHistory();
+    setExportLinks(data.history_id);
     renderResults(data);
   } catch (err) {
     showError(err.message || "Something went wrong while synthesizing the comparison.");

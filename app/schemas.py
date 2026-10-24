@@ -21,6 +21,7 @@ __all__ = [
     "ProvisioningMethod",
     "DeviceSpec",
     "BattlecardResponse",
+    "CompareResponse",
     "HistorySummary",
     "HistoryRecord",
     "HistoryPage",
@@ -67,6 +68,12 @@ class BattlecardResponse(BaseModel):
     key_advantages_device_a: List[str]
     key_advantages_device_b: List[str]
     sales_talk_track: str
+
+
+class CompareResponse(BattlecardResponse):
+    """A fresh comparison plus the ID of the history record it was saved as."""
+
+    history_id: str
 
 
 class HistorySummary(BaseModel):
