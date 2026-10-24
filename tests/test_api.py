@@ -417,6 +417,57 @@ class TestComparisonMode:
         assert "ours" not in disposition and "competitor" not in disposition
 
 
+class TestDatasheets:
+    def _compare(self, a, b, mode="sales"):
+        return client.post(
+            "/api/v1/compare",
+            data={"mode": mode},
+            files={
+                "device_a_file": (
+                    a,
+                    (SAMPLE_DOCS_DIR / a).read_bytes(),
+                    "text/markdown",
+                ),
+                "device_b_file": (
+                    b,
+                    (SAMPLE_DOCS_DIR / b).read_bytes(),
+                    "text/markdown",
+                ),
+            },
+        )
+
+    def test_two_datasheets_compare_specs_without_friction(self):
+        response = self._compare("device_c_datasheet.md", "device_d_datasheet.md")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["installation_friction_score_device_a"] is None
+        assert data["installation_friction_score_device_b"] is None
+        assert data["comparison_matrix"]["document_type"] == {
+            "device_a": "datasheet",
+            "device_b": "datasheet",
+        }
+        names = [row["name"] for row in data["comparison_matrix"]["extra_specs"]]
+        assert "Power Consumption" in names and "Battery Backup" in names
+
+    def test_history_lists_unscored_comparisons(self):
+        self._compare("device_c_datasheet.md", "device_d_datasheet.md")
+        item = client.get("/api/v1/history").json()["items"][0]
+        assert item["installation_friction_score_device_a"] is None
+
+    def test_exports_say_friction_was_not_compared_and_include_spec_rows(self):
+        history_id = self._compare("device_a_qsg.md", "device_c_datasheet.md").json()[
+            "history_id"
+        ]
+        markdown = client.get(f"/api/v1/history/{history_id}/export.md").text
+        assert "Not compared: install effort is only scored" in markdown
+        assert (
+            "| Power Consumption | Not listed | 28 W typical, 36 W max (PoE++) |"
+            in markdown
+        )
+        pdf = client.get(f"/api/v1/history/{history_id}/export.pdf")
+        assert pdf.content[:4] == b"%PDF"
+
+
 class TestPdfUploadErrors:
     def test_corrupt_pdf_returns_400(self):
         response = client.post(

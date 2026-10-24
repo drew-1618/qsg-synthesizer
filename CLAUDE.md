@@ -44,7 +44,16 @@ docker compose up --build                        # requires a .env file (cp .env
      a regex parser keyed on the heading names used in `sample_docs/*.md`.
    - `_normalize_to_device_spec` converts it into the API-facing `DeviceSpec` (`app/schemas.py`)
      using the deterministic tools in `app/tools/`.
+   - Documents longer than `MAX_LLM_INPUT_CHARS` are not truncated: `_extract_document` splits
+     them on Markdown headings (`_split_into_chunks`, at most `_MAX_CHUNKS` parts), runs the same
+     bounded extractor per part, and `_merge_extractions` combines them deterministically. Skipped
+     parts become `DeviceSpec.extraction_warnings` and then `BattlecardResponse.warnings`.
+   - Each extraction carries a `document_type` (`quick_start_guide`/`datasheet`/`other`; the
+     heuristic only says datasheet on clear evidence) and open-ended `specs` rows.
 3. `synthesize_battlecard()` is fully rule-based (friction score, risks, advantages, talk track).
+   Friction is scored only when both documents are quick start guides (`_is_install_document`,
+   which treats a missing type as a guide); otherwise both scores are `None` and the talk track
+   is spec-based. The UI, history and exports all handle `None` scores.
 4. `app/services/history.py` saves the result as `data/history/<uuid hex>.json` (capped at 50);
    the export endpoints (`app/services/export.py`) render from those saved records.
 
@@ -82,6 +91,12 @@ Things that span multiple files:
   `app.services.orchestrator.genai` and setting the key env vars with `patch.dict`.
 - Most API tests run end-to-end through the heuristic parser on `sample_docs/`, so changing
   those sample docs or the heuristic parser can shift the expected friction scores.
+- `sample_docs/device_c_datasheet.md` (bullet specs) and `device_d_datasheet.md` (table specs)
+  are the datasheet fixtures; `tests/test_datasheets.py` covers document types, spec rows,
+  unscored comparisons and long-document chunking with a fake LLM.
+- Running the app or a script outside pytest loads `.env` and makes real LLM calls. For manual
+  checks start uvicorn with `GEMINI_API_KEY= ANTHROPIC_API_KEY= LLM_PROVIDER=` (empty values win
+  over `.env`) unless you mean to use a real provider.
 
 ## Agent Principles
 - Never dump raw multi-page documents into the primary orchestrator prompt.

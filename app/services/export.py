@@ -129,9 +129,44 @@ def _labels(battlecard: BattlecardResponse) -> tuple[str, str]:
     return name_a, name_b
 
 
+FRICTION_NOT_COMPARED = (
+    "Not compared: install effort is only scored when both documents are "
+    "quick start guides."
+)
+
+
+def _friction_scored(battlecard: BattlecardResponse) -> bool:
+    return (
+        battlecard.installation_friction_score_device_a is not None
+        and battlecard.installation_friction_score_device_b is not None
+    )
+
+
+def _extra_spec_rows(cm: dict) -> list[tuple[str, Optional[str], Optional[str]]]:
+    return [
+        (str(row.get("name", "")), row.get("device_a"), row.get("device_b"))
+        for row in cm.get("extra_specs") or []
+    ]
+
+
+def _spec_cell(value: Optional[str]) -> str:
+    return _md_cell(value) if value else "Not listed"
+
+
 def _md_cell(text: str) -> str:
     """Make `text` safe inside a Markdown table cell."""
     return text.replace("|", "\\|").replace("\r", " ").replace("\n", " ")
+
+
+def _matrix_value(cm: dict, key: str, device: str):
+    """A comparison-matrix value for export. When the document listed no
+    provisioning method, the primary one is only the scoring fallback."""
+    if (
+        key == "provisioning_method"
+        and cm.get("provisioning_methods", {}).get(device) == []
+    ):
+        return "Not specified"
+    return cm.get(key, {}).get(device)
 
 
 def _plain_cell(value) -> str:
@@ -150,8 +185,16 @@ def battlecard_to_markdown(battlecard: BattlecardResponse) -> str:
         f"# Battlecard: {name_a} vs {name_b}",
         "",
         "## Installation Friction Index",
-        f"- **{label_a}**: {battlecard.installation_friction_score_device_a} / 10",
-        f"- **{label_b}**: {battlecard.installation_friction_score_device_b} / 10",
+        *(
+            [
+                f"- **{label_a}**: "
+                f"{battlecard.installation_friction_score_device_a} / 10",
+                f"- **{label_b}**: "
+                f"{battlecard.installation_friction_score_device_b} / 10",
+            ]
+            if _friction_scored(battlecard)
+            else [FRICTION_NOT_COMPARED]
+        ),
         "",
         "## Competitive Sales Talk Track",
         battlecard.sales_talk_track,
@@ -162,10 +205,13 @@ def battlecard_to_markdown(battlecard: BattlecardResponse) -> str:
         "|---|---|---|",
     ]
     for label, key in _COMPARISON_ROWS:
-        row = cm.get(key, {})
-        cell_a = _plain_cell(row.get("device_a"))
-        cell_b = _plain_cell(row.get("device_b"))
+        cell_a = _plain_cell(_matrix_value(cm, key, "device_a"))
+        cell_b = _plain_cell(_matrix_value(cm, key, "device_b"))
         lines.append(f"| {label} | {cell_a} | {cell_b} |")
+    for spec_name, value_a, value_b in _extra_spec_rows(cm):
+        lines.append(
+            f"| {_md_cell(spec_name)} | {_spec_cell(value_a)} | {_spec_cell(value_b)} |"
+        )
 
     lines += ["", "## Competitive Advantages", "", f"### {label_a}"]
     lines += [f"- {adv}" for adv in battlecard.key_advantages_device_a] or [
@@ -184,6 +230,9 @@ def battlecard_to_markdown(battlecard: BattlecardResponse) -> str:
     lines += [f"- {risk}" for risk in battlecard.key_risks_device_b] or [
         "- None identified."
     ]
+    if battlecard.warnings:
+        lines += ["", "## Notes", ""]
+        lines += [f"- {warning}" for warning in battlecard.warnings]
     lines.append("")
     return "\n".join(lines)
 
@@ -213,9 +262,17 @@ def battlecard_to_pdf_bytes(battlecard: BattlecardResponse) -> bytes:
     story: list[Flowable] = [
         Paragraph(f"Battlecard: {_esc(name_a)} vs {_esc(name_b)}", _H1),
         Paragraph(
-            f"Installation Friction Index &mdash; {_esc(label_a)}: "
-            f"{battlecard.installation_friction_score_device_a}/10, "
-            f"{_esc(label_b)}: {battlecard.installation_friction_score_device_b}/10",
+            (
+                (
+                    f"Installation Friction Index &mdash; {_esc(label_a)}: "
+                    f"{battlecard.installation_friction_score_device_a}/10, "
+                    f"{_esc(label_b)}: "
+                    f"{battlecard.installation_friction_score_device_b}/10"
+                )
+                if _friction_scored(battlecard)
+                else "Installation Friction Index &mdash; "
+                + _esc(FRICTION_NOT_COMPARED)
+            ),
             _BODY,
         ),
         Paragraph("Competitive Sales Talk Track", _H2),
@@ -223,12 +280,19 @@ def battlecard_to_pdf_bytes(battlecard: BattlecardResponse) -> bytes:
         Paragraph("Side-by-Side Comparison", _H2),
     ]
 
-    rows = [["Attribute", label_a, label_b]]
+    rows: list[list] = [["Attribute", label_a, label_b]]
     for label, key in _COMPARISON_ROWS:
-        row = cm.get(key, {})
-        cell_a = _cell_flowable(row.get("device_a"))
-        cell_b = _cell_flowable(row.get("device_b"))
+        cell_a = _cell_flowable(_matrix_value(cm, key, "device_a"))
+        cell_b = _cell_flowable(_matrix_value(cm, key, "device_b"))
         rows.append([label, cell_a, cell_b])
+    for spec_name, value_a, value_b in _extra_spec_rows(cm):
+        rows.append(
+            [
+                Paragraph(_esc(spec_name), _BODY),
+                Paragraph(_esc(value_a or "Not listed"), _BODY),
+                Paragraph(_esc(value_b or "Not listed"), _BODY),
+            ]
+        )
     table = Table(rows, colWidths=[1.4 * inch, 2.8 * inch, 2.8 * inch])
     table.setStyle(_TABLE_STYLE)
     story.append(table)
@@ -266,6 +330,15 @@ def battlecard_to_pdf_bytes(battlecard: BattlecardResponse) -> bytes:
         else:
             story.append(Paragraph("None identified.", _BODY))
         story.append(Spacer(1, 4))
+
+    if battlecard.warnings:
+        story.append(Paragraph("Notes", _H2))
+        story.append(
+            ListFlowable(
+                [ListItem(Paragraph(_esc(w), _BODY)) for w in battlecard.warnings],  # type: ignore[misc]
+                bulletType="bullet",
+            )
+        )
 
     doc.build(story)
     return buffer.getvalue()

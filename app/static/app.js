@@ -561,6 +561,7 @@ function formatTimestamp(iso) {
 function easierLabel(item) {
   const a = item.installation_friction_score_device_a;
   const b = item.installation_friction_score_device_b;
+  if (a == null || b == null) return "Spec comparison, no install scores";
   if (a === b) return "Same installation friction";
   if (item.perspective === "sales") return `${a < b ? "Ours" : "Competitor"}: easier to install`;
   return `Easier to install: ${a < b ? item.device_a_name : item.device_b_name}`;
@@ -820,9 +821,35 @@ function roleTag(perspective, id, colorClass = "text-ink-muted") {
   return `<span class="block text-xs font-medium ${colorClass}">${role}</span>`;
 }
 
+const DOCUMENT_TYPE_LABELS = {
+  quick_start_guide: "Quick start guide",
+  datasheet: "Datasheet",
+  other: "Other document",
+};
+const DOCUMENT_TYPE_PHRASES = {
+  quick_start_guide: "a quick start guide",
+  datasheet: "a datasheet",
+  other: "another kind of document",
+};
+
 function renderVerdict(data, nameA, nameB) {
   const scoreA = data.installation_friction_score_device_a;
   const scoreB = data.installation_friction_score_device_b;
+  const subtitle = document.getElementById("friction-subtitle");
+  // Friction is only scored when both documents are quick start guides.
+  if (scoreA == null || scoreB == null) {
+    subtitle.classList.add("hidden");
+    const types = data.comparison_matrix.document_type || {};
+    const describe = (name, type) =>
+      `${escapeHtml(name)} is ${DOCUMENT_TYPE_PHRASES[type] || "not a quick start guide"}`;
+    document.getElementById("results-verdict").innerHTML = `
+      <p class="md:col-span-2 max-w-[65ch] text-ink-muted">
+        Install effort is only compared when both documents are quick start guides.
+        ${describe(nameA, types.device_a)}, and ${describe(nameB, types.device_b)}.
+      </p>`;
+    return;
+  }
+  subtitle.classList.remove("hidden");
   const easier = scoreA < scoreB ? "a" : scoreB < scoreA ? "b" : null;
   const card = (key, name, score) => `
     <div class="bg-plate border border-line rounded-control p-5">
@@ -853,6 +880,12 @@ function provisioningChip(method) {
 // Primary method first, then any other methods the document lists. Records
 // saved before provisioning_methods existed only have the primary one.
 function provisioningCell(cm, device) {
+  // An empty list means the document named no method; the primary is then only
+  // the conservative Console fallback used for scoring, so don't show it.
+  const listed = (cm.provisioning_methods || {})[device];
+  if (Array.isArray(listed) && listed.length === 0) {
+    return `<span class="text-ink-muted">Not specified</span>`;
+  }
   const primary = cm.provisioning_method[device];
   const others = ((cm.provisioning_methods || {})[device] || []).filter(
     (method) => method !== primary
@@ -875,7 +908,9 @@ function renderSpecTable(cm, nameA, nameB, perspective) {
   const textOrDash = (value) =>
     value ? escapeHtml(value) : `<span class="text-ink-muted">Not specified</span>`;
   const ipCell = (device) =>
-    `<span class="font-mono break-all">${escapeHtml(cm.default_ip[device] || "Unknown")}</span>${ipLabel(cm.is_private_ip[device])}`;
+    cm.default_ip[device]
+      ? `<span class="font-mono break-all">${escapeHtml(cm.default_ip[device])}</span>${ipLabel(cm.is_private_ip[device])}`
+      : `<span class="text-ink-muted">Not specified</span>`;
   const rows = [
     ["Default IP", ipCell("device_a"), ipCell("device_b")],
     ["Provisioning method", provisioningCell(cm, "device_a"), provisioningCell(cm, "device_b")],
@@ -886,17 +921,32 @@ function renderSpecTable(cm, nameA, nameB, perspective) {
     ["Form factor", textOrDash(cm.form_factor.device_a), textOrDash(cm.form_factor.device_b)],
     ["Capabilities", listOrDash(cm.capabilities.device_a), listOrDash(cm.capabilities.device_b)],
   ];
+  // Older records have no document types; show the row only when known.
+  const types = cm.document_type || {};
+  if (types.device_a || types.device_b) {
+    const typeCell = (type) =>
+      type ? DOCUMENT_TYPE_LABELS[type] || "Other document" : `<span class="text-ink-muted">Not specified</span>`;
+    rows.unshift(["Document type", typeCell(types.device_a), typeCell(types.device_b)]);
+  }
+  // Open-ended specs (power, certifications...) come from the documents
+  // themselves, so the names are escaped like any other extracted text.
+  const specCell = (value) =>
+    value ? escapeHtml(value) : `<span class="text-ink-muted">Not listed</span>`;
+  (cm.extra_specs || []).forEach((row) => {
+    rows.push([escapeHtml(row.name), specCell(row.device_a), specCell(row.device_b)]);
+  });
   // Below md each spec stacks into a block and the device name is repeated
   // above its value, since a 3-column table is too narrow on a phone.
-  const deviceLabel = (name) =>
-    `<span class="md:hidden block text-xs font-medium text-ink-muted mb-0.5">${escapeHtml(name)}</span>`;
+  const roles = perspective === "sales" ? { a: " (ours)", b: " (competitor)" } : { a: "", b: "" };
+  const deviceLabel = (name, id) =>
+    `<span class="md:hidden block text-xs font-medium text-ink-muted mb-0.5">${escapeHtml(name)}${roles[id]}</span>`;
   document.getElementById("comparison-table-body").innerHTML = rows
     .map(
       ([label, a, b]) => `
       <tr class="align-top max-md:block max-md:border-b max-md:border-line max-md:py-3">
         <th scope="row" class="md:border-b md:border-line md:py-3 pr-3 text-left font-medium text-ink-muted max-md:block max-md:pb-2">${label}</th>
-        <td class="md:border-b md:border-line md:py-3 pr-3 break-words max-md:block max-md:py-1.5">${deviceLabel(nameA)}${a}</td>
-        <td class="md:border-b md:border-line md:py-3 pr-3 break-words max-md:block max-md:py-1.5">${deviceLabel(nameB)}${b}</td>
+        <td class="md:border-b md:border-line md:py-3 pr-3 break-words max-md:block max-md:py-1.5">${deviceLabel(nameA, "a")}${a}</td>
+        <td class="md:border-b md:border-line md:py-3 pr-3 break-words max-md:block max-md:py-1.5">${deviceLabel(nameB, "b")}${b}</td>
       </tr>`
     )
     .join("");
@@ -958,6 +1008,19 @@ function renderResults(data) {
   const cm = data.comparison_matrix;
   const nameA = cm.model_name.device_a;
   const nameB = cm.model_name.device_b;
+
+  const warnings = data.warnings || [];
+  const warningsEl = document.getElementById("results-warnings");
+  warningsEl.innerHTML = warnings
+    .map(
+      (warning) => `
+      <li class="flex items-start gap-2 text-ink-muted">
+        <span class="led-dot led-dot--amber mt-1.5" aria-hidden="true"></span>
+        <span>${escapeHtml(warning)}</span>
+      </li>`
+    )
+    .join("");
+  warningsEl.classList.toggle("hidden", warnings.length === 0);
 
   renderVerdict(data, nameA, nameB);
   document.getElementById("sales-talk-track").textContent = data.sales_talk_track;

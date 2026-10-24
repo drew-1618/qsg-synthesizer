@@ -28,16 +28,18 @@ import os
 import re
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Hashable, Iterable, Optional, TypeVar
 
 from pydantic import ValidationError
 
 from app.models.schemas import (
-    ASSESSMENT_FIELDS,
+    DROPPABLE_FIELDS,
     CablingPort,
+    DocumentType,
     LEDIndicator,
     QSGExtraction,
     RawProvisioningMethod,
+    SpecItem,
 )
 from app.schemas import (
     BattlecardResponse,
@@ -45,6 +47,7 @@ from app.schemas import (
     LEDStatus,
     Perspective,
     ProvisioningMethod,
+    SpecValue,
 )
 from app.tools.capability_compare import parse_speed_mbps, rank_wifi_standard
 from app.tools.led_normalizer import LEDState, led_sort_key, normalize_led
@@ -75,6 +78,16 @@ MAX_LLM_INPUT_CHARS = 100_000
 _LLM_MAX_OUTPUT_TOKENS = 4096
 _LLM_TIMEOUT_SECONDS = 60.0
 _EXTRACTION_TOOL_NAME = "record_qsg_extraction"
+
+# Documents longer than MAX_LLM_INPUT_CHARS are read section by section rather
+# than truncated: split on Markdown headings into parts of at most this size,
+# each sent to the same bounded extractor, then merged deterministically.
+_CHUNK_CHARS = 60_000
+_MAX_CHUNKS = 8
+_CHUNK_WORKERS = 4
+# Open-ended spec rows kept per device, so one verbose datasheet can't flood
+# the comparison table.
+_MAX_SPEC_ROWS = 40
 
 EXTRACTION_SOURCE_LLM = "llm"
 EXTRACTION_SOURCE_HEURISTIC = "heuristic"
@@ -108,7 +121,20 @@ _SPEC_LABEL_TO_FIELD = {
 
 _HEADING_PREFIX_RE = re.compile(r"^#+\s*")
 _BULLET_PREFIX_RE = re.compile(r"^[-*]\s+")
-_TITLE_SUFFIX_RE = re.compile(r"\s*[—-]\s*quick start guide\s*$", re.IGNORECASE)
+_TITLE_SUFFIX_RE = re.compile(
+    r"\s*[—-]\s*(?:quick start guide|data\s*sheet|spec(?:ification)?s? sheet)\s*$",
+    re.IGNORECASE,
+)
+_DATASHEET_TITLE_RE = re.compile(
+    r"\b(?:data\s*sheet|spec(?:ification)?s?\s+sheet|product\s+specifications?)\b",
+    re.IGNORECASE,
+)
+_INSTALL_TITLE_RE = re.compile(
+    r"\b(?:quick\s*start|installation|install|setup|getting\s+started)\b",
+    re.IGNORECASE,
+)
+_INSTALL_SECTIONS = {"installation steps", "required tools", "provisioning"}
+_SPEC_TABLE_HEADERS = {"spec", "specification", "parameter", "feature", "value"}
 _IPV4_RE = re.compile(
     r"\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b"
 )
@@ -223,18 +249,47 @@ def _parse_table_rows(lines: list[str]) -> list[list[str]]:
 
 
 def _parse_specifications(lines: list[str]) -> dict[str, str]:
-    """Parse "Label: value" bullets from a Specifications section into the
-    QSGExtraction field names they map to. Unrecognized labels are ignored
-    rather than guessed at."""
+    """Map the Specifications section's labels (bullets or table rows) onto
+    the QSGExtraction field names they correspond to. Unrecognized labels are
+    ignored here; they become open-ended spec rows instead."""
     specs: dict[str, str] = {}
+    for item in _parse_spec_items(lines):
+        field = _SPEC_LABEL_TO_FIELD.get(_spec_key(item.name))
+        if field and field not in specs:
+            specs[field] = item.value
+    return specs
+
+
+def _parse_spec_items(lines: list[str]) -> list[SpecItem]:
+    """Every "Label: value" bullet and two-column table row in a
+    Specifications section, verbatim, for the open-ended spec rows."""
+    items = []
     for bullet in _parse_bullets(lines):
         label, sep, value = bullet.partition(":")
-        if not sep:
+        if sep and label.strip() and value.strip():
+            items.append(SpecItem(name=label.strip(), value=value.strip()))
+    for row in _parse_table_rows(lines):
+        if len(row) < 2 or not row[0] or not row[1]:
             continue
-        field = _SPEC_LABEL_TO_FIELD.get(label.strip().lower())
-        if field:
-            specs[field] = value.strip()
-    return specs
+        if {row[0].lower(), row[1].lower()} <= _SPEC_TABLE_HEADERS:
+            continue
+        items.append(SpecItem(name=row[0], value=row[1]))
+    return items
+
+
+def _detect_document_type(text: str, sections: dict[str, list[str]]) -> DocumentType:
+    """Call a document a datasheet only on clear evidence: a datasheet title, or
+    a Specifications section with no install title or install sections.
+    Everything else stays a quick start guide, as before document types."""
+    title = next((line.strip() for line in text.splitlines() if line.strip()), "")
+    if _DATASHEET_TITLE_RE.search(title):
+        return DocumentType.DATASHEET
+    looks_like_install = bool(
+        _INSTALL_TITLE_RE.search(title) or _INSTALL_SECTIONS & sections.keys()
+    )
+    if "specifications" in sections and not looks_like_install:
+        return DocumentType.DATASHEET
+    return DocumentType.QUICK_START_GUIDE
 
 
 def _detect_device_name(text: str) -> str:
@@ -320,6 +375,8 @@ def _heuristic_extract_qsg(text: str, source_document: str) -> QSGExtraction:
         wan_speed=specs.get("wan_speed"),
         form_factor=specs.get("form_factor"),
         capabilities=_parse_bullets(sections.get("key features", [])),
+        document_type=_detect_document_type(text, sections),
+        specs=_parse_spec_items(sections.get("specifications", [])),
     )
 
 
@@ -395,17 +452,17 @@ def _parse_json_payload(raw: str) -> dict:
 def _validate_extraction(payload: object) -> QSGExtraction:
     """Validate a model's payload against `QSGExtraction`.
 
-    A malformed assessment (step count, difficulty, strengths, gaps) only
-    costs those fields: they are dropped with a warning so the otherwise
-    good extraction survives. Any other violation raises, and the caller
-    falls back to the heuristic parser."""
+    A malformed optional field (the assessment, document type or open-ended
+    specs) only costs that field: it is dropped with a warning so the
+    otherwise good extraction survives. Any other violation raises, and the
+    caller falls back to the heuristic parser."""
     try:
         return QSGExtraction.model_validate(payload)
     except ValidationError as exc:
         bad = {err["loc"][0] for err in exc.errors() if err["loc"]}
-        if not isinstance(payload, dict) or not bad <= ASSESSMENT_FIELDS:
+        if not isinstance(payload, dict) or not bad <= DROPPABLE_FIELDS:
             raise
-        logger.warning("Dropping malformed LLM assessment fields: %s", sorted(bad))
+        logger.warning("Dropping malformed optional LLM fields: %s", sorted(bad))
         return QSGExtraction.model_validate(
             {k: v for k, v in payload.items() if k not in bad}
         )
@@ -513,6 +570,191 @@ def _extract_with_source(
     )
 
 
+def _split_into_chunks(text: str, max_chars: int = _CHUNK_CHARS) -> list[str]:
+    """Split on Markdown headings and pack whole sections into parts of at
+    most `max_chars`. A single oversized section is cut at the last blank line
+    that fits, or at `max_chars` if there is none."""
+    sections: list[str] = []
+    current: list[str] = []
+    for line in text.splitlines(keepends=True):
+        if line.lstrip().startswith("#") and current:
+            sections.append("".join(current))
+            current = []
+        current.append(line)
+    if current:
+        sections.append("".join(current))
+
+    pieces: list[str] = []
+    for section in sections:
+        while len(section) > max_chars:
+            cut = section.rfind("\n\n", 0, max_chars)
+            if cut <= 0:
+                cut = max_chars
+            pieces.append(section[:cut])
+            section = section[cut:]
+        pieces.append(section)
+
+    chunks: list[str] = []
+    buffer = ""
+    for piece in pieces:
+        if buffer and len(buffer) + len(piece) > max_chars:
+            chunks.append(buffer)
+            buffer = ""
+        buffer += piece
+    chunks.append(buffer)
+    return [chunk for chunk in chunks if chunk.strip()]
+
+
+_T = TypeVar("_T")
+
+
+def _unique(
+    items: Iterable[_T], key: Callable[[_T], Hashable] = lambda item: item
+) -> list[_T]:
+    seen: set[Hashable] = set()
+    result = []
+    for item in items:
+        marker = key(item)
+        if marker not in seen:
+            seen.add(marker)
+            result.append(item)
+    return result
+
+
+def _spec_key(name: str) -> str:
+    return " ".join(name.lower().rstrip(":").split())
+
+
+def _merge_extractions(
+    parts: list[QSGExtraction], source_document: str
+) -> QSGExtraction:
+    """Combine per-section extractions in document order: the first non-empty
+    scalar wins, and list fields are unioned without duplicates."""
+
+    def first(field: str):
+        return next(
+            (getattr(p, field) for p in parts if getattr(p, field) not in (None, "")),
+            None,
+        )
+
+    step_counts = [p.step_count for p in parts if p.step_count is not None]
+    return QSGExtraction(
+        device_name=parts[0].device_name,
+        source_document=source_document,
+        default_ip=first("default_ip"),
+        provisioning_methods=_unique(m for p in parts for m in p.provisioning_methods),
+        required_tools=_unique(
+            (tool for p in parts for tool in p.required_tools), key=str.lower
+        ),
+        cabling_ports=_unique(
+            (port for p in parts for port in p.cabling_ports),
+            key=lambda port: port.port_name.lower(),
+        ),
+        led_indicators=_unique(
+            (led for p in parts for led in p.led_indicators),
+            key=lambda led: (led.led_name.lower(), led.raw_description.lower()),
+        ),
+        wifi_standard=first("wifi_standard"),
+        wan_speed=first("wan_speed"),
+        form_factor=first("form_factor"),
+        capabilities=_unique(
+            (cap for p in parts for cap in p.capabilities), key=str.lower
+        ),
+        # A procedure normally sits in one section; summing would double-count
+        # steps a document repeats.
+        step_count=max(step_counts) if step_counts else None,
+        setup_difficulty=first("setup_difficulty"),
+        strengths=_unique((x for p in parts for x in p.strengths), key=str.lower),
+        gaps=_unique((x for p in parts for x in p.gaps), key=str.lower),
+        document_type=first("document_type"),
+        specs=_unique(
+            (spec for p in parts for spec in p.specs),
+            key=lambda spec: _spec_key(spec.name),
+        ),
+    )
+
+
+def _extract_in_parts(
+    provider: str, document_text: str, source_document: str
+) -> tuple[QSGExtraction, list[str]]:
+    """Run the bounded extractor once per section of a long document and merge.
+
+    The first part runs alone so its device name can be passed to the rest:
+    later sections rarely repeat it, and `device_name` is required."""
+    chunks = _split_into_chunks(document_text)
+    warnings: list[str] = []
+    if len(chunks) > _MAX_CHUNKS:
+        warnings.append(
+            f"Only the first {_MAX_CHUNKS} of {len(chunks)} sections were read; "
+            "the document is too long to read in full."
+        )
+        chunks = chunks[:_MAX_CHUNKS]
+    total = len(chunks)
+    logger.info("Reading %r in %d parts", source_document, total)
+    extractor = _PROVIDER_EXTRACTORS[provider]
+    first = extractor(chunks[0], f"{source_document} (part 1 of {total})")
+
+    def run(index: int) -> QSGExtraction:
+        label = (
+            f"{source_document} (part {index + 1} of {total}; "
+            f"device: {first.device_name})"
+        )
+        return extractor(chunks[index], label)
+
+    parts = [first]
+    failed = 0
+    with ThreadPoolExecutor(max_workers=_CHUNK_WORKERS) as pool:
+        for future in [pool.submit(run, i) for i in range(1, total)]:
+            try:
+                parts.append(future.result())
+            except Exception:
+                failed += 1
+                logger.warning(
+                    "Extraction failed for a part of %r; skipping it",
+                    source_document,
+                    exc_info=True,
+                )
+    if failed:
+        warnings.append(
+            f"{failed} of {total} sections could not be read and were skipped."
+        )
+    return _merge_extractions(parts, source_document), warnings
+
+
+def _extract_document(
+    document_text: str, source_document: str
+) -> tuple[QSGExtraction, str, list[str]]:
+    """Like `_extract_with_source`, but documents too long for one LLM call
+    are read in parts instead of being truncated. Also returns warnings about
+    how the document was read."""
+    provider = _select_llm_provider()
+    if (
+        provider
+        and _provider_ready(provider)
+        and len(document_text) > MAX_LLM_INPUT_CHARS
+    ):
+        try:
+            extraction, warnings = _extract_in_parts(
+                provider, document_text, source_document
+            )
+            return extraction, EXTRACTION_SOURCE_LLM, warnings
+        except Exception:
+            logger.warning(
+                "%s sectioned extraction failed for %r; falling back to heuristic "
+                "parser",
+                provider.capitalize(),
+                source_document,
+                exc_info=True,
+            )
+            return (
+                _heuristic_extract_qsg(document_text, source_document),
+                EXTRACTION_SOURCE_HEURISTIC,
+                [],
+            )
+    extraction, source = _extract_with_source(document_text, source_document)
+    return extraction, source, []
+
+
 def _select_primary_provisioning_method(
     methods: list[RawProvisioningMethod],
 ) -> ProvisioningMethod:
@@ -578,15 +820,39 @@ def _normalize_to_device_spec(extraction: QSGExtraction) -> DeviceSpec:
         ),
         strengths=extraction.strengths,
         gaps=extraction.gaps,
+        document_type=(
+            extraction.document_type.value if extraction.document_type else None
+        ),
+        specs=_normalize_specs(extraction.specs),
     )
+
+
+def _normalize_specs(specs: list[SpecItem]) -> list[SpecValue]:
+    """De-duplicate open-ended specs and drop the ones already shown as fixed
+    rows (Wi-Fi standard, WAN speed, form factor)."""
+    kept = _unique(
+        (
+            spec
+            for spec in specs
+            if spec.name.strip()
+            and spec.value.strip()
+            and _spec_key(spec.name) not in _SPEC_LABEL_TO_FIELD
+        ),
+        key=lambda spec: _spec_key(spec.name),
+    )
+    return [
+        SpecValue(name=spec.name.strip(), value=spec.value.strip())
+        for spec in kept[:_MAX_SPEC_ROWS]
+    ]
 
 
 def extract_device_spec(document_text: str, source_document: str) -> DeviceSpec:
     """Full pipeline for one document: raw extraction, then deterministic
     IP/LED normalization into a clean `DeviceSpec`."""
-    extraction, source = _extract_with_source(document_text, source_document)
+    extraction, source, warnings = _extract_document(document_text, source_document)
     spec = _normalize_to_device_spec(extraction)
     spec.extraction_source = source
+    spec.extraction_warnings = warnings
     return spec
 
 
@@ -673,18 +939,48 @@ def _build_comparison_matrix(device_a: DeviceSpec, device_b: DeviceSpec) -> dict
             "device_a": [led.model_dump() for led in device_a.led_states],
             "device_b": [led.model_dump() for led in device_b.led_states],
         },
+        "document_type": {
+            "device_a": device_a.document_type,
+            "device_b": device_b.document_type,
+        },
+        "extra_specs": _merge_spec_rows(device_a, device_b),
     }
+
+
+def _merge_spec_rows(device_a: DeviceSpec, device_b: DeviceSpec) -> list[dict]:
+    """One row per open-ended spec name (matched case-insensitively), A's
+    order first; a side that doesn't list a spec gets None."""
+    rows: dict[str, dict] = {}
+    for side, spec in (("device_a", device_a), ("device_b", device_b)):
+        for item in spec.specs:
+            row = rows.setdefault(
+                _spec_key(item.name),
+                {"name": item.name, "device_a": None, "device_b": None},
+            )
+            if row[side] is None:
+                row[side] = item.value
+    return list(rows.values())[:_MAX_SPEC_ROWS]
+
+
+def _is_install_document(spec: DeviceSpec) -> bool:
+    """Quick start guides (and records from before document types) describe an
+    installation, so their install effort can be scored and compared."""
+    return spec.document_type in (None, DocumentType.QUICK_START_GUIDE.value)
 
 
 def _build_key_risks(spec: DeviceSpec) -> list[str]:
     risks = []
-    if spec.provisioning_method == ProvisioningMethod.CONSOLE:
+    # With no documented provisioning, the primary method is only the
+    # conservative Console fallback; for a datasheet that would invent a risk.
+    provisioning_known = _is_install_document(spec) or bool(spec.provisioning_methods)
+    if provisioning_known and spec.provisioning_method == ProvisioningMethod.CONSOLE:
         risks.append(
             "Requires a technician with a laptop and terminal emulator on-site "
             "for initial console setup."
         )
     if (
-        spec.default_ip
+        provisioning_known
+        and spec.default_ip
         and spec.is_private_ip
         and spec.provisioning_method not in _REMOTE_PROVISIONING_METHODS
     ):
@@ -753,8 +1049,48 @@ def _build_key_advantages(
     return advantages_a, advantages_b
 
 
-def _real_items(items: list[str], fallback: str) -> list[str]:
-    return [item for item in items if item != fallback]
+def _strengths_phrase(advantages: Optional[list[str]]) -> str:
+    """Up to three real advantages as one phrase, without the "Unique
+    capability:" prefix; empty when only the no-advantages message is there."""
+    real = [a for a in advantages or [] if a != NO_ADVANTAGES_MESSAGE][:3]
+    return "; ".join(a.removeprefix("Unique capability: ").rstrip(".") for a in real)
+
+
+def _build_spec_talk_track(
+    device_a: DeviceSpec,
+    device_b: DeviceSpec,
+    perspective: Optional[Perspective],
+    advantages_a: list[str],
+    advantages_b: list[str],
+) -> str:
+    """Talk track when install effort can't be compared because the documents
+    aren't both quick start guides; built only from the spec advantages."""
+    a, b = device_a.model_name, device_b.model_name
+    intro = (
+        "Install effort isn't compared because these documents don't both "
+        "describe an installation procedure."
+    )
+    strengths_a = _strengths_phrase(advantages_a)
+    strengths_b = _strengths_phrase(advantages_b)
+    if perspective == "sales":
+        if strengths_a:
+            text = f"Lead with what {a} offers that {b} doesn't: {strengths_a}."
+        else:
+            text = (
+                f"No spec advantages for {a} were identified from the documents, "
+                f"so differentiate on factors outside them."
+            )
+        if strengths_b:
+            text += f" Be ready for {b} to point to: {strengths_b}."
+        return f"{intro} {text}"
+    parts = [intro]
+    if strengths_a:
+        parts.append(f"{a} stands out for: {strengths_a}.")
+    if strengths_b:
+        parts.append(f"{b} stands out for: {strengths_b}.")
+    if not (strengths_a or strengths_b):
+        parts.append("Neither document shows a clear spec advantage over the other.")
+    return " ".join(parts)
 
 
 def _build_sales_talk_track(
@@ -786,15 +1122,10 @@ def _build_sales_talk_track(
             f"(Installation Friction Index {score_a} vs. {score_b}), so don't "
             f"compete on install speed."
         )
-        strengths = _real_items(advantages_a or [], NO_ADVANTAGES_MESSAGE)[:3]
+        strengths = _strengths_phrase(advantages_a)
         if strengths:
             track += (
-                f" Lead with what {ours} offers that {theirs} doesn't: "
-                + "; ".join(
-                    item.removeprefix("Unique capability: ").rstrip(".")
-                    for item in strengths
-                )
-                + "."
+                f" Lead with what {ours} offers that {theirs} doesn't: {strengths}."
             )
         else:
             track += (
@@ -842,10 +1173,23 @@ def synthesize_battlecard(
 ) -> BattlecardResponse:
     """Deterministically compare two normalized `DeviceSpec` objects into a
     `BattlecardResponse`. Rule-based rather than LLM-routed, since free-form
-    prose doesn't map onto these typed fields."""
-    score_a = _compute_friction_score(device_a)
-    score_b = _compute_friction_score(device_b)
+    prose doesn't map onto these typed fields.
+
+    Install friction is scored only when both documents are quick start
+    guides; otherwise both scores are None and the talk track is spec-based."""
     advantages_a, advantages_b = _build_key_advantages(device_a, device_b)
+    score_a: Optional[int] = None
+    score_b: Optional[int] = None
+    if _is_install_document(device_a) and _is_install_document(device_b):
+        score_a = _compute_friction_score(device_a)
+        score_b = _compute_friction_score(device_b)
+        talk_track = _build_sales_talk_track(
+            device_a, score_a, device_b, score_b, perspective, advantages_a
+        )
+    else:
+        talk_track = _build_spec_talk_track(
+            device_a, device_b, perspective, advantages_a, advantages_b
+        )
     return BattlecardResponse(
         comparison_matrix=_build_comparison_matrix(device_a, device_b),
         installation_friction_score_device_a=score_a,
@@ -854,10 +1198,13 @@ def synthesize_battlecard(
         key_risks_device_b=_build_key_risks(device_b),
         key_advantages_device_a=advantages_a,
         key_advantages_device_b=advantages_b,
-        sales_talk_track=_build_sales_talk_track(
-            device_a, score_a, device_b, score_b, perspective, advantages_a
-        ),
+        sales_talk_track=talk_track,
         extraction_source_device_a=device_a.extraction_source,
         extraction_source_device_b=device_b.extraction_source,
         perspective=perspective,
+        warnings=[
+            f"{spec.model_name}: {warning}"
+            for spec in (device_a, device_b)
+            for warning in spec.extraction_warnings
+        ],
     )

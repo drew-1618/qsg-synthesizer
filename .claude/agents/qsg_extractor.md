@@ -1,6 +1,6 @@
 ---
 name: qsg_extractor
-description: Bounded parser for a single telecom hardware Quick Start Guide or spec sheet. Extracts structured install/provisioning facts. Never invoked on more than one document at a time.
+description: Bounded parser for a single telecom hardware Quick Start Guide, datasheet or spec sheet. Extracts structured install/provisioning facts and specifications. Never invoked on more than one document at a time.
 model: haiku
 tools: Read
 ---
@@ -60,6 +60,24 @@ Read the supplied document text and extract only these fields:
   easy about setup. Use only what the document states.
 - `gaps`: a list of short strings naming what the document leaves out or
   makes hard (missing default credentials, unexplained LED states, etc.).
+- `document_type`: exactly one of `"quick_start_guide"` (the document walks
+  through installing or setting up the device), `"datasheet"` (a spec or data
+  sheet: mostly specifications, no setup procedure), or `"other"`; or `null`
+  if you can't tell.
+- `specs`: a list of objects `{"name", "value"}` for specifications the
+  document states that are NOT already covered by the fields above (e.g.
+  `{"name": "Power consumption", "value": "12 W typical"}`, max throughput
+  per band, operating temperature, dimensions, certifications, memory).
+  Copy names and values VERBATIM; do not convert units, rank, or merge rows.
+  Leave out Wi-Fi standard, WAN speed and form factor (they have their own
+  fields). Use `[]` if there are none.
+
+## Long documents
+
+A long document may be sent to you in parts. When the source label says
+something like `(part 3 of 5; device: Acme X1)`, you are seeing only that
+part: extract only what this part states, use `null`/`[]` for everything it
+doesn't mention, and use the device name from the label for `device_name`.
 
 ## Hard constraints
 

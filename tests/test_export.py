@@ -130,3 +130,45 @@ class TestSanitizeFilename:
     def test_length_is_capped(self):
         result = self.clean("x" * 500)
         assert result == "x" * 100 + ".pdf"
+
+
+class TestDatasheetExports:
+    def _unscored(self, **overrides):
+        card = _card(
+            installation_friction_score_device_a=None,
+            installation_friction_score_device_b=None,
+            warnings=["A: Only the first 8 of 9 sections were read."],
+            **overrides,
+        )
+        card.comparison_matrix["extra_specs"] = [
+            {"name": "Power | draw", "device_a": "10 W", "device_b": None}
+        ]
+        return card
+
+    def test_markdown_handles_missing_scores_spec_rows_and_notes(self):
+        md = battlecard_to_markdown(self._unscored())
+        assert "Not compared: install effort is only scored" in md
+        assert "None / 10" not in md
+        assert "| Power \\| draw | 10 W | Not listed |" in md
+        assert "## Notes" in md
+        assert "- A: Only the first 8 of 9 sections were read." in md
+
+    def test_scored_cards_have_no_notes_section(self):
+        assert "## Notes" not in battlecard_to_markdown(_card())
+
+    def test_pdf_renders_unscored_cards(self):
+        assert battlecard_to_pdf_bytes(self._unscored()).startswith(b"%PDF")
+
+
+def test_undocumented_provisioning_is_not_shown_as_the_console_fallback():
+    card = _card()
+    card.comparison_matrix["provisioning_method"] = {
+        "device_a": "Console",
+        "device_b": "Console",
+    }
+    card.comparison_matrix["provisioning_methods"] = {
+        "device_a": [],
+        "device_b": ["Console"],
+    }
+    md = battlecard_to_markdown(card)
+    assert "| Provisioning Method | Not specified | Console |" in md
