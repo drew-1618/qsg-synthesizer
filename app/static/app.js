@@ -53,48 +53,35 @@ function highlightMatch(text, query) {
   if (idx === -1) return escaped;
   return (
     escaped.slice(0, idx) +
-    `<mark class="bg-amber-200 text-slate-900 rounded-sm px-0.5">${escaped.slice(idx, idx + escapedQuery.length)}</mark>` +
+    `<mark class="bg-led-amber/30 text-ink rounded-sm px-0.5">${escaped.slice(idx, idx + escapedQuery.length)}</mark>` +
     escaped.slice(idx + escapedQuery.length)
   );
 }
 
 // ---- Confirmation dialog (replaces window.confirm) ----
+// A native modal <dialog>: it joins the top layer (so it can open over the
+// history drawer), traps focus, and Esc cancels it.
 function confirmDialog(message, { title = "Are you sure?", confirmLabel = "Confirm" } = {}) {
   const dialog = document.getElementById("confirm-dialog");
-  const backdrop = document.getElementById("confirm-backdrop");
-  const titleEl = document.getElementById("confirm-title");
-  const messageEl = document.getElementById("confirm-message");
   const okBtn = document.getElementById("confirm-ok-btn");
   const cancelBtn = document.getElementById("confirm-cancel-btn");
 
-  titleEl.textContent = title;
-  messageEl.textContent = message;
+  document.getElementById("confirm-title").textContent = title;
+  document.getElementById("confirm-message").textContent = message;
   okBtn.textContent = confirmLabel;
 
-  dialog.classList.remove("hidden");
-  cancelBtn.focus();
-
   return new Promise((resolve) => {
-    const cleanup = (result) => {
-      dialog.classList.add("hidden");
-      okBtn.removeEventListener("click", onOk);
-      cancelBtn.removeEventListener("click", onCancel);
-      backdrop.removeEventListener("click", onCancel);
-      document.removeEventListener("keydown", onKeydown);
-      resolve(result);
-    };
-    const onOk = () => cleanup(true);
-    const onCancel = () => cleanup(false);
     // Enter is deliberately not handled here: the focused button (Cancel by
     // default) activates itself natively, so Enter never confirms by accident.
-    const onKeydown = (e) => {
-      if (e.key === "Escape") cleanup(false);
+    okBtn.onclick = () => dialog.close("confirm");
+    cancelBtn.onclick = () => dialog.close("cancel");
+    dialog.onclick = (e) => {
+      if (e.target === dialog) dialog.close("cancel");
     };
-
-    okBtn.addEventListener("click", onOk);
-    cancelBtn.addEventListener("click", onCancel);
-    backdrop.addEventListener("click", onCancel);
-    document.addEventListener("keydown", onKeydown);
+    dialog.onclose = () => resolve(dialog.returnValue === "confirm");
+    dialog.returnValue = "";
+    dialog.showModal();
+    cancelBtn.focus();
   });
 }
 
@@ -283,8 +270,9 @@ async function synthesize() {
     if (!res.ok) {
       throw new Error(data.detail || "Synthesis failed.");
     }
-    await loadHistory();
     setExportLinks(data.history_id);
+    setUrlId(data.history_id);
+    await loadHistory();
     renderResults(data);
   } catch (err) {
     showError(err.message || "Something went wrong while synthesizing the comparison.");
@@ -295,13 +283,43 @@ async function synthesize() {
 
 document.getElementById("synthesize-btn").addEventListener("click", synthesize);
 
-// ---- History ----
+// ---- History drawer ----
+const HISTORY_ID_PATTERN = /^[0-9a-f]{32}$/;
+const historyDrawer = document.getElementById("history-drawer");
+let historyTotalAll = 0;
+
 function formatTimestamp(iso) {
   try {
-    return new Date(iso).toLocaleString();
+    return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(iso));
   } catch {
     return iso;
   }
+}
+
+function easierLabel(item) {
+  const a = item.installation_friction_score_device_a;
+  const b = item.installation_friction_score_device_b;
+  if (a === b) return "Same installation friction";
+  return `Easier to install: ${a < b ? item.device_a_name : item.device_b_name}`;
+}
+
+function updateHistoryCount() {
+  const countEl = document.getElementById("history-count");
+  countEl.textContent = String(historyTotalAll);
+  countEl.classList.toggle("hidden", historyTotalAll === 0);
+}
+
+// The URL carries the open comparison (?id=<history id>) so a result can be
+// reloaded, bookmarked or shared.
+function urlHistoryId() {
+  const id = new URLSearchParams(location.search).get("id");
+  return id && HISTORY_ID_PATTERN.test(id) ? id : null;
+}
+
+function setUrlId(id, { replace = false } = {}) {
+  if (urlHistoryId() === id) return;
+  const url = id ? `${location.pathname}?id=${id}` : location.pathname;
+  history[replace ? "replaceState" : "pushState"]({}, "", url);
 }
 
 function renderHistoryList() {
@@ -313,7 +331,7 @@ function renderHistoryList() {
     list.innerHTML = "";
     empty.textContent = historySearch
       ? "No comparisons match that search."
-      : "No comparisons yet — synthesize one to see it here.";
+      : "No comparisons yet. Compare two guides and they will show up here.";
     empty.classList.remove("hidden");
     return;
   }
@@ -322,36 +340,22 @@ function renderHistoryList() {
     .map((item) => {
       const plainLabel = `${escapeHtml(item.device_a_name)} vs ${escapeHtml(item.device_b_name)}`;
       const highlightedLabel = `${highlightMatch(item.device_a_name, historySearch)} vs ${highlightMatch(item.device_b_name, historySearch)}`;
+      const isCurrent = item.id === currentHistoryId;
       return `
         <li class="flex items-center gap-1">
-          <button type="button" data-history-id="${item.id}"
-                  class="history-item flex-1 min-w-0 text-left py-2.5 px-2 -mx-2 rounded-md flex items-center justify-between gap-3 hover:bg-slate-50 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400">
-            <span class="min-w-0">
-              <span class="block font-medium text-slate-700 truncate">${highlightedLabel}</span>
-              <span class="block text-xs text-slate-400">${formatTimestamp(item.created_at)}</span>
-            </span>
-            <span class="flex items-center gap-1.5 shrink-0 text-xs font-semibold text-slate-500">
-              ${item.installation_friction_score_device_a}/10
-              <span class="text-slate-300">&middot;</span>
-              ${item.installation_friction_score_device_b}/10
-            </span>
+          <button type="button" data-history-id="${item.id}"${isCurrent ? ' aria-current="true"' : ""}
+                  class="flex-1 min-w-0 text-left py-3 px-2 -mx-2 rounded-control hover:bg-plate transition-colors ${isCurrent ? "bg-plate" : ""}">
+            <span class="block font-medium truncate" title="${plainLabel}">${highlightedLabel}</span>
+            <span class="block text-ink-muted truncate">${escapeHtml(easierLabel(item))}</span>
+            <span class="block text-ink-muted">${escapeHtml(formatTimestamp(item.created_at))}</span>
           </button>
           <button type="button" data-delete-id="${item.id}" aria-label="Delete comparison: ${plainLabel}"
-                  class="delete-history-item shrink-0 w-8 h-8 inline-flex items-center justify-center rounded-full text-slate-400 hover:text-red-600 hover:bg-red-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400">
+                  class="shrink-0 w-9 h-9 inline-flex items-center justify-center rounded-control text-ink-muted hover:text-led-red hover:bg-plate">
             &times;
           </button>
         </li>`;
     })
     .join("");
-  document.querySelectorAll(".history-item").forEach((btn) =>
-    btn.addEventListener("click", () => loadHistoryItem(btn.dataset.historyId))
-  );
-  document.querySelectorAll(".delete-history-item").forEach((btn) =>
-    btn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      deleteHistoryItem(btn.dataset.deleteId);
-    })
-  );
 }
 
 async function loadHistory({ append = false } = {}) {
@@ -365,13 +369,17 @@ async function loadHistory({ append = false } = {}) {
     const page = await res.json();
     historyItems = append ? historyItems.concat(page.items) : page.items;
     historyOffset = offset + page.items.length;
+    if (!historySearch) {
+      historyTotalAll = page.total;
+      updateHistoryCount();
+    }
     renderHistoryList();
     loadMoreBtn.classList.toggle("hidden", historyOffset >= page.total);
     return historyItems;
   } catch {
     document.getElementById("history-list").innerHTML = "";
     document.getElementById("clear-history-btn").classList.add("hidden");
-    empty.textContent = "Could not load comparison history.";
+    empty.textContent = "Could not load history. Close this panel and open it again to retry.";
     empty.classList.remove("hidden");
     loadMoreBtn.classList.add("hidden");
     return null;
@@ -386,9 +394,18 @@ async function loadHistoryItem(id) {
     if (!res.ok) throw new Error(record.detail || "Could not load that comparison.");
     setExportLinks(id);
     renderResults(record.battlecard);
+    return true;
   } catch (err) {
     showError(err.message || "Could not load that comparison.");
+    return false;
   }
+}
+
+async function openHistoryItem(id) {
+  if (!(await loadHistoryItem(id))) return;
+  setUrlId(id);
+  historyDrawer.close();
+  renderHistoryList();
 }
 
 async function deleteHistoryItem(id) {
@@ -403,12 +420,23 @@ async function deleteHistoryItem(id) {
     if (id === currentHistoryId) {
       setExportLinks(null);
       hideResults();
+      setUrlId(null, { replace: true });
     }
     await loadHistory();
   } catch (err) {
     showError(err.message || "Could not delete that comparison.");
   }
 }
+
+document.getElementById("history-list").addEventListener("click", (e) => {
+  const deleteBtn = e.target.closest("[data-delete-id]");
+  if (deleteBtn) {
+    deleteHistoryItem(deleteBtn.dataset.deleteId);
+    return;
+  }
+  const openBtn = e.target.closest("[data-history-id]");
+  if (openBtn) openHistoryItem(openBtn.dataset.historyId);
+});
 
 document.getElementById("clear-history-btn").addEventListener("click", async () => {
   const ok = await confirmDialog("Clear all comparison history? This cannot be undone.", {
@@ -421,13 +449,21 @@ document.getElementById("clear-history-btn").addEventListener("click", async () 
     if (!res.ok) throw new Error("Could not clear history.");
     setExportLinks(null);
     hideResults();
+    setUrlId(null, { replace: true });
     await loadHistory();
   } catch (err) {
     showError(err.message || "Could not clear history.");
   }
 });
 
-document.getElementById("refresh-history-btn").addEventListener("click", () => loadHistory());
+document.getElementById("history-toggle").addEventListener("click", () => {
+  historyDrawer.showModal();
+  loadHistory();
+});
+document.getElementById("history-close").addEventListener("click", () => historyDrawer.close());
+historyDrawer.addEventListener("click", (e) => {
+  if (e.target === historyDrawer) historyDrawer.close();
+});
 document.getElementById("load-more-history-btn").addEventListener("click", () => loadHistory({ append: true }));
 
 let historySearchDebounce;
@@ -439,7 +475,23 @@ document.getElementById("history-search").addEventListener("input", (e) => {
   }, 300);
 });
 
+window.addEventListener("popstate", () => {
+  const id = urlHistoryId();
+  if (id) {
+    loadHistoryItem(id);
+  } else {
+    setExportLinks(null);
+    hideResults();
+  }
+});
+
 loadHistory();
+const initialHistoryId = urlHistoryId();
+if (initialHistoryId) {
+  loadHistoryItem(initialHistoryId).then((ok) => {
+    if (!ok) setUrlId(null, { replace: true });
+  });
+}
 
 // ---- Copy to clipboard ----
 document.getElementById("copy-btn").addEventListener("click", async () => {
