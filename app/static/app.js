@@ -105,45 +105,77 @@ function clearError() {
   document.getElementById("error-banner").classList.add("hidden");
 }
 
-// ---- Drop zones ----
+// ---- Device slots ----
+// One slot per device. The drop surface is a native <label> for a visually
+// hidden file input, so click, Enter/Space and focus all come from the browser;
+// the Remove button sits outside the label to avoid nesting controls.
+function renderDeviceSlot(letter) {
+  const id = letter.toLowerCase();
+  return `
+    <div id="slot-${id}" class="group" data-state="empty">
+      <div class="flex items-center justify-between gap-3 mb-2">
+        <h3 class="flex items-center gap-2 font-heading font-semibold">
+          <span id="led-${id}" class="led-dot led-dot--off mt-0" aria-hidden="true"></span>
+          Device ${letter}
+        </h3>
+        <button type="button" id="clear-${id}"
+                class="hidden text-sm font-medium text-ink-muted hover:text-ink underline underline-offset-2 rounded-control">
+          Remove<span class="sr-only"> file for Device ${letter}</span>
+        </button>
+      </div>
+      <label id="dropzone-${id}" for="file-${id}"
+             class="dropzone block cursor-pointer border-2 border-dashed border-line bg-plate rounded-control p-6 text-center transition-colors hover:border-action has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-action">
+        <span class="sr-only">Device ${letter} quick start guide (PDF)</span>
+        <input type="file" id="file-${id}" accept="application/pdf" class="sr-only" />
+        <svg class="w-8 h-8 mx-auto text-ink-muted mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8l-5-5zM14 3v5h5" />
+        </svg>
+        <span class="block text-ink-muted group-data-[state=filled]:hidden">
+          Drop a PDF here or <span class="font-medium text-action underline underline-offset-2">choose a file</span>
+        </span>
+        <span id="filename-${id}" class="block font-mono text-sm break-all"></span>
+      </label>
+    </div>`;
+}
+
+document.getElementById("device-slots").innerHTML = ["A", "B"].map(renderDeviceSlot).join("");
+
 function wireDropzone(zoneId, inputId, filenameId, clearId, key) {
   const zone = document.getElementById(zoneId);
   const input = document.getElementById(inputId);
   const filenameEl = document.getElementById(filenameId);
   const clearBtn = document.getElementById(clearId);
+  const slot = zone.closest("[data-state]");
+  const led = slot.querySelector(".led-dot");
+
+  const setState = (filled) => {
+    slot.dataset.state = filled ? "filled" : "empty";
+    led.classList.toggle("led-dot--green", filled);
+    led.classList.toggle("led-dot--off", !filled);
+    clearBtn.classList.toggle("hidden", !filled);
+  };
 
   const setFile = (file) => {
     if (!file) return;
     if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
-      showError(`"${file.name}" is not a PDF file.`);
+      showError(`"${file.name}" is not a PDF. Choose a PDF quick start guide.`);
       return;
     }
     clearError();
     state[key] = file;
     filenameEl.textContent = file.name;
-    clearBtn.classList.remove("hidden");
+    setState(true);
   };
 
   const clearFile = () => {
     state[key] = null;
     filenameEl.textContent = "";
     input.value = "";
-    clearBtn.classList.add("hidden");
+    setState(false);
   };
 
-  zone.addEventListener("click", () => input.click());
-  zone.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      input.click();
-    }
-  });
   input.addEventListener("change", (e) => setFile(e.target.files[0]));
-
-  clearBtn.addEventListener("click", (e) => {
-    e.stopPropagation();
-    clearFile();
-  });
+  clearBtn.addEventListener("click", clearFile);
 
   ["dragenter", "dragover"].forEach((evt) =>
     zone.addEventListener(evt, (e) => {
@@ -191,17 +223,17 @@ document.getElementById("load-samples-btn").addEventListener("click", async () =
   }
 });
 
-// ---- Synthesize ----
+// ---- Compare ----
 function setLoading(isLoading) {
   document.getElementById("synthesize-spinner").classList.toggle("hidden", !isLoading);
-  document.getElementById("synthesize-label").textContent = isLoading ? "Synthesizing…" : "Synthesize";
+  document.getElementById("synthesize-label").textContent = isLoading ? "Comparing…" : "Compare devices";
   document.getElementById("synthesize-btn").disabled = isLoading;
   document.getElementById("load-samples-btn").disabled = isLoading;
 }
 
 async function synthesize() {
   if (!state.fileA || !state.fileB) {
-    showError("Please provide a QSG PDF for both Device A and Device B.");
+    showError("Add a quick start guide PDF for both Device A and Device B.");
     return;
   }
   clearError();

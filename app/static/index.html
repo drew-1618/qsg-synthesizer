@@ -34,63 +34,22 @@
     <!-- Error banner -->
     <div id="error-banner" role="alert" aria-live="polite" class="hidden rounded-lg border border-red-200 bg-red-50 text-red-700 px-4 py-3 text-sm"></div>
 
-    <!-- Upload section -->
-    <section class="bg-white rounded-xl border border-slate-200 p-6 space-y-6">
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div>
-          <label class="block text-sm font-semibold text-slate-700 mb-2">
-            Device A
-          </label>
-          <div id="dropzone-a" class="dropzone relative cursor-pointer border-2 border-dashed border-slate-300 rounded-lg p-8 text-center transition-colors hover:border-indigo-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2"
-               role="button" tabindex="0" aria-label="Upload Device A QSG PDF">
-            <input type="file" id="file-a" accept="application/pdf" class="hidden" />
-            <button type="button" id="clear-a" aria-label="Remove selected file for Device A"
-                    class="hidden absolute top-2 right-2 w-7 h-7 inline-flex items-center justify-center rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-100">
-              &times;
-            </button>
-            <svg class="w-8 h-8 mx-auto text-slate-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M12 12v9m0-9l-3 3m3-3l3 3" />
-            </svg>
-            <p class="text-sm text-slate-500">
-              Drag &amp; drop a PDF QSG here, or <span class="text-indigo-600 font-medium">browse</span>
-            </p>
-            <p id="filename-a" class="text-sm font-medium text-slate-700 mt-2 break-words"></p>
-          </div>
-        </div>
-        <div>
-          <label class="block text-sm font-semibold text-slate-700 mb-2">
-            Device B
-          </label>
-          <div id="dropzone-b" class="dropzone relative cursor-pointer border-2 border-dashed border-slate-300 rounded-lg p-8 text-center transition-colors hover:border-indigo-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2"
-               role="button" tabindex="0" aria-label="Upload Device B QSG PDF">
-            <input type="file" id="file-b" accept="application/pdf" class="hidden" />
-            <button type="button" id="clear-b" aria-label="Remove selected file for Device B"
-                    class="hidden absolute top-2 right-2 w-7 h-7 inline-flex items-center justify-center rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-100">
-              &times;
-            </button>
-            <svg class="w-8 h-8 mx-auto text-slate-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M12 12v9m0-9l-3 3m3-3l3 3" />
-            </svg>
-            <p class="text-sm text-slate-500">
-              Drag &amp; drop a PDF QSG here, or <span class="text-indigo-600 font-medium">browse</span>
-            </p>
-            <p id="filename-b" class="text-sm font-medium text-slate-700 mt-2 break-words"></p>
-          </div>
-        </div>
-      </div>
+    <!-- Compare: choose two guides -->
+    <section aria-labelledby="compare-heading" class="space-y-5">
+      <h2 id="compare-heading" class="font-heading font-semibold text-xl">Add two quick start guides</h2>
 
-      <div class="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2 border-t border-slate-100">
+      <!-- Device slots are rendered by renderDeviceSlot() in app.js -->
+      <div id="device-slots" class="grid grid-cols-1 md:grid-cols-2 gap-5"></div>
+
+      <div class="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-3">
         <button id="load-samples-btn" type="button"
-                class="text-base font-medium text-indigo-600 hover:text-indigo-800 disabled:text-indigo-300 disabled:cursor-not-allowed inline-flex items-center gap-2">
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-          </svg>
-          Load Sample QSGs
+                class="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-control border border-line bg-plate font-medium hover:bg-white disabled:text-ink-muted disabled:cursor-not-allowed transition-colors">
+          Try with sample guides
         </button>
         <button id="synthesize-btn" type="button"
-                class="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 text-white font-semibold text-base px-6 py-3 rounded-lg transition-colors">
+                class="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-control bg-action hover:bg-action-hover disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold transition-colors">
           <span id="synthesize-spinner" class="spinner hidden"></span>
-          <span id="synthesize-label">Synthesize</span>
+          <span id="synthesize-label">Compare devices</span>
         </button>
       </div>
     </section>
