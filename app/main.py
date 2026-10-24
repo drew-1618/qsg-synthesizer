@@ -20,7 +20,7 @@ if "PYTEST_VERSION" not in os.environ:
 import base64
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import (
     APIRouter,
@@ -39,7 +39,13 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from app.logging_config import configure_logging
-from app.schemas import CompareResponse, DeviceSpec, HistoryPage, HistoryRecord
+from app.schemas import (
+    CompareResponse,
+    DeviceSpec,
+    HistoryPage,
+    HistoryRecord,
+    Perspective,
+)
 from app.services import export as export_service
 from app.services import history
 from app.services.auth import require_auth, security, verify_credentials
@@ -184,8 +190,12 @@ def compare_text(payload: CompareTextRequest) -> CompareResponse:
     return _synthesize_and_save(device_a, device_b)
 
 
-def _synthesize_and_save(device_a: DeviceSpec, device_b: DeviceSpec) -> CompareResponse:
-    battlecard = synthesize_battlecard(device_a, device_b)
+def _synthesize_and_save(
+    device_a: DeviceSpec,
+    device_b: DeviceSpec,
+    perspective: Optional[Perspective] = None,
+) -> CompareResponse:
+    battlecard = synthesize_battlecard(device_a, device_b, perspective)
     record = history.save_comparison(battlecard)
     return CompareResponse(**battlecard.model_dump(), history_id=record.id)
 
@@ -290,6 +300,7 @@ def compare_documents(
     device_b_file: Optional[UploadFile] = File(None),
     device_b_text: Optional[str] = Form(None, max_length=MAX_TEXT_CHARS),
     device_b_name: Optional[str] = Form(None, max_length=200),
+    mode: Literal["sales", "neutral"] = Form("sales"),
 ) -> CompareResponse:
     text_a, source_a = _resolve_document(
         "Device A", device_a_file, device_a_text, device_a_name
@@ -298,7 +309,7 @@ def compare_documents(
         "Device B", device_b_file, device_b_text, device_b_name
     )
     device_a, device_b = extract_device_specs(text_a, source_a, text_b, source_b)
-    return _synthesize_and_save(device_a, device_b)
+    return _synthesize_and_save(device_a, device_b, mode)
 
 
 @router.get("/api/v1/history", response_model=HistoryPage)

@@ -43,6 +43,7 @@ from app.schemas import (
     BattlecardResponse,
     DeviceSpec,
     LEDStatus,
+    Perspective,
     ProvisioningMethod,
 )
 from app.tools.capability_compare import parse_speed_mbps, rank_wifi_standard
@@ -752,9 +753,24 @@ def _build_key_advantages(
     return advantages_a, advantages_b
 
 
+def _real_items(items: list[str], fallback: str) -> list[str]:
+    return [item for item in items if item != fallback]
+
+
 def _build_sales_talk_track(
-    device_a: DeviceSpec, score_a: int, device_b: DeviceSpec, score_b: int
+    device_a: DeviceSpec,
+    score_a: int,
+    device_b: DeviceSpec,
+    score_b: int,
+    perspective: Optional[Perspective] = None,
+    advantages_a: Optional[list[str]] = None,
 ) -> str:
+    """Talk track for one comparison.
+
+    In "sales" perspective device A is the user's own product, so the advice
+    flips with who wins on install effort. Otherwise (neutral, or a record
+    from before perspectives) it describes the comparison without a side.
+    """
     if score_a == score_b:
         return (
             f"{device_a.model_name} and {device_b.model_name} are tied on "
@@ -762,6 +778,34 @@ def _build_sales_talk_track(
             f"Differentiate on the capability and spec advantages above "
             f"rather than on field labor."
         )
+
+    if perspective == "sales" and score_a > score_b:
+        ours, theirs = device_a.model_name, device_b.model_name
+        track = (
+            f"{ours} takes more field effort to install than {theirs} "
+            f"(Installation Friction Index {score_a} vs. {score_b}), so don't "
+            f"compete on install speed."
+        )
+        strengths = _real_items(advantages_a or [], NO_ADVANTAGES_MESSAGE)[:3]
+        if strengths:
+            track += (
+                f" Lead with what {ours} offers that {theirs} doesn't: "
+                + "; ".join(
+                    item.removeprefix("Unique capability: ").rstrip(".")
+                    for item in strengths
+                )
+                + "."
+            )
+        else:
+            track += (
+                f" No spec advantages for {ours} were identified from the "
+                f"documents, so differentiate on factors outside them."
+            )
+        return track + (
+            f" Expect {theirs} to lead with easier installation, "
+            f"and be ready to address it."
+        )
+
     if score_a < score_b:
         winner, w_score, loser, l_score = (
             device_a.model_name,
@@ -776,16 +820,25 @@ def _build_sales_talk_track(
             device_a.model_name,
             score_a,
         )
+    if perspective == "sales":
+        # Ours won: lead with the install advantage against the incumbent.
+        return (
+            f"{winner} installs with meaningfully less field labor than {loser} "
+            f"(Installation Friction Index {w_score} vs. {l_score}). Lead with "
+            f"faster time-to-online and lower truck-roll/support cost whenever "
+            f"{loser} is the incumbent."
+        )
     return (
         f"{winner} installs with meaningfully less field labor than {loser} "
-        f"(Installation Friction Index {w_score} vs. {l_score}). Lead with "
-        f"faster time-to-online and lower truck-roll/support cost whenever "
-        f"{loser} is the incumbent."
+        f"(Installation Friction Index {w_score} vs. {l_score}), which means "
+        f"faster time-to-online and lower truck-roll and support cost."
     )
 
 
 def synthesize_battlecard(
-    device_a: DeviceSpec, device_b: DeviceSpec
+    device_a: DeviceSpec,
+    device_b: DeviceSpec,
+    perspective: Optional[Perspective] = None,
 ) -> BattlecardResponse:
     """Deterministically compare two normalized `DeviceSpec` objects into a
     `BattlecardResponse`. Rule-based rather than LLM-routed, since free-form
@@ -801,7 +854,10 @@ def synthesize_battlecard(
         key_risks_device_b=_build_key_risks(device_b),
         key_advantages_device_a=advantages_a,
         key_advantages_device_b=advantages_b,
-        sales_talk_track=_build_sales_talk_track(device_a, score_a, device_b, score_b),
+        sales_talk_track=_build_sales_talk_track(
+            device_a, score_a, device_b, score_b, perspective, advantages_a
+        ),
         extraction_source_device_a=device_a.extraction_source,
         extraction_source_device_b=device_b.extraction_source,
+        perspective=perspective,
     )

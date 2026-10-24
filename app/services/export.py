@@ -121,6 +121,14 @@ def sanitize_export_filename(
     return f"{name or default_basename}.{ext}"
 
 
+def _labels(battlecard: BattlecardResponse) -> tuple[str, str]:
+    """Display names for headings and tables; adds the role in a sales comparison."""
+    name_a, name_b = _names(battlecard)
+    if battlecard.perspective == "sales":
+        return f"{name_a} (ours)", f"{name_b} (competitor)"
+    return name_a, name_b
+
+
 def _md_cell(text: str) -> str:
     """Make `text` safe inside a Markdown table cell."""
     return text.replace("|", "\\|").replace("\r", " ").replace("\n", " ")
@@ -137,19 +145,20 @@ def _plain_cell(value) -> str:
 def battlecard_to_markdown(battlecard: BattlecardResponse) -> str:
     cm = battlecard.comparison_matrix
     name_a, name_b = _names(battlecard)
+    label_a, label_b = _labels(battlecard)
     lines = [
         f"# Battlecard: {name_a} vs {name_b}",
         "",
         "## Installation Friction Index",
-        f"- **{name_a}**: {battlecard.installation_friction_score_device_a} / 10",
-        f"- **{name_b}**: {battlecard.installation_friction_score_device_b} / 10",
+        f"- **{label_a}**: {battlecard.installation_friction_score_device_a} / 10",
+        f"- **{label_b}**: {battlecard.installation_friction_score_device_b} / 10",
         "",
         "## Competitive Sales Talk Track",
         battlecard.sales_talk_track,
         "",
         "## Side-by-Side Comparison",
         "",
-        f"| Attribute | {_md_cell(name_a)} | {_md_cell(name_b)} |",
+        f"| Attribute | {_md_cell(label_a)} | {_md_cell(label_b)} |",
         "|---|---|---|",
     ]
     for label, key in _COMPARISON_ROWS:
@@ -158,20 +167,20 @@ def battlecard_to_markdown(battlecard: BattlecardResponse) -> str:
         cell_b = _plain_cell(row.get("device_b"))
         lines.append(f"| {label} | {cell_a} | {cell_b} |")
 
-    lines += ["", "## Competitive Advantages", "", f"### {name_a}"]
+    lines += ["", "## Competitive Advantages", "", f"### {label_a}"]
     lines += [f"- {adv}" for adv in battlecard.key_advantages_device_a] or [
         "- None identified."
     ]
-    lines += ["", f"### {name_b}"]
+    lines += ["", f"### {label_b}"]
     lines += [f"- {adv}" for adv in battlecard.key_advantages_device_b] or [
         "- None identified."
     ]
 
-    lines += ["", "## Field-Deployment Risks", "", f"### {name_a}"]
+    lines += ["", "## Field-Deployment Risks", "", f"### {label_a}"]
     lines += [f"- {risk}" for risk in battlecard.key_risks_device_a] or [
         "- None identified."
     ]
-    lines += ["", f"### {name_b}"]
+    lines += ["", f"### {label_b}"]
     lines += [f"- {risk}" for risk in battlecard.key_risks_device_b] or [
         "- None identified."
     ]
@@ -182,6 +191,7 @@ def battlecard_to_markdown(battlecard: BattlecardResponse) -> str:
 def battlecard_to_pdf_bytes(battlecard: BattlecardResponse) -> bytes:
     cm = battlecard.comparison_matrix
     name_a, name_b = _names(battlecard)
+    label_a, label_b = _labels(battlecard)
 
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -203,9 +213,9 @@ def battlecard_to_pdf_bytes(battlecard: BattlecardResponse) -> bytes:
     story: list[Flowable] = [
         Paragraph(f"Battlecard: {_esc(name_a)} vs {_esc(name_b)}", _H1),
         Paragraph(
-            f"Installation Friction Index &mdash; {_esc(name_a)}: "
+            f"Installation Friction Index &mdash; {_esc(label_a)}: "
             f"{battlecard.installation_friction_score_device_a}/10, "
-            f"{_esc(name_b)}: {battlecard.installation_friction_score_device_b}/10",
+            f"{_esc(label_b)}: {battlecard.installation_friction_score_device_b}/10",
             _BODY,
         ),
         Paragraph("Competitive Sales Talk Track", _H2),
@@ -213,7 +223,7 @@ def battlecard_to_pdf_bytes(battlecard: BattlecardResponse) -> bytes:
         Paragraph("Side-by-Side Comparison", _H2),
     ]
 
-    rows = [["Attribute", name_a, name_b]]
+    rows = [["Attribute", label_a, label_b]]
     for label, key in _COMPARISON_ROWS:
         row = cm.get(key, {})
         cell_a = _cell_flowable(row.get("device_a"))
@@ -224,8 +234,8 @@ def battlecard_to_pdf_bytes(battlecard: BattlecardResponse) -> bytes:
     story.append(table)
 
     advantage_sections = [
-        (name_a, battlecard.key_advantages_device_a),
-        (name_b, battlecard.key_advantages_device_b),
+        (label_a, battlecard.key_advantages_device_a),
+        (label_b, battlecard.key_advantages_device_b),
     ]
     for name, advantages in advantage_sections:
         story.append(Paragraph(f"Competitive Advantages &mdash; {_esc(name)}", _H2))
@@ -241,8 +251,8 @@ def battlecard_to_pdf_bytes(battlecard: BattlecardResponse) -> bytes:
         story.append(Spacer(1, 4))
 
     risk_sections = [
-        (name_a, battlecard.key_risks_device_a),
-        (name_b, battlecard.key_risks_device_b),
+        (label_a, battlecard.key_risks_device_a),
+        (label_b, battlecard.key_risks_device_b),
     ]
     for name, risks in risk_sections:
         story.append(Paragraph(f"Field-Deployment Risks &mdash; {_esc(name)}", _H2))

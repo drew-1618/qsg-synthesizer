@@ -1,8 +1,14 @@
-const state = { busy: false, slots: { a: emptySlot(), b: emptySlot() } };
+const state = { busy: false, mode: "sales", slots: { a: emptySlot(), b: emptySlot() } };
 
 // One slot holds either an uploaded file or pasted text; `mode` says which is used.
 function emptySlot() {
   return { mode: "file", file: null, text: "", name: "" };
+}
+
+// What a slot is called depends on the comparison mode.
+function slotLabel(id) {
+  if (state.mode === "sales") return id === "a" ? "Our device" : "Competitor";
+  return `Device ${id.toUpperCase()}`;
 }
 
 function slotHasContent(slot) {
@@ -191,15 +197,15 @@ function renderDeviceSlot(letter) {
       <div class="flex items-center justify-between gap-3 mb-2">
         <h3 class="flex items-center gap-2 font-heading font-semibold">
           <span id="led-${id}" class="led-dot led-dot--off mt-0" aria-hidden="true"></span>
-          Device ${letter}
+          <span data-slot-label="${id}">${slotLabel(id)}</span>
         </h3>
         <button type="button" id="clear-${id}"
                 class="hidden text-sm font-medium text-ink-muted hover:text-ink disabled:opacity-50 disabled:cursor-not-allowed underline underline-offset-2 rounded-control">
-          Remove<span class="sr-only"> file for Device ${letter}</span>
+          Remove<span class="sr-only"> file for <span data-slot-label="${id}">${slotLabel(id)}</span></span>
         </button>
       </div>
       <fieldset class="mb-2 flex gap-5 text-sm">
-        <legend class="sr-only">Source for Device ${letter}</legend>
+        <legend class="sr-only">Source for <span data-slot-label="${id}">${slotLabel(id)}</span></legend>
         <label class="inline-flex items-center gap-2 cursor-pointer">
           <input type="radio" name="source-${id}" value="file" checked class="accent-action" /> Upload file
         </label>
@@ -210,7 +216,7 @@ function renderDeviceSlot(letter) {
       <div id="pane-file-${id}">
         <label id="dropzone-${id}" for="file-${id}"
                class="dropzone block cursor-pointer border-2 border-dashed border-line bg-plate rounded-control p-6 text-center transition-colors hover:border-action has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-action">
-          <span class="sr-only">Device ${letter} document (PDF, Word, Markdown or text)</span>
+          <span class="sr-only"><span data-slot-label="${id}">${slotLabel(id)}</span> document (PDF, Word, Markdown or text)</span>
           <input type="file" id="file-${id}" accept="${ACCEPTED_EXTENSIONS.join(",")}" class="sr-only" />
           <svg class="w-8 h-8 mx-auto text-ink-muted mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8l-5-5zM14 3v5h5" />
@@ -224,7 +230,7 @@ function renderDeviceSlot(letter) {
       </div>
       <div id="pane-text-${id}" class="hidden space-y-3">
         <div>
-          <label for="text-${id}" class="sr-only">Device ${letter} document text</label>
+          <label for="text-${id}" class="sr-only"><span data-slot-label="${id}">${slotLabel(id)}</span> document text</label>
           <textarea id="text-${id}" name="text-${id}" rows="8" maxlength="${MAX_PASTE_CHARS}" spellcheck="false"
                     placeholder="Paste the guide or spec sheet text…"
                     class="w-full font-mono text-sm bg-plate border border-line rounded-control p-3 placeholder:text-ink-muted"></textarea>
@@ -322,6 +328,46 @@ function wireSlot(letter) {
 
 const setFileA = wireSlot("A");
 const setFileB = wireSlot("B");
+
+// ---- Comparison mode ----
+// Sales: side A is the user's own device and B the competitor's, and the talk
+// track is written from A's side. Neutral: two devices, no side.
+const MODE_STORAGE_KEY = "qsg-mode";
+const MODE_HINTS = {
+  sales: "Compare your device against a competitor's. The talk track is written from your side.",
+  neutral: "Compare two devices without picking a side.",
+};
+
+function storedMode() {
+  try {
+    const mode = localStorage.getItem(MODE_STORAGE_KEY);
+    return mode === "sales" || mode === "neutral" ? mode : null;
+  } catch {
+    return null;
+  }
+}
+
+function applyMode(mode, { persist = false } = {}) {
+  state.mode = mode;
+  document.querySelectorAll('#mode-control input[name="mode"]').forEach((radio) => {
+    radio.checked = radio.value === mode;
+  });
+  document.getElementById("mode-hint").textContent = MODE_HINTS[mode];
+  document.querySelectorAll("[data-slot-label]").forEach((el) => {
+    el.textContent = slotLabel(el.dataset.slotLabel);
+  });
+  if (!persist) return;
+  try {
+    localStorage.setItem(MODE_STORAGE_KEY, mode);
+  } catch {
+    // Storage unavailable (e.g. private mode): the choice just won't persist.
+  }
+}
+
+document.querySelectorAll('#mode-control input[name="mode"]').forEach((radio) =>
+  radio.addEventListener("change", () => applyMode(radio.value, { persist: true }))
+);
+applyMode(storedMode() || "sales");
 
 // ---- Load Sample QSGs ----
 function base64ToFile(base64, filename) {
@@ -433,7 +479,7 @@ function setLoading(isLoading) {
   document.getElementById("synthesize-label").textContent = isLoading ? "Comparing…" : "Compare devices";
   document.getElementById("synthesize-btn").disabled = isLoading;
   document.getElementById("load-samples-btn").disabled = isLoading;
-  document.querySelectorAll("#device-slots input, #device-slots textarea, #device-slots button").forEach((el) => {
+  document.querySelectorAll("#mode-control input, #device-slots input, #device-slots textarea, #device-slots button").forEach((el) => {
     el.disabled = isLoading;
   });
 
@@ -463,7 +509,7 @@ function setLoading(isLoading) {
 async function synthesize() {
   const missing = ["a", "b"]
     .filter((id) => !slotHasContent(state.slots[id]))
-    .map((id) => `Device ${id.toUpperCase()}`);
+    .map(slotLabel);
   if (missing.length > 0) {
     showError(`Add a document or paste text for ${missing.join(" and ")}.`);
     return;
@@ -473,6 +519,7 @@ async function synthesize() {
   document.getElementById("results").classList.add("hidden");
   try {
     const formData = new FormData();
+    formData.append("mode", state.mode);
     for (const id of ["a", "b"]) {
       const slot = state.slots[id];
       if (slot.mode === "file") {
@@ -515,6 +562,7 @@ function easierLabel(item) {
   const a = item.installation_friction_score_device_a;
   const b = item.installation_friction_score_device_b;
   if (a === b) return "Same installation friction";
+  if (item.perspective === "sales") return `${a < b ? "Ours" : "Competitor"}: easier to install`;
   return `Easier to install: ${a < b ? item.device_a_name : item.device_b_name}`;
 }
 
@@ -764,13 +812,21 @@ function frictionMeter(score) {
   return `<div class="flex gap-1" role="img" aria-label="Friction ${score} out of ${FRICTION_SEGMENTS}">${segments}</div>`;
 }
 
+// In a sales comparison side A is ours and B is the competitor; the tag goes
+// under each device name wherever the results show one.
+function roleTag(perspective, id, colorClass = "text-ink-muted") {
+  if (perspective !== "sales") return "";
+  const role = id === "a" ? "Ours" : "Competitor";
+  return `<span class="block text-xs font-medium ${colorClass}">${role}</span>`;
+}
+
 function renderVerdict(data, nameA, nameB) {
   const scoreA = data.installation_friction_score_device_a;
   const scoreB = data.installation_friction_score_device_b;
   const easier = scoreA < scoreB ? "a" : scoreB < scoreA ? "b" : null;
   const card = (key, name, score) => `
     <div class="bg-plate border border-line rounded-control p-5">
-      <h4 class="font-heading font-semibold text-lg break-words">${escapeHtml(name)}</h4>
+      <h4 class="font-heading font-semibold text-lg break-words">${escapeHtml(name)}${roleTag(data.perspective, key)}</h4>
       <p class="mt-3 flex items-baseline gap-2">
         <span class="font-heading font-semibold text-2xl tabular-nums">${score}</span>
         <span class="text-ink-muted">out of ${FRICTION_SEGMENTS}</span>
@@ -813,9 +869,9 @@ function listOrDash(items, { mono = false } = {}) {
     .join("")}</ul>`;
 }
 
-function renderSpecTable(cm, nameA, nameB) {
-  document.getElementById("col-header-a").textContent = nameA;
-  document.getElementById("col-header-b").textContent = nameB;
+function renderSpecTable(cm, nameA, nameB, perspective) {
+  document.getElementById("col-header-a").innerHTML = escapeHtml(nameA) + roleTag(perspective, "a");
+  document.getElementById("col-header-b").innerHTML = escapeHtml(nameB) + roleTag(perspective, "b");
   const textOrDash = (value) =>
     value ? escapeHtml(value) : `<span class="text-ink-muted">Not specified</span>`;
   const ipCell = (device) =>
@@ -859,9 +915,9 @@ function assessmentList(items, fallback, ledClass) {
 }
 
 function renderAssessment(data, nameA, nameB) {
-  const panel = (name, advantages, risks) => `
+  const panel = (key, name, advantages, risks) => `
     <div class="bg-plate border border-line rounded-control p-5 space-y-5">
-      <h4 class="font-heading font-semibold text-lg break-words">${escapeHtml(name)}</h4>
+      <h4 class="font-heading font-semibold text-lg break-words">${escapeHtml(name)}${roleTag(data.perspective, key)}</h4>
       <div>
         <h5 class="font-medium mb-2">Advantages</h5>
         <ul class="space-y-2 text-sm">${assessmentList(advantages, NO_ADVANTAGES_MESSAGE, "led-dot--green")}</ul>
@@ -872,14 +928,14 @@ function renderAssessment(data, nameA, nameB) {
       </div>
     </div>`;
   document.getElementById("results-assessment").innerHTML =
-    panel(nameA, data.key_advantages_device_a, data.key_risks_device_a) +
-    panel(nameB, data.key_advantages_device_b, data.key_risks_device_b);
+    panel("a", nameA, data.key_advantages_device_a, data.key_risks_device_a) +
+    panel("b", nameB, data.key_advantages_device_b, data.key_risks_device_b);
 }
 
-function renderLedGuide(cm, nameA, nameB) {
-  const column = (name, leds) => `
+function renderLedGuide(cm, nameA, nameB, perspective) {
+  const column = (key, name, leds) => `
     <div>
-      <h4 class="font-heading font-semibold text-lg break-words mb-3">${escapeHtml(name)}</h4>
+      <h4 class="font-heading font-semibold text-lg break-words mb-3">${escapeHtml(name)}${roleTag(perspective, key, "text-bezel-ink/70")}</h4>
       <ul class="space-y-3 text-sm">
         ${
           leds
@@ -895,7 +951,7 @@ function renderLedGuide(cm, nameA, nameB) {
       </ul>
     </div>`;
   document.getElementById("results-leds").innerHTML =
-    column(nameA, cm.led_states.device_a) + column(nameB, cm.led_states.device_b);
+    column("a", nameA, cm.led_states.device_a) + column("b", nameB, cm.led_states.device_b);
 }
 
 function renderResults(data) {
@@ -905,9 +961,13 @@ function renderResults(data) {
 
   renderVerdict(data, nameA, nameB);
   document.getElementById("sales-talk-track").textContent = data.sales_talk_track;
-  renderSpecTable(cm, nameA, nameB);
+  // The pitch only makes sense in a sales comparison; otherwise it is a summary.
+  const isSales = data.perspective === "sales";
+  document.getElementById("talk-track-heading").textContent = isSales ? "Sales talk track" : "Summary";
+  document.getElementById("copy-btn").textContent = isSales ? "Copy talk track" : "Copy summary";
+  renderSpecTable(cm, nameA, nameB, data.perspective);
   renderAssessment(data, nameA, nameB);
-  renderLedGuide(cm, nameA, nameB);
+  renderLedGuide(cm, nameA, nameB, data.perspective);
 
   const results = document.getElementById("results");
   results.classList.remove("hidden");

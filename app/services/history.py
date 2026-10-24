@@ -91,6 +91,7 @@ def _load_all_summaries() -> List[HistorySummary]:
                     installation_friction_score_device_b=data["battlecard"][
                         "installation_friction_score_device_b"
                     ],
+                    perspective=data["battlecard"].get("perspective"),
                 )
             )
         except (ValueError, KeyError, TypeError, OSError):

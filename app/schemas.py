@@ -10,13 +10,14 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.tools.led_normalizer import LEDState
 
 __all__ = [
+    "Perspective",
     "LEDStatus",
     "ProvisioningMethod",
     "DeviceSpec",
@@ -26,6 +27,12 @@ __all__ = [
     "HistoryRecord",
     "HistoryPage",
 ]
+
+
+# "sales": side A is the user's own device and side B the competitor's, and the
+# talk track is written from A's side. "neutral" (or None, for records saved
+# before this existed) compares two devices without picking a side.
+Perspective = Literal["sales", "neutral"]
 
 
 class ProvisioningMethod(str, Enum):
@@ -86,6 +93,7 @@ class BattlecardResponse(BaseModel):
     # None on history records saved before provenance was tracked
     extraction_source_device_a: Optional[str] = None
     extraction_source_device_b: Optional[str] = None
+    perspective: Optional[Perspective] = None
 
 
 class CompareResponse(BattlecardResponse):
@@ -101,6 +109,7 @@ class HistorySummary(BaseModel):
     device_b_name: str
     installation_friction_score_device_a: int
     installation_friction_score_device_b: int
+    perspective: Optional[Perspective] = None
 
 
 class HistoryRecord(BaseModel):

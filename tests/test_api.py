@@ -346,6 +346,77 @@ class TestCompareDocuments:
         assert "is not a PDF file" in response.json()["detail"]
 
 
+class TestComparisonMode:
+    def _compare(self, a="device_a_qsg.md", b="device_b_qsg.md", **data):
+        return client.post(
+            "/api/v1/compare",
+            data=data,
+            files={
+                "device_a_file": (
+                    "a.md",
+                    (SAMPLE_DOCS_DIR / a).read_bytes(),
+                    "text/markdown",
+                ),
+                "device_b_file": (
+                    "b.md",
+                    (SAMPLE_DOCS_DIR / b).read_bytes(),
+                    "text/markdown",
+                ),
+            },
+        )
+
+    def test_defaults_to_sales_perspective(self):
+        response = self._compare()
+        assert response.status_code == 200
+        assert response.json()["perspective"] == "sales"
+
+    def test_neutral_mode_is_recorded(self):
+        assert self._compare(mode="neutral").json()["perspective"] == "neutral"
+
+    def test_unknown_mode_is_422(self):
+        assert self._compare(mode="aggressive").status_code == 422
+
+    def test_sales_talk_track_follows_who_is_ours(self):
+        # Side A is ours: NovaFiber installs easier, so lead with that...
+        wins = self._compare().json()["sales_talk_track"]
+        assert "whenever" in wins and "incumbent" in wins
+        # ...and with the files swapped our device is the harder install.
+        loses = self._compare(a="device_b_qsg.md", b="device_a_qsg.md").json()[
+            "sales_talk_track"
+        ]
+        assert "don't compete on install speed" in loses
+
+    def test_perspective_round_trips_through_history(self):
+        history_id = self._compare().json()["history_id"]
+        assert (
+            client.get(f"/api/v1/history/{history_id}").json()["battlecard"][
+                "perspective"
+            ]
+            == "sales"
+        )
+        item = client.get("/api/v1/history").json()["items"][0]
+        assert item["perspective"] == "sales"
+
+    def test_older_endpoints_stay_neutral(self):
+        text = (SAMPLE_DOCS_DIR / "device_a_qsg.md").read_text(encoding="utf-8")
+        response = client.post(
+            "/api/v1/compare-text",
+            json={
+                "device_a_text": text,
+                "device_b_text": text.replace("NovaFiber", "Other"),
+            },
+        )
+        assert response.status_code == 200
+        assert response.json()["perspective"] is None
+
+    def test_exports_label_the_roles_in_sales_mode(self):
+        history_id = self._compare().json()["history_id"]
+        markdown = client.get(f"/api/v1/history/{history_id}/export.md")
+        assert "(ours)" in markdown.text and "(competitor)" in markdown.text
+        disposition = markdown.headers["content-disposition"]
+        assert "ours" not in disposition and "competitor" not in disposition
+
+
 class TestPdfUploadErrors:
     def test_corrupt_pdf_returns_400(self):
         response = client.post(

@@ -76,6 +76,21 @@
     <section aria-labelledby="compare-heading" class="space-y-5">
       <h2 id="compare-heading" class="font-heading font-semibold text-xl">Add the two documents to compare</h2>
 
+      <fieldset id="mode-control" class="space-y-2">
+        <legend class="sr-only">Comparison mode</legend>
+        <div class="inline-flex rounded-control border border-line bg-plate p-1">
+          <label class="cursor-pointer">
+            <input type="radio" name="mode" value="sales" class="peer sr-only" checked />
+            <span class="block px-3.5 py-2 rounded-control text-sm font-medium transition-colors hover:bg-plate-hover peer-checked:bg-action peer-checked:text-on-action peer-checked:hover:bg-action-hover peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-action">Sales battlecard</span>
+          </label>
+          <label class="cursor-pointer">
+            <input type="radio" name="mode" value="neutral" class="peer sr-only" />
+            <span class="block px-3.5 py-2 rounded-control text-sm font-medium transition-colors hover:bg-plate-hover peer-checked:bg-action peer-checked:text-on-action peer-checked:hover:bg-action-hover peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-action">Neutral comparison</span>
+          </label>
+        </div>
+        <p id="mode-hint" class="text-sm text-ink-muted"></p>
+      </fieldset>
+
       <!-- Device slots are rendered by renderDeviceSlot() in app.js -->
       <div id="device-slots" class="grid grid-cols-1 md:grid-cols-2 gap-5"></div>
 

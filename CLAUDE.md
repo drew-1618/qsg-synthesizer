@@ -49,6 +49,11 @@ docker compose up --build                        # requires a .env file (cp .env
    the export endpoints (`app/services/export.py`) render from those saved records.
 
 Things that span multiple files:
+- Comparison perspective: `BattlecardResponse.perspective` is `"sales"` (side A is the user's own
+  device, B the competitor; the talk track in `_build_sales_talk_track` flips with who wins on
+  install effort), `"neutral"`, or `None` for older records and the legacy endpoints (treated as
+  neutral). Only `POST /api/v1/compare` takes `mode` (default `sales`); the UI labels
+  ("Our device"/"Competitor", role tags in results, history wording) all derive from it.
 - Export file names: `export.default_export_basename()` builds `battlecard-<a>-vs-<b>-<date>`
   and `export.sanitize_export_filename()` cleans any user-supplied `?filename=` to ASCII
   `[A-Za-z0-9._()-]` before it reaches `Content-Disposition`. The UI downloads via `fetch` so
