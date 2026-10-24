@@ -6,6 +6,17 @@
   <title>QSG Synthesizer</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
   <meta name="theme-color" content="#2b333b" />
+  <script>
+    // Set the theme before first paint so there is no flash. Mirrors applyTheme() in app.js.
+    (function () {
+      var theme = null;
+      try { theme = localStorage.getItem("qsg-theme"); } catch (e) {}
+      if (theme !== "light" && theme !== "dark") {
+        theme = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+      }
+      document.documentElement.dataset.theme = theme;
+    })();
+  </script>
   <link rel="preload" href="/static/fonts/ibm-plex-sans-latin-wght.woff2" as="font" type="font/woff2" crossorigin />
   <link rel="preload" href="/static/fonts/archivo-latin-wdth.woff2" as="font" type="font/woff2" crossorigin />
   <link rel="stylesheet" href="/static/tailwind.css" />
@@ -14,7 +25,7 @@
   <a href="#main" class="skip-link">Skip to main content</a>
 
   <!-- Header -->
-  <header class="bg-bezel text-bezel-ink sticky top-0 z-10">
+  <header class="bg-bezel text-bezel-ink border-b border-bezel-ink/10 sticky top-0 z-10">
     <div class="max-w-6xl mx-auto px-4 h-16 flex items-center gap-3">
       <svg class="w-8 h-8 shrink-0" viewBox="0 0 32 32" aria-hidden="true">
         <rect x="1" y="1" width="30" height="30" rx="6" fill="none" stroke="currentColor" stroke-opacity="0.45" stroke-width="2" />
@@ -23,14 +34,22 @@
         <circle cx="23" cy="16" r="3" class="fill-led-blue" />
       </svg>
       <div class="min-w-0">
-        <h1 class="font-heading font-semibold text-lg leading-tight tracking-tight">QSG Synthesizer</h1>
-        <p class="text-sm text-bezel-ink/75 leading-tight truncate">Compare two quick start guides</p>
+        <h1 class="font-heading font-semibold text-lg leading-tight tracking-tight whitespace-nowrap">QSG Synthesizer</h1>
+        <p class="hidden sm:block text-sm text-bezel-ink/75 leading-tight truncate">Compare two quick start guides</p>
       </div>
-      <button id="history-toggle" type="button" aria-haspopup="dialog"
-              class="ml-auto shrink-0 inline-flex items-center gap-2 px-3 py-1.5 rounded-control border border-bezel-ink/30 text-sm font-medium hover:bg-bezel-ink/10 transition-colors focus-visible:outline-bezel-ink">
-        History
-        <span id="history-count" class="hidden font-mono tabular-nums text-bezel-ink/75"></span>
-      </button>
+      <div class="ml-auto flex items-center gap-2">
+        <button id="history-toggle" type="button" aria-haspopup="dialog"
+                class="shrink-0 inline-flex h-10 items-center gap-2 px-3 rounded-control border border-bezel-ink/30 text-sm font-medium hover:bg-bezel-ink/10 transition-colors focus-visible:outline-bezel-ink">
+          History
+          <span id="history-count" class="hidden font-mono tabular-nums text-bezel-ink/75"></span>
+        </button>
+        <button id="theme-toggle" type="button" aria-pressed="false" aria-label="Dark theme" title="Dark theme"
+                class="shrink-0 inline-flex h-10 w-10 items-center justify-center rounded-control border border-bezel-ink/30 hover:bg-bezel-ink/10 aria-pressed:bg-bezel-ink/20 transition-colors focus-visible:outline-bezel-ink">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+          </svg>
+        </button>
+      </div>
     </div>
   </header>
 
@@ -40,7 +59,7 @@
     <div id="error-banner" role="alert" class="hidden sticky top-20 z-10">
       <div class="flex items-start gap-3 rounded-control border border-danger bg-plate px-4 py-3 text-sm">
         <span class="led-dot led-dot--red mt-1.5" aria-hidden="true"></span>
-        <p id="error-message" class="flex-1 break-words"></p>
+        <p id="error-message" class="flex-1 min-w-0 break-words"></p>
         <button id="error-dismiss" type="button"
                 class="shrink-0 font-medium underline underline-offset-2 rounded-control">
           Dismiss<span class="sr-only"> error</span>
@@ -57,11 +76,11 @@
 
       <div class="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-3">
         <button id="load-samples-btn" type="button"
-                class="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-control border border-line bg-plate font-medium hover:bg-white disabled:text-ink-muted disabled:cursor-not-allowed transition-colors">
+                class="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-control border border-line bg-plate font-medium hover:bg-plate-hover disabled:text-ink-muted disabled:cursor-not-allowed transition-colors">
           Try with sample guides
         </button>
         <button id="synthesize-btn" type="button"
-                class="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-control bg-action hover:bg-action-hover disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold transition-colors">
+                class="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-control bg-action hover:bg-action-hover disabled:opacity-60 disabled:cursor-not-allowed text-on-action font-semibold transition-colors">
           <span id="synthesize-spinner" class="spinner hidden"></span>
           <span id="synthesize-label">Compare devices</span>
         </button>
@@ -78,11 +97,11 @@
         <h2 id="results-heading" tabindex="-1" class="font-heading font-semibold text-xl focus:outline-none">Results</h2>
         <div class="flex items-center gap-2">
           <a id="export-md-btn" href="#" aria-disabled="true" tabindex="-1"
-             class="text-sm font-medium bg-plate border border-line hover:bg-white px-3.5 py-2 rounded-control transition-colors pointer-events-none opacity-40">
+             class="text-sm font-medium bg-plate border border-line hover:bg-plate-hover px-3.5 py-2 rounded-control transition-colors pointer-events-none opacity-40">
             Export Markdown
           </a>
           <a id="export-pdf-btn" href="#" aria-disabled="true" tabindex="-1"
-             class="text-sm font-medium bg-plate border border-line hover:bg-white px-3.5 py-2 rounded-control transition-colors pointer-events-none opacity-40">
+             class="text-sm font-medium bg-plate border border-line hover:bg-plate-hover px-3.5 py-2 rounded-control transition-colors pointer-events-none opacity-40">
             Export PDF
           </a>
         </div>
@@ -100,7 +119,7 @@
         <div class="flex flex-wrap items-center justify-between gap-3">
           <h3 id="talk-track-heading" class="font-heading font-semibold text-lg">Sales talk track</h3>
           <button id="copy-btn" type="button"
-                  class="text-sm font-medium bg-plate border border-line hover:bg-white px-3.5 py-2 rounded-control transition-colors">
+                  class="text-sm font-medium bg-plate border border-line hover:bg-plate-hover px-3.5 py-2 rounded-control transition-colors">
             Copy talk track
           </button>
         </div>
@@ -141,12 +160,12 @@
 
   <!-- History drawer: a native modal dialog, so focus trap, Esc and focus return come from the browser -->
   <dialog id="history-drawer" aria-labelledby="history-heading"
-          class="ml-auto mr-0 my-0 h-dvh max-h-none w-full max-w-md p-0 bg-panel text-ink border-l border-line backdrop:bg-ink/40 overscroll-contain">
+          class="ml-auto mr-0 my-0 h-dvh max-h-none w-full max-w-md p-0 bg-panel text-ink border-l border-line backdrop:bg-scrim overscroll-contain">
     <div class="flex h-full flex-col">
       <div class="flex items-center justify-between gap-3 px-5 py-4 border-b border-line">
         <h2 id="history-heading" class="font-heading font-semibold text-xl">History</h2>
         <button id="history-close" type="button"
-                class="text-sm font-medium px-3 py-1.5 rounded-control border border-line bg-plate hover:bg-white transition-colors">
+                class="text-sm font-medium px-3 py-1.5 rounded-control border border-line bg-plate hover:bg-plate-hover transition-colors">
           Close
         </button>
       </div>
@@ -175,12 +194,12 @@
 
   <!-- Confirmation dialog (replaces window.confirm across the app) -->
   <dialog id="confirm-dialog" aria-labelledby="confirm-title" aria-describedby="confirm-message"
-          class="confirm-pop m-auto w-full max-w-sm p-6 bg-plate text-ink rounded-control border border-line backdrop:bg-ink/40">
+          class="confirm-pop m-auto w-full max-w-sm p-6 bg-plate text-ink rounded-control border border-line backdrop:bg-scrim">
     <h2 id="confirm-title" class="font-heading font-semibold text-lg">Confirm action</h2>
     <p id="confirm-message" class="text-ink-muted mt-2"></p>
     <div class="flex items-center justify-end gap-2 mt-6">
       <button id="confirm-cancel-btn" type="button"
-              class="font-medium px-4 py-2.5 rounded-control border border-line bg-plate hover:bg-white transition-colors">
+              class="font-medium px-4 py-2.5 rounded-control border border-line bg-plate hover:bg-plate-hover transition-colors">
         Cancel
       </button>
       <button id="confirm-ok-btn" type="button"

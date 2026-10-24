@@ -1,4 +1,41 @@
 const state = { fileA: null, fileB: null, busy: false };
+// ---- Theme ----
+// Follows the OS until the user picks one; the pick is remembered per browser.
+const THEME_STORAGE_KEY = "qsg-theme";
+const THEME_BAR_COLORS = { light: "#2b333b", dark: "#0c0f12" };
+const themeToggle = document.getElementById("theme-toggle");
+
+function storedTheme() {
+  try {
+    const theme = localStorage.getItem(THEME_STORAGE_KEY);
+    return theme === "light" || theme === "dark" ? theme : null;
+  } catch {
+    return null;
+  }
+}
+
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  themeToggle.setAttribute("aria-pressed", String(theme === "dark"));
+  document.querySelector('meta[name="theme-color"]').content = THEME_BAR_COLORS[theme];
+}
+
+themeToggle.addEventListener("click", () => {
+  const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  applyTheme(next);
+  try {
+    localStorage.setItem(THEME_STORAGE_KEY, next);
+  } catch {
+    // Storage unavailable (e.g. private mode): the choice just won't persist.
+  }
+});
+
+window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (e) => {
+  if (!storedTheme()) applyTheme(e.matches ? "dark" : "light");
+});
+
+applyTheme(document.documentElement.dataset.theme === "dark" ? "dark" : "light");
+
 let currentHistoryId = null;
 const HISTORY_PAGE_SIZE = 20;
 let historyOffset = 0;
@@ -378,7 +415,7 @@ function renderHistoryList() {
             <span class="block text-ink-muted">${escapeHtml(formatTimestamp(item.created_at))}</span>
           </button>
           <button type="button" data-delete-id="${item.id}" aria-label="Delete comparison: ${plainLabel}"
-                  class="shrink-0 w-9 h-9 inline-flex items-center justify-center rounded-control text-ink-muted hover:text-danger hover:bg-plate">
+                  class="shrink-0 w-9 h-9 inline-flex items-center justify-center rounded-control text-ink-muted hover:text-danger-text hover:bg-plate">
             &times;
           </button>
         </li>`;

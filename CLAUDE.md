@@ -90,6 +90,11 @@ everything else stays quiet. Sentence case, no all-caps labels, no tinted-card-f
   #1c2127, `ink-muted` #56616b, `line` #c9d0cb, `bezel` #2b333b, `action` #0d6b6b, `danger` #b3261e (destructive
   actions, error borders), plus
   `led-green/amber/red/blue` for status only. Use the tokens, never raw hex in markup or JS.
+- Themes: light and dark share the same token names. Dark overrides them in
+  `:root[data-theme="dark"]` in `input.css`; never branch on theme in markup, use tokens (e.g.
+  `bg-plate-hover`, `text-on-action`, `bg-scrim`, not `bg-white`/`text-white`). `data-theme` is set
+  before first paint by the inline script in `index.html` (stored `qsg-theme`, else the OS
+  setting) and toggled by `applyTheme()` in `app.js`. Check contrast per theme when adding tokens.
 - Spacing: 4px base scale (Tailwind default at a 16px root); avoid arbitrary values.
 - Mobile-first, test at 375px width.
 - No `src/components/` dir here (vanilla JS, no build step beyond Tailwind). Build reusable UI as
