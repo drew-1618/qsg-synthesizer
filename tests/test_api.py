@@ -480,6 +480,22 @@ class TestPdfUploadErrors:
         assert response.status_code == 400
         assert "could not be read as a PDF" in response.json()["detail"]
 
+    def test_pdf_over_the_page_limit_says_why(self, monkeypatch):
+        from app.tools import pdf_parser
+
+        monkeypatch.setattr(pdf_parser, "MAX_PDF_PAGES", 1)
+        pdf_bytes = (SAMPLE_DOCS_DIR / "device_a_qsg.pdf").read_bytes()
+        response = client.post(
+            "/api/v1/compare-pdfs",
+            files={
+                "device_a_pdf": ("a.pdf", pdf_bytes, "application/pdf"),
+                "device_b_pdf": ("b.pdf", pdf_bytes, "application/pdf"),
+            },
+        )
+        assert response.status_code == 400
+        assert "'a.pdf' has " in response.json()["detail"]
+        assert "the limit is 1" in response.json()["detail"]
+
     def test_encrypted_pdf_returns_400(self):
         import pymupdf
 

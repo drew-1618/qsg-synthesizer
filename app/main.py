@@ -65,6 +65,7 @@ from app.services.orchestrator import (
 from app.services.rate_limiter import RateLimiter
 from app.tools.document_parser import (
     DocumentParseError,
+    DocumentRejectedError,
     extract_text,
     file_kind,
     is_supported,
@@ -273,6 +274,8 @@ def _read_document_upload(upload: UploadFile, pdf_only: bool = False) -> str:
         )
     try:
         text = extract_text(filename, contents)
+    except DocumentRejectedError as exc:
+        raise HTTPException(status_code=400, detail=f"'{filename}' {exc}")
     except DocumentParseError:
         logger.warning("Could not parse upload '%s'", filename, exc_info=True)
         raise HTTPException(

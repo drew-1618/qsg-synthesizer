@@ -18,7 +18,7 @@ from docx import Document
 from docx.table import Table
 from docx.text.paragraph import Paragraph
 
-from app.tools.pdf_parser import extract_text_from_pdf
+from app.tools.pdf_parser import PdfRejectedError, extract_text_from_pdf
 from app.tools.text_cleaning import clean_text
 
 SUPPORTED_EXTENSIONS = frozenset({".pdf", ".docx", ".md", ".markdown", ".txt"})
@@ -39,6 +39,11 @@ class UnsupportedDocumentError(ValueError):
 
 class DocumentParseError(ValueError):
     """The file's contents could not be read as the type its extension claims."""
+
+
+class DocumentRejectedError(DocumentParseError):
+    """The file can be read but won't be processed. The message is shown to
+    the user after the file name, e.g. "has 900 pages; the limit is 200."."""
 
 
 def extension_of(filename: str) -> str:
@@ -66,6 +71,8 @@ def extract_text(filename: str, contents: bytes) -> str:
             return clean_text(_decode_text(contents))
     except DocumentParseError:
         raise
+    except PdfRejectedError as exc:
+        raise DocumentRejectedError(str(exc)) from exc
     except Exception as exc:
         raise DocumentParseError(f"Could not read {filename!r}") from exc
     raise UnsupportedDocumentError(f"Unsupported file type: {ext or filename!r}")
