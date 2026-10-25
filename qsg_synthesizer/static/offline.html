@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>QSG Synthesizer isn't running</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+  <meta name="theme-color" content="#2b333b" />
+  <script>
+    // Same theme logic as index.html, so this page matches the app.
+    (function () {
+      var theme = null;
+      try { theme = localStorage.getItem("qsg-theme"); } catch (e) {}
+      if (theme !== "light" && theme !== "dark") {
+        theme = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+      }
+      document.documentElement.dataset.theme = theme;
+    })();
+  </script>
+  <link rel="stylesheet" href="/static/tailwind.css" />
+</head>
+<!-- Shown by sw.js in place of the browser's error page when the app's server
+     isn't running. Self-contained apart from the assets sw.js caches. -->
+<body class="min-h-screen">
+  <header class="bg-bezel text-bezel-ink border-b border-bezel-ink/10">
+    <div class="max-w-6xl mx-auto px-4 h-16 flex items-center gap-3">
+      <svg class="w-8 h-8 shrink-0" viewBox="0 0 32 32" aria-hidden="true">
+        <rect x="1" y="1" width="30" height="30" rx="6" fill="none" stroke="currentColor" stroke-opacity="0.45" stroke-width="2" />
+        <circle cx="9" cy="16" r="3" class="fill-led-off" />
+        <circle cx="16" cy="16" r="3" class="fill-led-off" />
+        <circle cx="23" cy="16" r="3" class="fill-led-off" />
+      </svg>
+      <h1 class="font-heading font-semibold text-lg leading-tight tracking-tight whitespace-nowrap">QSG Synthesizer</h1>
+    </div>
+  </header>
+
+  <main class="max-w-2xl mx-auto px-4 py-8">
+    <section aria-labelledby="offline-heading" class="bg-plate border border-line rounded-control p-5 space-y-4">
+      <h2 id="offline-heading" class="flex items-center gap-3 font-heading font-semibold text-xl">
+        <span class="led-dot led-dot--amber led-dot--blinking" aria-hidden="true"></span>
+        The app isn't running
+      </h2>
+      <p>Start it, and this window opens the dashboard by itself.</p>
+      <div class="space-y-2">
+        <h3 class="font-medium">Installed with uv or pipx</h3>
+        <p class="text-ink-muted">Run this in a terminal:</p>
+        <pre class="font-mono text-sm bg-panel border border-line rounded-control px-3 py-2 overflow-x-auto"><code>qsg-synthesizer</code></pre>
+        <p class="text-sm text-ink-muted">
+          To have it start whenever you log in, run <code class="font-mono">qsg-synthesizer autostart on</code> once.
+        </p>
+      </div>
+      <div class="space-y-2">
+        <h3 class="font-medium">Running in Docker</h3>
+        <p class="text-ink-muted">Start Docker Desktop. If the container still doesn't start, run:</p>
+        <pre class="font-mono text-sm bg-panel border border-line rounded-control px-3 py-2 overflow-x-auto"><code>docker start qsg-synthesizer</code></pre>
+      </div>
+      <p id="offline-status" role="status" class="text-sm text-ink-muted">Checking again every few seconds…</p>
+    </section>
+  </main>
+
+  <script>
+    // Reload as soon as the server answers again. Each check gives up after
+    // 2.5 s, since some networks hang on a closed port instead of refusing it.
+    setInterval(function () {
+      var controller = new AbortController();
+      var timer = setTimeout(function () { controller.abort(); }, 2500);
+      fetch("/healthz", { cache: "no-store", signal: controller.signal })
+        .then(function (res) { if (res.ok) location.reload(); })
+        .catch(function () {})
+        .then(function () { clearTimeout(timer); });
+    }, 3000);
+  </script>
+</body>
+</html>

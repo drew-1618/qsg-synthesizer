@@ -100,6 +100,15 @@ Things that span multiple files:
   `pyproject.toml`). History defaults to `<repo>/data/history` in a checkout, the per-user data
   folder for an installed package, and the Dockerfile sets `HISTORY_DIR`. `pyproject.toml`
   dependencies must match `requirements.txt` (enforced by `tests/test_packaging.py`).
+- Installed app (PWA): `/manifest.webmanifest` and `/sw.js` are root routes in `main.py` (a
+  worker only controls pages under its own path). `sw.js` caches nothing but `offline.html`
+  and the assets it lists in `OFFLINE_ASSETS` (`tests/test_pwa.py` checks they exist and that
+  `offline.html` loads nothing else); bump its `CACHE` name when that list changes. `/` and
+  `/static/*` send `Cache-Control: no-cache` so a stopped server shows the offline page.
+- The launcher (`cli.py`) opens `BROWSER_HOST` (`localhost`), matching the README's Docker
+  instructions: localhost and 127.0.0.1 are different sites with separate settings, keys and
+  installed app. `autostart.py` writes per-OS login entries (systemd user unit, launchd
+  agent, HKCU Run key) that run `python -m qsg_synthesizer --no-browser --log-file …`.
 - `.claude/agents/*.md` are read at runtime, so the Dockerfile copies `.claude/`, and
   `.dockerignore` must not exclude `*.md` there. `sample_docs/*.pdf` likewise ship in the
   image for `GET /api/v1/samples`, and the tests read `sample_docs/*.md|pdf`.

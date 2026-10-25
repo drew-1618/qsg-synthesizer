@@ -18,11 +18,13 @@ and history stay on your machine. You need either Docker, or Python 3.11+ with
 **With Docker**
 
 ```bash
-docker run -d --name qsg-synthesizer -p 127.0.0.1:8000:8000 \
-  -v qsg-history:/app/data/history ghcr.io/drew-1618/qsg-synthesizer:latest
+docker run -d --name qsg-synthesizer --restart unless-stopped \
+  -p 127.0.0.1:8000:8000 -v qsg-history:/app/data/history \
+  ghcr.io/drew-1618/qsg-synthesizer:latest
 ```
 
-Then open <http://localhost:8000>. History is kept in the `qsg-history` volume.
+Then open <http://localhost:8000>. It starts again whenever Docker Desktop does,
+and history is kept in the `qsg-history` volume.
 
 **Without Docker**
 
@@ -38,6 +40,30 @@ port and other options. History is saved in your user data folder
 on macOS, `%LOCALAPPDATA%\qsg-synthesizer` on Windows), and the command prints
 the exact path at startup. To update, run the install command again with
 `--reinstall` (`uv`) or `--force` (`pipx`).
+
+To have it start whenever you log in, run this once (`off` undoes it, `status`
+checks it):
+
+```bash
+qsg-synthesizer autostart on
+```
+
+It uses the `.env` in the folder you run it from, if there is one, and writes
+its output to a `qsg-synthesizer.log` file in the data folder above.
+
+**Open it like an app**
+
+In Chrome or Edge, use the install icon in the address bar (or **Settings >
+Install as an app**) to get QSG Synthesizer in its own window, with an icon in
+your Start menu, Dock or app launcher. In Safari on macOS, use **File > Add to
+Dock**. Firefox can't install apps, so bookmark it instead. The app needs QSG
+Synthesizer running; with Docker's `--restart` or `autostart on` above, it
+always is. If it isn't, the window says how to start it and opens the
+dashboard by itself once it's up.
+
+Always use the same address, <http://localhost:8000>. Browsers treat
+`localhost` and `127.0.0.1` (or another port) as different sites, each with its
+own settings, saved keys and installed app.
 
 **Reading documents with AI (optional)**
 
@@ -110,7 +136,7 @@ cp .env.example .env   # optionally set ANTHROPIC_API_KEY
 .venv/bin/uvicorn qsg_synthesizer.main:app --reload
 ```
 
-Open `http://127.0.0.1:8000/` for the dashboard, or `http://127.0.0.1:8000/docs`
+Open `http://localhost:8000/` for the dashboard, or `http://localhost:8000/docs`
 for the OpenAPI docs.
 
 ## Frontend build (Tailwind CSS)
