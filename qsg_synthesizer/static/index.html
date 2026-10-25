@@ -6,6 +6,10 @@
   <title>QSG Synthesizer</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
   <meta name="theme-color" content="#2b333b" />
+  <!-- use-credentials: browsers fetch manifests without credentials otherwise,
+       which Basic Auth (APP_USERNAME/APP_PASSWORD) would reject. -->
+  <link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials" />
+  <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png" />
   <script>
     // Set the theme before first paint so there is no flash. Mirrors applyTheme() in app.js.
     (function () {
@@ -381,6 +385,16 @@
         </button>
         <p id="settings-documents-status" role="status" class="text-sm text-ink-muted"></p>
       </fieldset>
+
+      <!-- Filled in by syncInstallSection() in app.js -->
+      <div class="space-y-2">
+        <h3 class="text-sm font-medium">App</h3>
+        <p id="settings-install-text" class="text-sm text-ink-muted"></p>
+        <button id="settings-install" type="button"
+                class="hidden text-sm font-medium px-3 py-2 rounded-control border border-line bg-plate hover:bg-plate-hover transition-colors">
+          Install as an app
+        </button>
+      </div>
     </div>
     <div class="flex items-center justify-end mt-6">
       <button id="settings-done" type="button"

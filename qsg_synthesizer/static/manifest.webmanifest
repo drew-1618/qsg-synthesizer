@@ -1,0 +1,16 @@
+{
+  "id": "/",
+  "name": "QSG Synthesizer",
+  "short_name": "QSG Synthesizer",
+  "description": "Compare telecom quick start guides and datasheets into a usability battlecard.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#eef0ee",
+  "theme_color": "#2b333b",
+  "icons": [
+    { "src": "/static/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/static/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/static/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

@@ -134,7 +134,10 @@ async def guard_static_files(request: Request, call_next):
                 content={"detail": exc.detail},
                 headers=exc.headers or {},
             )
-    return await call_next(request)
+    response = await call_next(request)
+    if request.url.path.startswith("/static/"):
+        response.headers.setdefault("Cache-Control", "no-cache")
+    return response
 
 
 @app.exception_handler(Exception)
@@ -155,7 +158,34 @@ def healthz() -> dict:
 
 @router.get("/", include_in_schema=False)
 def serve_dashboard() -> FileResponse:
-    return FileResponse(STATIC_DIR / "index.html")
+    # no-cache here and on /static/ (see guard_static_files): browsers keep the
+    # files but revalidate each load (a cheap 304 locally). Otherwise they may
+    # reuse them unasked, showing a dead dashboard when the app isn't running
+    # instead of sw.js's offline page, or old JS after an upgrade.
+    return FileResponse(
+        STATIC_DIR / "index.html", headers={"Cache-Control": "no-cache"}
+    )
+
+
+# Installed-app (PWA) files. The service worker is served from the root, not
+# /static/, because a worker only controls pages under its own path. no-cache
+# makes browsers check for an updated worker on every visit.
+@router.get("/sw.js", include_in_schema=False)
+def service_worker() -> FileResponse:
+    return FileResponse(
+        STATIC_DIR / "sw.js",
+        media_type="text/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+@router.get("/manifest.webmanifest", include_in_schema=False)
+def web_manifest() -> FileResponse:
+    return FileResponse(
+        STATIC_DIR / "manifest.webmanifest",
+        media_type="application/manifest+json",
+        headers={"Cache-Control": "no-cache"},
+    )
 
 
 @router.get("/api/v1/samples")

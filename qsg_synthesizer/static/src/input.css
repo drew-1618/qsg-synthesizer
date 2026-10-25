@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @source "../index.html";
 @source "../app.js";
+@source "../offline.html";
 
 /* Dark theme is opt-in via <html data-theme="dark">, set before first paint (see index.html). */
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));

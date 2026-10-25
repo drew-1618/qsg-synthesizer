@@ -275,6 +275,57 @@ document.getElementById("settings-forget").addEventListener("click", () => {
   settingsKeyInput.focus();
 });
 
+// ---- Installed app (PWA) ----
+// sw.js shows a "start the app" page instead of the browser's error page when
+// the server isn't running. Chrome and Edge offer an install prompt; other
+// browsers get directions instead.
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("/sw.js").catch(() => {
+    // Without it the app works the same; only the offline page is missing.
+  });
+}
+
+let installPrompt = null;
+const installButton = document.getElementById("settings-install");
+
+function isInstalledApp() {
+  return matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+}
+
+function syncInstallSection() {
+  const text = document.getElementById("settings-install-text");
+  installButton.classList.toggle("hidden", !installPrompt);
+  if (isInstalledApp()) {
+    text.textContent = "You're using the installed app. It needs QSG Synthesizer running, like the browser version.";
+  } else if (installPrompt) {
+    text.textContent = "Install it to open the dashboard in its own window from your desktop or app list.";
+  } else {
+    text.textContent =
+      "To open it in its own window from your desktop or app list, use your browser's install option: " +
+      "the install icon in the address bar in Chrome or Edge, or File > Add to Dock in Safari. " +
+      "Firefox can't install apps; bookmark this page instead.";
+  }
+}
+
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  installPrompt = e;
+  syncInstallSection();
+});
+window.addEventListener("appinstalled", () => {
+  installPrompt = null;
+  syncInstallSection();
+});
+installButton.addEventListener("click", async () => {
+  if (!installPrompt) return;
+  const prompt = installPrompt;
+  installPrompt = null;
+  await prompt.prompt();
+  syncInstallSection();
+});
+document.getElementById("settings-toggle").addEventListener("click", syncInstallSection);
+syncInstallSection();
+
 // ---- Settings: whether comparisons keep their documents (for Rerun) ----
 // On by default: the server is the user's own and Rerun needs the text. The
 // choice is per browser and sent with each compare as `keep_documents`.
