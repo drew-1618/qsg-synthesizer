@@ -18,8 +18,8 @@ from docx import Document
 from docx.table import Table
 from docx.text.paragraph import Paragraph
 
-from app.tools.pdf_parser import PdfRejectedError, extract_text_from_pdf
-from app.tools.text_cleaning import clean_text
+from qsg_synthesizer.tools.pdf_parser import PdfRejectedError, extract_text_from_pdf
+from qsg_synthesizer.tools.text_cleaning import clean_text
 
 SUPPORTED_EXTENSIONS = frozenset({".pdf", ".docx", ".md", ".markdown", ".txt"})
 _TEXT_EXTENSIONS = frozenset({".md", ".markdown", ".txt"})

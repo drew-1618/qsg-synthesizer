@@ -7,8 +7,8 @@ from reportlab.lib.pagesizes import LETTER
 from reportlab.pdfgen.canvas import Canvas
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
 
-from app.tools import pdf_parser
-from app.tools.pdf_parser import PdfRejectedError, extract_text_from_pdf
+from qsg_synthesizer.tools import pdf_parser
+from qsg_synthesizer.tools.pdf_parser import PdfRejectedError, extract_text_from_pdf
 
 
 def _build_pdf(pages: list[list[str]]) -> bytes:

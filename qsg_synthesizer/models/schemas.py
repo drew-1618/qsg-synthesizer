@@ -3,7 +3,7 @@
 `QSGExtraction` is the contract the `qsg_extractor` subagent must produce:
 raw, unvalidated text pulled from a single document. Numeric/IP/LED
 normalization happens afterward via the deterministic tools in
-`app/tools/`, never inside the extraction step itself.
+`qsg_synthesizer/tools/`, never inside the extraction step itself.
 """
 
 from __future__ import annotations

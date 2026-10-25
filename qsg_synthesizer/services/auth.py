@@ -1,7 +1,7 @@
 """Optional HTTP Basic Auth gate for the dashboard and API.
 
 Mirrors the project's existing optional-credential pattern (see
-ANTHROPIC_API_KEY in app/services/orchestrator.py): if APP_USERNAME and
+ANTHROPIC_API_KEY in qsg_synthesizer/services/orchestrator.py): if APP_USERNAME and
 APP_PASSWORD aren't both set, the app stays open, which is what local dev
 and the test suite rely on. Set both before deploying anywhere reachable
 beyond localhost.

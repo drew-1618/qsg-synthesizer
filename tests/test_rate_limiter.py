@@ -9,7 +9,7 @@ import logging
 import pytest
 from fastapi import HTTPException
 
-from app.services.rate_limiter import RateLimiter
+from qsg_synthesizer.services.rate_limiter import RateLimiter
 
 
 class FakeRequest:
@@ -41,7 +41,9 @@ def test_blocks_requests_over_the_limit(caplog):
     limiter(FakeRequest("1.2.3.4"))
     limiter(FakeRequest("1.2.3.4"))
 
-    with caplog.at_level(logging.WARNING, logger="app.services.rate_limiter"):
+    with caplog.at_level(
+        logging.WARNING, logger="qsg_synthesizer.services.rate_limiter"
+    ):
         with pytest.raises(HTTPException) as exc_info:
             limiter(FakeRequest("1.2.3.4"))
     assert exc_info.value.status_code == 429

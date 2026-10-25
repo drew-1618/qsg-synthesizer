@@ -1,7 +1,7 @@
 import pytest
 
-from app.main import compare_rate_limiter, export_rate_limiter
-from app.services import history
+from qsg_synthesizer.main import compare_rate_limiter, export_rate_limiter
+from qsg_synthesizer.services import history
 
 
 @pytest.fixture(autouse=True)

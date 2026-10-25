@@ -2,9 +2,9 @@
   "name": "qsg-synthesizer",
   "private": true,
   "version": "1.0.0",
-  "description": "Tailwind CSS build for the QSG Synthesizer dashboard (app/static/index.html)",
+  "description": "Tailwind CSS build for the QSG Synthesizer dashboard (qsg_synthesizer/static/index.html)",
   "scripts": {
-    "build:css": "tailwindcss -i ./app/static/src/input.css -o ./app/static/tailwind.css --minify"
+    "build:css": "tailwindcss -i ./qsg_synthesizer/static/src/input.css -o ./qsg_synthesizer/static/tailwind.css --minify"
   },
   "devDependencies": {
     "@fontsource-variable/archivo": "^5.3.0",

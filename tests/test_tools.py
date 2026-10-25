@@ -1,16 +1,16 @@
 import pytest
 
-from app.tools.capability_compare import (
+from qsg_synthesizer.tools.capability_compare import (
     capability_key,
     parse_speed_mbps,
     rank_wifi_standard,
 )
-from app.tools.led_normalizer import LEDState, normalize_led
-from app.tools.net_validator import (
+from qsg_synthesizer.tools.led_normalizer import LEDState, normalize_led
+from qsg_synthesizer.tools.net_validator import (
     InvalidNetworkInput,
     classify_ip,
 )
-from app.tools.port_counter import expand_port_range
+from qsg_synthesizer.tools.port_counter import expand_port_range
 
 
 class TestClassifyIp:

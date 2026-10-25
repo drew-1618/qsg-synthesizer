@@ -20,15 +20,15 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import app
-from app.schemas import ProvisioningMethod
-from app.services import orchestrator
-from app.services.orchestrator import (
+from qsg_synthesizer.main import app
+from qsg_synthesizer.schemas import ProvisioningMethod
+from qsg_synthesizer.services import orchestrator
+from qsg_synthesizer.services.orchestrator import (
     NO_RISKS_MESSAGE,
     extract_device_spec,
     synthesize_battlecard,
 )
-from app.tools.pdf_parser import extract_text_from_pdf
+from qsg_synthesizer.tools.pdf_parser import extract_text_from_pdf
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 R7000_PDF = FIXTURES_DIR / "netgear_r7000_qsg.pdf"
@@ -108,7 +108,7 @@ def mock_llm():
     client.messages.create.side_effect = create
     with (
         patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key", "LLM_PROVIDER": ""}),
-        patch("app.services.orchestrator.anthropic") as mock_anthropic,
+        patch("qsg_synthesizer.services.orchestrator.anthropic") as mock_anthropic,
     ):
         mock_anthropic.Anthropic.return_value = client
         yield client
@@ -246,7 +246,7 @@ class TestRealQsgHeuristicFallback:
         client.messages.create.side_effect = RuntimeError("boom")
         with (
             patch.dict("os.environ", {"ANTHROPIC_API_KEY": "k", "LLM_PROVIDER": ""}),
-            patch("app.services.orchestrator.anthropic") as mock_anthropic,
+            patch("qsg_synthesizer.services.orchestrator.anthropic") as mock_anthropic,
         ):
             mock_anthropic.Anthropic.return_value = client
             a = extract_device_spec(r7000_text, R7000_PDF.name)

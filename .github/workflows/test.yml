@@ -81,7 +81,7 @@ jobs:
             sleep 2
           done
           curl -fs http://localhost:8001/api/v1/samples > /dev/null
-          /tmp/qsg/bin/python -c "from app.services.orchestrator import _load_agent_system_prompt as p; assert p('qsg_extractor.md')"
+          /tmp/qsg/bin/python -c "from qsg_synthesizer.services.orchestrator import _load_agent_system_prompt as p; assert p('qsg_extractor.md')"
           curl -fs -X POST http://localhost:8001/api/v1/compare \
             -F device_a_file=@$GITHUB_WORKSPACE/sample_docs/device_a_qsg.md \
             -F device_b_file=@$GITHUB_WORKSPACE/sample_docs/device_b_qsg.md > /dev/null

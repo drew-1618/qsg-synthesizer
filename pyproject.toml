@@ -29,17 +29,17 @@ dependencies = [
 ]
 
 [project.scripts]
-qsg-synthesizer = "app.cli:main"
+qsg-synthesizer = "qsg_synthesizer.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["app"]
+packages = ["qsg_synthesizer"]
 
-# Read at runtime from the repo in a checkout or Docker (see app/paths.py);
-# an installed package gets these copies instead.
+# Read at runtime from the repo in a checkout or Docker (see
+# qsg_synthesizer/paths.py); an installed package gets these copies instead.
 [tool.hatch.build.targets.wheel.force-include]
-".claude/agents/qsg_extractor.md" = "app/_bundled/agents/qsg_extractor.md"
-"sample_docs/device_a_qsg.pdf" = "app/_bundled/sample_docs/device_a_qsg.pdf"
-"sample_docs/device_b_qsg.pdf" = "app/_bundled/sample_docs/device_b_qsg.pdf"
+".claude/agents/qsg_extractor.md" = "qsg_synthesizer/_bundled/agents/qsg_extractor.md"
+"sample_docs/device_a_qsg.pdf" = "qsg_synthesizer/_bundled/sample_docs/device_a_qsg.pdf"
+"sample_docs/device_b_qsg.pdf" = "qsg_synthesizer/_bundled/sample_docs/device_b_qsg.pdf"
 
 [tool.ruff]
 target-version = "py311"
@@ -47,10 +47,11 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "I"]
 
-# app/main.py must call load_dotenv() before its app.* imports (see that
-# file's comment) - E402 would otherwise flag every import after it.
+# qsg_synthesizer/main.py must call load_dotenv() before its own package's
+# imports (see that file's comment) - E402 would otherwise flag every import
+# after it.
 [tool.ruff.lint.per-file-ignores]
-"app/main.py" = ["E402"]
+"qsg_synthesizer/main.py" = ["E402"]
 
 [tool.black]
 target-version = ["py311"]
@@ -60,7 +61,7 @@ pythonpath = ["."]
 
 [tool.mypy]
 python_version = "3.11"
-files = ["app"]
+files = ["qsg_synthesizer"]
 
 # pymupdf/pymupdf4llm ship no stubs/py.typed marker, and following into
 # their transitive deps (pymupdf_layout -> onnxruntime -> numpy) pulls in

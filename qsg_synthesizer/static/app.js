@@ -388,7 +388,7 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
-// Must match app/services/orchestrator.py's NO_RISKS_MESSAGE /
+// Must match qsg_synthesizer/services/orchestrator.py's NO_RISKS_MESSAGE /
 // NO_ADVANTAGES_MESSAGE exactly — used to render the "nothing found"
 // fallback as a neutral line instead of a highlighted risk/advantage.
 const NO_RISKS_MESSAGE =

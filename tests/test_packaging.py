@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
-from app import cli, paths
+from qsg_synthesizer import cli, paths
 
 ROOT = Path(__file__).parent.parent
 
@@ -33,11 +33,11 @@ def test_runtime_files_are_bundled_into_the_wheel():
     ]
     for source, target in bundled.items():
         assert (ROOT / source).is_file(), source
-        assert target.startswith("app/_bundled/")
+        assert target.startswith("qsg_synthesizer/_bundled/")
     targets = set(bundled.values())
-    assert "app/_bundled/agents/qsg_extractor.md" in targets
-    assert "app/_bundled/sample_docs/device_a_qsg.pdf" in targets
-    assert "app/_bundled/sample_docs/device_b_qsg.pdf" in targets
+    assert "qsg_synthesizer/_bundled/agents/qsg_extractor.md" in targets
+    assert "qsg_synthesizer/_bundled/sample_docs/device_a_qsg.pdf" in targets
+    assert "qsg_synthesizer/_bundled/sample_docs/device_b_qsg.pdf" in targets
 
 
 class TestResourceDir:
@@ -96,7 +96,9 @@ class TestCli:
             patch.object(cli.threading, "Timer") as timer,
         ):
             cli.main([])
-        run.assert_called_once_with("app.main:app", host="127.0.0.1", port=8000)
+        run.assert_called_once_with(
+            "qsg_synthesizer.main:app", host="127.0.0.1", port=8000
+        )
         assert timer.call_args.kwargs["args"] == ("http://127.0.0.1:8000/",)
         out = capsys.readouterr().out
         assert "http://127.0.0.1:8000/" in out

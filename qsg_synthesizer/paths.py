@@ -1,10 +1,10 @@
 """Where the app finds its bundled files and keeps its data.
 
-The app runs three ways: from a source checkout (`uvicorn app.main:app`), in
+The app runs three ways: from a source checkout (`uvicorn qsg_synthesizer.main:app`), in
 the Docker image (which copies the repo's `.claude/` and `sample_docs/` next
-to `app/`), and as an installed package (`uv tool install` / `pipx`), where
-only `app/` exists and the build copies the extractor prompt and sample PDFs
-into `app/_bundled/`. Data goes to `<repo>/data` in a checkout, as it always
+to `qsg_synthesizer/`), and as an installed package (`uv tool install` / `pipx`), where
+only `qsg_synthesizer/` exists and the build copies the extractor prompt and sample PDFs
+into `qsg_synthesizer/_bundled/`. Data goes to `<repo>/data` in a checkout, as it always
 has, and to the platform's per-user data folder for an installed package.
 """
 

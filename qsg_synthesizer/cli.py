@@ -48,9 +48,9 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
 
     import uvicorn
 
-    from app.services import history
+    from qsg_synthesizer.services import history
 
-    # Lets app.main skip its "auth is off" warning when only this computer
+    # Lets qsg_synthesizer.main skip its "auth is off" warning when only this computer
     # can connect.
     os.environ["QSG_BIND_HOST"] = args.host
     browse_host = "127.0.0.1" if args.host in ("0.0.0.0", "::") else args.host
@@ -60,7 +60,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     print("Press Ctrl+C to stop.", flush=True)
     if not args.no_browser:
         threading.Timer(1.5, webbrowser.open, args=(url,)).start()
-    uvicorn.run("app.main:app", host=args.host, port=args.port)
+    uvicorn.run("qsg_synthesizer.main:app", host=args.host, port=args.port)
 
 
 if __name__ == "__main__":

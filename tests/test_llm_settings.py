@@ -12,8 +12,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import app
-from app.services import history
+from qsg_synthesizer.main import app
+from qsg_synthesizer.services import history
 from tests.test_orchestrator import (
     _FAKE_EXTRACTION,
     _fake_anthropic_response,
@@ -57,7 +57,7 @@ class _AuthError(Exception):
 def test_user_key_reaches_the_provider_client():
     with (
         patch.dict("os.environ", NO_SERVER_KEYS),
-        patch("app.services.orchestrator.anthropic") as mock_anthropic,
+        patch("qsg_synthesizer.services.orchestrator.anthropic") as mock_anthropic,
     ):
         _anthropic_mock(mock_anthropic)
         response = _compare({"X-LLM-Provider": "anthropic", "X-LLM-API-Key": USER_KEY})
@@ -71,7 +71,7 @@ def test_user_key_reaches_the_provider_client():
 def test_user_key_is_not_saved_in_history():
     with (
         patch.dict("os.environ", NO_SERVER_KEYS),
-        patch("app.services.orchestrator.anthropic") as mock_anthropic,
+        patch("qsg_synthesizer.services.orchestrator.anthropic") as mock_anthropic,
     ):
         _anthropic_mock(mock_anthropic)
         _compare({"X-LLM-Provider": "anthropic", "X-LLM-API-Key": USER_KEY})
@@ -83,7 +83,7 @@ def test_user_key_is_not_saved_in_history():
 def test_heuristic_choice_skips_the_llm_even_with_server_keys():
     with (
         patch.dict("os.environ", {"ANTHROPIC_API_KEY": "server", "LLM_PROVIDER": ""}),
-        patch("app.services.orchestrator.anthropic") as mock_anthropic,
+        patch("qsg_synthesizer.services.orchestrator.anthropic") as mock_anthropic,
     ):
         response = _compare({"X-LLM-Provider": "heuristic"})
 
@@ -95,8 +95,8 @@ def test_provider_without_a_key_uses_the_server_key():
     env = {"ANTHROPIC_API_KEY": "server-a", "GEMINI_API_KEY": "server-g"}
     with (
         patch.dict("os.environ", {**env, "LLM_PROVIDER": ""}),
-        patch("app.services.orchestrator.anthropic") as mock_anthropic,
-        patch("app.services.orchestrator.genai") as mock_genai,
+        patch("qsg_synthesizer.services.orchestrator.anthropic") as mock_anthropic,
+        patch("qsg_synthesizer.services.orchestrator.genai") as mock_genai,
     ):
         mock_client = MagicMock()
         mock_client.models.generate_content.return_value = _fake_gemini_response(
@@ -120,7 +120,7 @@ def test_provider_without_any_key_uses_the_heuristic_parser():
 def test_rejected_user_key_warns_without_leaking_the_key(caplog):
     with (
         patch.dict("os.environ", NO_SERVER_KEYS),
-        patch("app.services.orchestrator.anthropic") as mock_anthropic,
+        patch("qsg_synthesizer.services.orchestrator.anthropic") as mock_anthropic,
         caplog.at_level(logging.DEBUG),
     ):
         _anthropic_mock(mock_anthropic, side_effect=_AuthError("invalid x-api-key"))
@@ -139,7 +139,7 @@ def test_rejected_user_key_warns_without_leaking_the_key(caplog):
 def test_other_failures_with_a_user_key_get_a_retry_hint():
     with (
         patch.dict("os.environ", NO_SERVER_KEYS),
-        patch("app.services.orchestrator.anthropic") as mock_anthropic,
+        patch("qsg_synthesizer.services.orchestrator.anthropic") as mock_anthropic,
     ):
         _anthropic_mock(mock_anthropic, side_effect=RuntimeError("timeout"))
         response = _compare({"X-LLM-Provider": "anthropic", "X-LLM-API-Key": USER_KEY})
@@ -151,7 +151,7 @@ def test_other_failures_with_a_user_key_get_a_retry_hint():
 def test_server_key_failures_warn_without_pointing_at_settings():
     with (
         patch.dict("os.environ", {**NO_SERVER_KEYS, "ANTHROPIC_API_KEY": "server"}),
-        patch("app.services.orchestrator.anthropic") as mock_anthropic,
+        patch("qsg_synthesizer.services.orchestrator.anthropic") as mock_anthropic,
     ):
         _anthropic_mock(mock_anthropic, side_effect=_AuthError("bad"))
         response = _compare({})
@@ -172,7 +172,7 @@ def test_rate_limits_say_to_wait(user_key):
     headers = {"X-LLM-Provider": "anthropic", "X-LLM-API-Key": user_key or ""}
     with (
         patch.dict("os.environ", env),
-        patch("app.services.orchestrator.anthropic") as mock_anthropic,
+        patch("qsg_synthesizer.services.orchestrator.anthropic") as mock_anthropic,
     ):
         _anthropic_mock(mock_anthropic, side_effect=_RateLimitError("slow down"))
         response = _compare(headers)
@@ -185,7 +185,7 @@ class TestModelChoice:
     def _gemini_compare(self, headers):
         with (
             patch.dict("os.environ", {**NO_SERVER_KEYS, "GEMINI_API_KEY": "server-g"}),
-            patch("app.services.orchestrator.genai") as mock_genai,
+            patch("qsg_synthesizer.services.orchestrator.genai") as mock_genai,
         ):
             client_mock = mock_genai.Client.return_value
             client_mock.models.generate_content.return_value = _fake_gemini_response(
@@ -212,7 +212,7 @@ class TestModelChoice:
     def test_chosen_anthropic_model_reaches_the_client(self):
         with (
             patch.dict("os.environ", NO_SERVER_KEYS),
-            patch("app.services.orchestrator.anthropic") as mock_anthropic,
+            patch("qsg_synthesizer.services.orchestrator.anthropic") as mock_anthropic,
         ):
             mock_client = _anthropic_mock(mock_anthropic)
             _compare(
@@ -231,7 +231,7 @@ class TestModelChoice:
             first = _compare({}).json()
         with (
             patch.dict("os.environ", {**NO_SERVER_KEYS, "GEMINI_API_KEY": "server-g"}),
-            patch("app.services.orchestrator.genai") as mock_genai,
+            patch("qsg_synthesizer.services.orchestrator.genai") as mock_genai,
         ):
             generate = mock_genai.Client.return_value.models.generate_content
             generate.return_value = _fake_gemini_response(_FAKE_EXTRACTION)
@@ -290,7 +290,7 @@ class TestSettingsEndpoint:
     def test_reports_the_server_provider(self):
         with (
             patch.dict("os.environ", {**NO_SERVER_KEYS, "GEMINI_API_KEY": "g"}),
-            patch("app.services.orchestrator.genai", MagicMock()),
+            patch("qsg_synthesizer.services.orchestrator.genai", MagicMock()),
         ):
             assert client.get("/api/v1/settings").json()["server_provider"] == "gemini"
 
@@ -321,7 +321,7 @@ class TestRerun:
 
         with (
             patch.dict("os.environ", NO_SERVER_KEYS),
-            patch("app.services.orchestrator.anthropic") as mock_anthropic,
+            patch("qsg_synthesizer.services.orchestrator.anthropic") as mock_anthropic,
         ):
             _anthropic_mock(mock_anthropic)
             response = client.post(

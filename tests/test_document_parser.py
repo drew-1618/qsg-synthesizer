@@ -7,8 +7,8 @@ from pathlib import Path
 import docx
 import pytest
 
-from app.tools import document_parser
-from app.tools.document_parser import (
+from qsg_synthesizer.tools import document_parser
+from qsg_synthesizer.tools.document_parser import (
     DocumentParseError,
     UnsupportedDocumentError,
     extension_of,

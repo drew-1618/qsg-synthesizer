@@ -7,8 +7,8 @@ per-test tmp_path, so these never touch the real repo's data/ directory.
 import json
 from pathlib import Path
 
-from app.schemas import BattlecardResponse
-from app.services import history
+from qsg_synthesizer.schemas import BattlecardResponse
+from qsg_synthesizer.services import history
 
 
 def _make_battlecard(name_a="Device A", name_b="Device B") -> BattlecardResponse:

@@ -1,4 +1,4 @@
-"""Generate realistic mock PDF QSGs for exercising app/tools/pdf_parser.py.
+"""Generate realistic mock PDF QSGs for exercising qsg_synthesizer/tools/pdf_parser.py.
 
 Uses genuine ReportLab layout constructs — a two-column instruction section
 via real page-template Frames, and a bordered grid Table for ports/LED

@@ -22,7 +22,7 @@ ENV/
 
 # Tests and other non-runtime content
 # (NOTE: do not exclude *.md globally - .claude/agents/*.md prompts are
-# copied into the image and read at runtime by app/services/orchestrator.py)
+# copied into the image and read at runtime by qsg_synthesizer/services/orchestrator.py)
 # (NOTE: do not exclude sample_docs/ - its PDFs are copied into the image
 # and served at runtime by the GET /api/v1/samples demo endpoint)
 tests/

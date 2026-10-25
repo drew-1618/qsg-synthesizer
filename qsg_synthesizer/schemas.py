@@ -1,9 +1,9 @@
 """API-facing schemas for the QSG Synthesizer service.
 
 These are the normalized, validated shapes returned to callers. Contrast
-with `app/models/schemas.py::QSGExtraction`, which is the raw, unvalidated
+with `qsg_synthesizer/models/schemas.py::QSGExtraction`, which is the raw, unvalidated
 contract the extraction subagent fills in before the deterministic tools in
-`app/tools/` clean it up into a `DeviceSpec`.
+`qsg_synthesizer/tools/` clean it up into a `DeviceSpec`.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from typing import List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.tools.led_normalizer import LEDState
+from qsg_synthesizer.tools.led_normalizer import LEDState
 
 __all__ = [
     "SpecValue",

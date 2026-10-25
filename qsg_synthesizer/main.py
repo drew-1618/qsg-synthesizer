@@ -6,14 +6,14 @@ import os
 
 from dotenv import load_dotenv
 
-# Must run before any app.* import below: several modules (app.services.history's
-# HISTORY_DIR, app.logging_config's LOG_LEVEL) read os.environ at import/call time,
-# so .env has to be loaded into the process environment first. Skipped under
-# pytest (PYTEST_VERSION is set by pytest>=7.2 for exactly this check) so the
-# test suite never picks up a developer's real API keys from .env and starts
-# making live LLM calls - see README's "Tests" section, which promises fully
-# offline/deterministic runs. (Ruff's E402 is disabled for this file in
-# pyproject.toml since these imports intentionally follow this guard.)
+# Must run before any qsg_synthesizer.* import below: several modules
+# (services.history's HISTORY_DIR, logging_config's LOG_LEVEL) read os.environ
+# at import/call time, so .env has to be loaded into the process environment
+# first. Skipped under pytest (PYTEST_VERSION is set by pytest>=7.2 for exactly
+# this check) so the test suite never picks up a developer's real API keys from
+# .env and starts making live LLM calls - see README's "Tests" section, which
+# promises fully offline/deterministic runs. (Ruff's E402 is disabled for this
+# file in pyproject.toml since these imports intentionally follow this guard.)
 if "PYTEST_VERSION" not in os.environ:
     load_dotenv()
 
@@ -38,9 +38,9 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app.logging_config import configure_logging
-from app.paths import PACKAGE_DIR, resource_dir
-from app.schemas import (
+from qsg_synthesizer.logging_config import configure_logging
+from qsg_synthesizer.paths import PACKAGE_DIR, resource_dir
+from qsg_synthesizer.schemas import (
     CompareResponse,
     DeviceSpec,
     HistoryPage,
@@ -48,15 +48,15 @@ from app.schemas import (
     HistoryStackPage,
     Perspective,
 )
-from app.services import export as export_service
-from app.services import history
-from app.services.auth import (
+from qsg_synthesizer.services import export as export_service
+from qsg_synthesizer.services import history
+from qsg_synthesizer.services.auth import (
     auth_enabled,
     require_auth,
     security,
     verify_credentials,
 )
-from app.services.orchestrator import (
+from qsg_synthesizer.services.orchestrator import (
     LLM_MODEL_CHOICES,
     LLMOverride,
     default_model,
@@ -64,8 +64,8 @@ from app.services.orchestrator import (
     server_llm_provider,
     synthesize_battlecard,
 )
-from app.services.rate_limiter import RateLimiter
-from app.tools.document_parser import (
+from qsg_synthesizer.services.rate_limiter import RateLimiter
+from qsg_synthesizer.tools.document_parser import (
     DocumentParseError,
     DocumentRejectedError,
     extract_text,

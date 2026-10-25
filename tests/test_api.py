@@ -4,8 +4,13 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from app.main import MAX_TEXT_CHARS, MAX_UPLOAD_BYTES, app, compare_rate_limiter
-from app.services import history
+from qsg_synthesizer.main import (
+    MAX_TEXT_CHARS,
+    MAX_UPLOAD_BYTES,
+    app,
+    compare_rate_limiter,
+)
+from qsg_synthesizer.services import history
 
 SAMPLE_DOCS_DIR = Path(__file__).parent.parent / "sample_docs"
 
@@ -481,7 +486,7 @@ class TestPdfUploadErrors:
         assert "could not be read as a PDF" in response.json()["detail"]
 
     def test_pdf_over_the_page_limit_says_why(self, monkeypatch):
-        from app.tools import pdf_parser
+        from qsg_synthesizer.tools import pdf_parser
 
         monkeypatch.setattr(pdf_parser, "MAX_PDF_PAGES", 1)
         pdf_bytes = (SAMPLE_DOCS_DIR / "device_a_qsg.pdf").read_bytes()
@@ -808,7 +813,7 @@ class TestUnhandledErrors:
         # TestClient re-raises unhandled server exceptions by default (for
         # debuggability) unless told not to.
         lenient_client = TestClient(app, raise_server_exceptions=False)
-        with caplog.at_level(logging.ERROR, logger="app.main"):
+        with caplog.at_level(logging.ERROR, logger="qsg_synthesizer.main"):
             response = lenient_client.post(
                 "/api/v1/compare-text",
                 json={"device_a_text": device_a_text, "device_b_text": device_b_text},
