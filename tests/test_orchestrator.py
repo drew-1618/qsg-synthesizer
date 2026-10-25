@@ -126,6 +126,9 @@ class TestExtractViaGemini:
                 kwargs["config"].response_json_schema
                 == QSGExtraction.model_json_schema()
             )
+            retry = mock_genai.Client.call_args.kwargs["http_options"].retry_options
+            assert retry.attempts == 3
+            assert 429 in retry.http_status_codes
 
     def test_truncated_reply_falls_back_to_heuristic(self):
         from google.genai import types as gemini_types

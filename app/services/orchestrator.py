@@ -89,6 +89,13 @@ _EXTRACTION_TOOL_NAME = "record_qsg_extraction"
 _CHUNK_CHARS = 60_000
 _MAX_CHUNKS = 8
 _CHUNK_WORKERS = 4
+# Gemini's free tier allows few requests per minute, and both devices are
+# read at once, so its sections go out two at a time.
+_GEMINI_CHUNK_WORKERS = 2
+# Gemini's SDK doesn't retry by default (Anthropic's gets max_retries=1).
+# Attempts include the first call; 429s are the free tier's per-minute limit.
+_GEMINI_RETRY_ATTEMPTS = 3
+_GEMINI_RETRY_STATUS_CODES = [429, 500, 502, 503, 504]
 # Open-ended spec rows kept per device, so one verbose datasheet can't flood
 # the comparison table.
 _MAX_SPEC_ROWS = 40
@@ -625,7 +632,15 @@ def _extract_via_gemini(
 ) -> QSGExtraction:
     client = genai.Client(
         api_key=api_key or os.environ["GEMINI_API_KEY"],
-        http_options=gemini_types.HttpOptions(timeout=int(_LLM_TIMEOUT_SECONDS * 1000)),
+        http_options=gemini_types.HttpOptions(
+            timeout=int(_LLM_TIMEOUT_SECONDS * 1000),
+            retry_options=gemini_types.HttpRetryOptions(
+                attempts=_GEMINI_RETRY_ATTEMPTS,
+                initial_delay=2.0,
+                max_delay=20.0,
+                http_status_codes=_GEMINI_RETRY_STATUS_CODES,
+            ),
+        ),
     )
     system_prompt = _load_agent_system_prompt("qsg_extractor.md")
     # The schema constrains decoding to QSGExtraction's shape, as the forced
@@ -816,6 +831,7 @@ def _extract_in_parts(
     extractor: Callable[[str, str], QSGExtraction],
     document_text: str,
     source_document: str,
+    max_workers: int = _CHUNK_WORKERS,
 ) -> tuple[QSGExtraction, list[str]]:
     """Run the bounded extractor once per section of a long document and merge.
 
@@ -842,7 +858,7 @@ def _extract_in_parts(
 
     parts = [first]
     failed = 0
-    with ThreadPoolExecutor(max_workers=_CHUNK_WORKERS) as pool:
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
         for future in [pool.submit(run, i) for i in range(1, total)]:
             try:
                 parts.append(future.result())
@@ -870,7 +886,14 @@ def _extract_document(
     if provider and len(document_text) > MAX_LLM_INPUT_CHARS:
         try:
             extraction, warnings = _extract_in_parts(
-                _extractor_for(provider, api_key), document_text, source_document
+                _extractor_for(provider, api_key),
+                document_text,
+                source_document,
+                max_workers=(
+                    _GEMINI_CHUNK_WORKERS
+                    if provider == _PROVIDER_GEMINI
+                    else _CHUNK_WORKERS
+                ),
             )
             return extraction, EXTRACTION_SOURCE_LLM, warnings
         except Exception as exc:
