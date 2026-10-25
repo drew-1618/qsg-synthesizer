@@ -91,6 +91,7 @@ class TestCli:
         # the suite must never pick those up (see tests/test_dotenv_guard.py).
         # It also sets QSG_BIND_HOST; monkeypatch removes it again afterwards.
         monkeypatch.setenv("QSG_BIND_HOST", "")
+        monkeypatch.setenv("QSG_ENV_LOADED", "")
         # Don't depend on whether something (e.g. a dev server) holds port 8000.
         monkeypatch.setattr(cli, "_port_is_free", lambda host, port: True)
         with patch.object(cli, "load_dotenv") as load:
@@ -144,6 +145,7 @@ class TestPortInUse:
     @pytest.fixture(autouse=True)
     def no_dotenv(self, monkeypatch):
         monkeypatch.setenv("QSG_BIND_HOST", "")
+        monkeypatch.setenv("QSG_ENV_LOADED", "")
         with patch.object(cli, "load_dotenv"):
             yield
 

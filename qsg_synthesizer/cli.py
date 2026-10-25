@@ -19,7 +19,7 @@ import webbrowser
 from pathlib import Path
 from typing import Optional, Sequence
 
-from dotenv import find_dotenv, load_dotenv
+from dotenv import load_dotenv
 
 from qsg_synthesizer import autostart
 from qsg_synthesizer.paths import APP_NAME, default_data_dir
@@ -60,6 +60,11 @@ def _parse_args(argv: Optional[Sequence[str]]) -> argparse.Namespace:
         help="settings file to load (default: .env in the current folder)",
     )
     parser.add_argument(
+        "--no-env-file",
+        action="store_true",
+        help="don't load any .env (used by autostart when there was none)",
+    )
+    parser.add_argument(
         "--log-file", type=Path, help="write output here instead of the terminal"
     )
     commands = parser.add_subparsers(dest="command")
@@ -88,10 +93,14 @@ def _redirect_output(log_file: Path) -> None:
 
 
 def _env_file(args: argparse.Namespace) -> Optional[Path]:
+    """--env-file, else a .env in the current folder. Never one from a parent
+    folder, which could be an unrelated project's (e.g. ~/.env)."""
+    if args.no_env_file:
+        return None
     if args.env_file is not None:
         return args.env_file.resolve()
-    found = find_dotenv(usecwd=True)
-    return Path(found).resolve() if found else None
+    here = Path.cwd() / ".env"
+    return here.resolve() if here.is_file() else None
 
 
 def _autostart(args: argparse.Namespace) -> None:
@@ -157,6 +166,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     env_file = _env_file(args)
     if env_file is not None:
         load_dotenv(env_file)
+    os.environ["QSG_ENV_LOADED"] = "1"  # so qsg_synthesizer.main doesn't search
 
     import uvicorn
 
