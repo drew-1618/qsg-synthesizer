@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-__all__ = ["rank_wifi_standard", "parse_speed_mbps"]
+__all__ = ["rank_wifi_standard", "parse_speed_mbps", "capability_key"]
 
 # Higher = newer/faster. 802.11a and 802.11b are roughly contemporaries, so
 # they share a rank.
@@ -32,6 +32,13 @@ _WIFI_LETTERS_RE = re.compile(
 _WIFI_SUFFIX_RE = re.compile(r"[a-z]{1,2}", re.IGNORECASE)
 _WIFI_GENERATION_RE = re.compile(r"wi-?fi\s?(\d)e?\b", re.IGNORECASE)
 _WIFI_GENERATION_TO_LETTERS = {"4": "n", "5": "ac", "6": "ax", "7": "be"}
+
+# Words that change a capability's phrasing but not which feature it names.
+_CAPABILITY_FILLER = frozenset(
+    {"a", "an", "and", "the", "for", "with", "of", "support", "supports", "supported"}
+)
+_NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
+_WIFI_SPELLINGS_RE = re.compile(r"\bwi fi\b")
 
 _SPEED_RE = re.compile(
     r"(\d+(?:\.\d+)?|\.\d+)\s*(gbps|gbit|mbps|mbit|gb|mb)\b", re.IGNORECASE
@@ -70,3 +77,14 @@ def parse_speed_mbps(text: Optional[str]) -> Optional[float]:
     value, unit = match.groups()
     multiplier = _SPEED_UNIT_MULTIPLIER_MBPS[unit[0].lower()]
     return float(value) * multiplier
+
+
+def capability_key(capability: str) -> tuple[str, ...]:
+    """Comparison key for a free-text capability, so the same feature worded
+    differently by each document ("Mesh Wi-Fi support" / "Supports WiFi
+    mesh") isn't reported as unique to both devices. Ignores case,
+    punctuation, word order and filler words."""
+    text = _NON_ALNUM_RE.sub(" ", capability.lower())
+    text = _WIFI_SPELLINGS_RE.sub("wifi", text)
+    words = {word for word in text.split() if word not in _CAPABILITY_FILLER}
+    return tuple(sorted(words))

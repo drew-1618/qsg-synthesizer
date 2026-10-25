@@ -236,12 +236,21 @@ class TestSources:
         history.delete_comparison(shared.id)
         assert len(list(self._sources_dir().glob("*.txt"))) == 2
 
-    def test_recent_texts_survive_cleanup(self):
+    def test_deleting_a_new_record_removes_its_texts_at_once(self):
         record = history.save_comparison(
             _make_battlecard(), sources=[("a", "fresh"), ("b", "fresh too")]
         )
         history.delete_comparison(record.id)
-        assert len(list(self._sources_dir().glob("*.txt"))) == 2
+        assert list(self._sources_dir().glob("*.txt")) == []
+
+    def test_recent_unrelated_texts_survive_cleanup(self):
+        # e.g. a text another process stored but hasn't written a record for yet
+        record = history.save_comparison(
+            _make_battlecard(), sources=[("a", "mine"), ("b", "mine too")]
+        )
+        in_flight = history._store_source("someone else's")
+        history.delete_comparison(record.id)
+        assert [p.stem for p in self._sources_dir().glob("*.txt")] == [in_flight]
 
     def test_pruning_removes_orphaned_texts(self, monkeypatch):
         monkeypatch.setattr(history, "MAX_HISTORY_ENTRIES", 1)
@@ -260,3 +269,17 @@ class TestSources:
 
 def test_forget_all_sources_with_no_history():
     assert history.forget_all_sources() == 0
+
+
+def test_delete_after_a_concurrent_delete_reports_not_found(monkeypatch):
+    record = history.save_comparison(_make_battlecard())
+    path = history.HISTORY_DIR / f"{record.id}.json"
+    real_source_hashes = history._source_hashes
+
+    def delete_meanwhile(history_id):
+        hashes = real_source_hashes(history_id)
+        path.unlink()  # the other request wins the race
+        return hashes
+
+    monkeypatch.setattr(history, "_source_hashes", delete_meanwhile)
+    assert history.delete_comparison(record.id) is False

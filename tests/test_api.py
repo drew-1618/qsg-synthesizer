@@ -480,6 +480,22 @@ class TestPdfUploadErrors:
         assert response.status_code == 400
         assert "could not be read as a PDF" in response.json()["detail"]
 
+    def test_pdf_over_the_page_limit_says_why(self, monkeypatch):
+        from app.tools import pdf_parser
+
+        monkeypatch.setattr(pdf_parser, "MAX_PDF_PAGES", 1)
+        pdf_bytes = (SAMPLE_DOCS_DIR / "device_a_qsg.pdf").read_bytes()
+        response = client.post(
+            "/api/v1/compare-pdfs",
+            files={
+                "device_a_pdf": ("a.pdf", pdf_bytes, "application/pdf"),
+                "device_b_pdf": ("b.pdf", pdf_bytes, "application/pdf"),
+            },
+        )
+        assert response.status_code == 400
+        assert "'a.pdf' has " in response.json()["detail"]
+        assert "the limit is 1" in response.json()["detail"]
+
     def test_encrypted_pdf_returns_400(self):
         import pymupdf
 
@@ -497,6 +513,7 @@ class TestPdfUploadErrors:
             },
         )
         assert response.status_code == 400
+        assert "'a.pdf' is password-protected" in response.json()["detail"]
         assert client.get("/api/v1/history").json()["total"] == 0
 
 
@@ -801,3 +818,22 @@ class TestUnhandledErrors:
         assert response.json() == {"detail": "Internal server error"}
         assert "disk on fire" not in response.text
         assert "Unhandled exception" in caplog.text
+
+
+class TestCrossOrigin:
+    def test_preflight_from_other_origin_is_not_allowed(self):
+        response = client.options(
+            "/api/v1/history",
+            headers={
+                "Origin": "https://evil.example",
+                "Access-Control-Request-Method": "DELETE",
+            },
+        )
+        assert "access-control-allow-origin" not in response.headers
+
+    def test_simple_request_gets_no_cors_header(self):
+        response = client.get(
+            "/api/v1/settings", headers={"Origin": "https://evil.example"}
+        )
+        assert response.status_code == 200
+        assert "access-control-allow-origin" not in response.headers

@@ -2,6 +2,7 @@ import json
 import logging
 from unittest.mock import MagicMock, patch
 
+from app.models.schemas import QSGExtraction
 from app.schemas import DeviceSpec, ProvisioningMethod
 from app.services import orchestrator
 from app.services.orchestrator import (
@@ -121,6 +122,56 @@ class TestExtractViaGemini:
             _, kwargs = mock_client.models.generate_content.call_args
             assert kwargs["model"] == "gemini-2.5-flash-lite"
             assert "some document text" in kwargs["contents"]
+            assert (
+                kwargs["config"].response_json_schema
+                == QSGExtraction.model_json_schema()
+            )
+            retry = mock_genai.Client.call_args.kwargs["http_options"].retry_options
+            assert retry.attempts == 3
+            assert 429 in retry.http_status_codes
+
+    def test_gemini_model_env_overrides_the_default(self):
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "ANTHROPIC_API_KEY": "",
+                    "GEMINI_API_KEY": "k",
+                    "LLM_PROVIDER": "",
+                    "GEMINI_MODEL": " gemini-2.5-flash ",
+                },
+            ),
+            patch("app.services.orchestrator.genai") as mock_genai,
+        ):
+            client = mock_genai.Client.return_value
+            client.models.generate_content.return_value = _fake_gemini_response(
+                _FAKE_EXTRACTION
+            )
+            extract_qsg_fields("some document text", "doc.md")
+            _, kwargs = client.models.generate_content.call_args
+        assert kwargs["model"] == "gemini-2.5-flash"
+
+    def test_truncated_reply_falls_back_to_heuristic(self):
+        from google.genai import types as gemini_types
+
+        with (
+            patch.dict(
+                "os.environ",
+                {"ANTHROPIC_API_KEY": "", "GEMINI_API_KEY": "k", "LLM_PROVIDER": ""},
+            ),
+            patch("app.services.orchestrator.genai") as mock_genai,
+        ):
+            response = _fake_gemini_response(_FAKE_EXTRACTION)
+            response.candidates = [
+                MagicMock(finish_reason=gemini_types.FinishReason.MAX_TOKENS)
+            ]
+            mock_genai.Client.return_value.models.generate_content.return_value = (
+                response
+            )
+            document_text = "# LegacyLink RG-210\n\nSome QSG content."
+            result = extract_qsg_fields(document_text, "doc.md")
+
+        assert result == _heuristic_extract_qsg(document_text, "doc.md")
 
     def test_falls_back_to_heuristic_on_api_error(self, caplog):
         with (
@@ -696,3 +747,98 @@ class TestProvisioningMapping:
             orchestrator._select_primary_provisioning_method([raw.WEB_GUI, raw.TR069])
             == orchestrator.ProvisioningMethod.WEB_GUI
         )
+
+
+def test_reworded_shared_capability_is_not_unique_to_either_device():
+    base = dict(provisioning_method=ProvisioningMethod.WEB_GUI)
+    a = DeviceSpec(model_name="A", capabilities=["Mesh Wi-Fi support"], **base)
+    b = DeviceSpec(model_name="B", capabilities=["supports WiFi mesh", "VoIP"], **base)
+    battlecard = orchestrator.synthesize_battlecard(a, b)
+    assert battlecard.key_advantages_device_a == [orchestrator.NO_ADVANTAGES_MESSAGE]
+    assert battlecard.key_advantages_device_b == ["Unique capability: VoIP"]
+
+
+def test_setup_assessment_reaches_the_comparison_matrix():
+    base = dict(provisioning_method=ProvisioningMethod.WEB_GUI)
+    a = DeviceSpec(
+        model_name="A",
+        step_count=5,
+        setup_difficulty="easy",
+        strengths=["QR onboarding"],
+        gaps=["No default password listed"],
+        **base,
+    )
+    b = DeviceSpec(model_name="B", **base)
+    cm = orchestrator.synthesize_battlecard(a, b).comparison_matrix
+    assert cm["step_count"] == {"device_a": 5, "device_b": None}
+    assert cm["setup_difficulty"] == {"device_a": "easy", "device_b": None}
+    assert cm["setup_strengths"]["device_a"] == ["QR onboarding"]
+    assert cm["setup_gaps"] == {
+        "device_a": ["No default password listed"],
+        "device_b": [],
+    }
+
+
+class TestStepCountFriction:
+    def _spec(self, name, steps):
+        return DeviceSpec(
+            model_name=name,
+            provisioning_method=ProvisioningMethod.TR069,
+            step_count=steps,
+        )
+
+    def test_long_procedures_add_friction_when_both_sides_are_counted(self):
+        card = orchestrator.synthesize_battlecard(
+            self._spec("A", 4), self._spec("B", 20)
+        )
+        assert card.installation_friction_score_device_a == 1
+        assert card.installation_friction_score_device_b == 3
+
+    def test_moderately_long_procedure_adds_one_point(self):
+        card = orchestrator.synthesize_battlecard(
+            self._spec("A", 9), self._spec("B", 8)
+        )
+        assert card.installation_friction_score_device_a == 2
+        assert card.installation_friction_score_device_b == 1
+
+    def test_ignored_when_only_one_side_has_a_count(self):
+        card = orchestrator.synthesize_battlecard(
+            self._spec("A", 30), self._spec("B", None)
+        )
+        assert card.installation_friction_score_device_a == 1
+        assert card.installation_friction_score_device_b == 1
+
+
+class TestExtractedWith:
+    def test_heuristic_read_is_labelled_built_in_parser(self):
+        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "", "GEMINI_API_KEY": ""}):
+            spec = orchestrator.extract_device_spec("# Foo\n\nSome text.", "foo.md")
+        assert spec.extracted_with == "Built-in parser"
+
+    def test_gemini_read_names_the_model(self):
+        with (
+            patch.dict(
+                "os.environ",
+                {"ANTHROPIC_API_KEY": "", "GEMINI_API_KEY": "k", "LLM_PROVIDER": ""},
+            ),
+            patch("app.services.orchestrator.genai") as mock_genai,
+        ):
+            client = mock_genai.Client.return_value
+            client.models.generate_content.return_value = _fake_gemini_response(
+                _FAKE_EXTRACTION
+            )
+            spec = orchestrator.extract_device_spec("some text", "doc.md")
+        assert spec.extracted_with == "Gemini (gemini-2.5-flash-lite)"
+
+    def test_failed_llm_read_is_labelled_built_in_parser(self):
+        with (
+            patch.dict(
+                "os.environ",
+                {"ANTHROPIC_API_KEY": "", "GEMINI_API_KEY": "k", "LLM_PROVIDER": ""},
+            ),
+            patch("app.services.orchestrator.genai") as mock_genai,
+        ):
+            client = mock_genai.Client.return_value
+            client.models.generate_content.side_effect = RuntimeError("down")
+            spec = orchestrator.extract_device_spec("# Foo\n\nSome text.", "doc.md")
+        assert spec.extracted_with == "Built-in parser"

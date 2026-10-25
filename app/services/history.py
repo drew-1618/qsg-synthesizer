@@ -22,6 +22,7 @@ import logging
 import os
 import re
 import shutil
+import threading
 import time
 import uuid
 from datetime import datetime, timezone
@@ -50,8 +51,13 @@ logger = logging.getLogger(__name__)
 
 _ID_PATTERN = re.compile(r"^[0-9a-f]{32}$")
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
-# A text stored this recently may belong to a save still writing its record.
+# A text stored this recently may belong to a save still writing its record
+# (in another process; within this one, `_sources_lock` serializes them).
 _ORPHAN_GRACE_SECONDS = 300
+# Held while a save stores its texts and writes its record, and while a delete
+# removes the texts it freed, so a delete never removes a text that a save in
+# this process is about to reference.
+_sources_lock = threading.Lock()
 
 
 def _sources_dir() -> Path:
@@ -74,21 +80,22 @@ def save_comparison(
 ) -> HistoryRecord:
     """Save a battlecard; `sources` are its (name, text) inputs, A then B."""
     HISTORY_DIR.mkdir(parents=True, exist_ok=True)
-    stored = [
-        SourceDocument(name=name, text_sha256=_store_source(text))
-        for name, text in sources
-    ]
     model_names = battlecard.comparison_matrix.get("model_name", {})
-    record = HistoryRecord(
-        id=uuid.uuid4().hex,
-        created_at=datetime.now(timezone.utc),
-        device_a_name=model_names.get("device_a", "Device A"),
-        device_b_name=model_names.get("device_b", "Device B"),
-        battlecard=battlecard,
-        input_fingerprint=input_fingerprint,
-        sources=stored,
-    )
-    _write_atomic(HISTORY_DIR / f"{record.id}.json", record.model_dump_json())
+    with _sources_lock:
+        stored = [
+            SourceDocument(name=name, text_sha256=_store_source(text))
+            for name, text in sources
+        ]
+        record = HistoryRecord(
+            id=uuid.uuid4().hex,
+            created_at=datetime.now(timezone.utc),
+            device_a_name=model_names.get("device_a", "Device A"),
+            device_b_name=model_names.get("device_b", "Device B"),
+            battlecard=battlecard,
+            input_fingerprint=input_fingerprint,
+            sources=stored,
+        )
+        _write_atomic(HISTORY_DIR / f"{record.id}.json", record.model_dump_json())
     _prune_oldest()
     return record
 
@@ -108,31 +115,43 @@ def _write_atomic(path: Path, content: str) -> None:
 def _prune_oldest() -> None:
     """Keep at most MAX_HISTORY_ENTRIES records, dropping the oldest first."""
     stale = _load_all_summaries()[MAX_HISTORY_ENTRIES:]
+    freed = [h for summary in stale for h in _source_hashes(summary.id)]
     for summary in stale:
         (HISTORY_DIR / f"{summary.id}.json").unlink(missing_ok=True)
     if stale:
-        _remove_orphan_sources()
+        _remove_orphan_sources(freed)
 
 
-def _remove_orphan_sources() -> None:
-    """Delete stored texts no remaining record refers to."""
+def _source_hashes(history_id: str) -> list[str]:
+    """The stored-text hashes a record refers to, or [] if it can't be read."""
+    record = get_comparison(history_id)
+    return [s.text_sha256 for s in record.sources] if record else []
+
+
+def _remove_orphan_sources(freed: Sequence[str] = ()) -> None:
+    """Delete stored texts no remaining record refers to. Texts in `freed`
+    (those of records just deleted) go at once; any other unreferenced text
+    only after the grace period."""
     if not _sources_dir().exists():
         return
-    referenced: set[str] = set()
-    for path in HISTORY_DIR.glob("*.json"):
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-            referenced.update(s["text_sha256"] for s in data.get("sources", []))
-        except (ValueError, KeyError, TypeError, OSError):
-            # Can't tell what an unreadable record uses, so keep everything.
-            return
-    cutoff = time.time() - _ORPHAN_GRACE_SECONDS
-    for path in _sources_dir().glob("*.txt"):
-        try:
-            if path.stem not in referenced and path.stat().st_mtime < cutoff:
-                path.unlink(missing_ok=True)
-        except OSError:
-            continue
+    with _sources_lock:
+        referenced: set[str] = set()
+        for path in HISTORY_DIR.glob("*.json"):
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                referenced.update(s["text_sha256"] for s in data.get("sources", []))
+            except (ValueError, KeyError, TypeError, OSError):
+                # Can't tell what an unreadable record uses, so keep everything.
+                return
+        cutoff = time.time() - _ORPHAN_GRACE_SECONDS
+        for path in _sources_dir().glob("*.txt"):
+            if path.stem in referenced:
+                continue
+            try:
+                if path.stem in freed or path.stat().st_mtime < cutoff:
+                    path.unlink(missing_ok=True)
+            except OSError:
+                continue
 
 
 def load_sources(record: HistoryRecord) -> Optional[list[tuple[str, str]]]:
@@ -289,10 +308,13 @@ def delete_comparison(history_id: str) -> bool:
     if not _ID_PATTERN.match(history_id):
         return False
     path = HISTORY_DIR / f"{history_id}.json"
-    if not path.exists():
+    freed = _source_hashes(history_id)
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        # Never existed, or a concurrent delete got there first.
         return False
-    path.unlink()
-    _remove_orphan_sources()
+    _remove_orphan_sources(freed)
     return True
 
 
@@ -321,7 +343,10 @@ def clear_history() -> int:
         return 0
     deleted = 0
     for path in HISTORY_DIR.glob("*.json"):
-        path.unlink()
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            continue
         deleted += 1
     shutil.rmtree(_sources_dir(), ignore_errors=True)
     return deleted

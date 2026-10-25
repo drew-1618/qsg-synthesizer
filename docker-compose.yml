@@ -4,7 +4,9 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "8000:8000"
+      # Localhost only: auth is off unless APP_USERNAME/APP_PASSWORD are set.
+      # Use "8000:8000" to reach it from other machines, with auth on.
+      - "127.0.0.1:8000:8000"
     env_file:
       - .env
     restart: unless-stopped

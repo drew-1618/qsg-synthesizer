@@ -35,7 +35,6 @@ from fastapi import (
     Request,
     UploadFile,
 )
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -51,7 +50,12 @@ from app.schemas import (
 )
 from app.services import export as export_service
 from app.services import history
-from app.services.auth import require_auth, security, verify_credentials
+from app.services.auth import (
+    auth_enabled,
+    require_auth,
+    security,
+    verify_credentials,
+)
 from app.services.orchestrator import (
     LLMOverride,
     extract_device_specs,
@@ -61,6 +65,7 @@ from app.services.orchestrator import (
 from app.services.rate_limiter import RateLimiter
 from app.tools.document_parser import (
     DocumentParseError,
+    DocumentRejectedError,
     extract_text,
     file_kind,
     is_supported,
@@ -68,6 +73,12 @@ from app.tools.document_parser import (
 
 configure_logging()
 logger = logging.getLogger(__name__)
+if not auth_enabled():
+    logger.warning(
+        "APP_USERNAME/APP_PASSWORD are not set: the dashboard and API are open "
+        "to anyone who can reach this server. Set both before exposing it "
+        "beyond localhost."
+    )
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 STATIC_DIR = BASE_DIR / "app" / "static"
@@ -91,13 +102,9 @@ app = FastAPI(
     version="0.1.0",
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# No CORS middleware on purpose: the dashboard is served from this same
+# origin, and allowing other origins would let any page open in the browser
+# call the API (clear history, spend the server's LLM key) while auth is off.
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
@@ -267,6 +274,8 @@ def _read_document_upload(upload: UploadFile, pdf_only: bool = False) -> str:
         )
     try:
         text = extract_text(filename, contents)
+    except DocumentRejectedError as exc:
+        raise HTTPException(status_code=400, detail=f"'{filename}' {exc}")
     except DocumentParseError:
         logger.warning("Could not parse upload '%s'", filename, exc_info=True)
         raise HTTPException(

@@ -1326,7 +1326,9 @@ function listOrDash(items, { mono = false } = {}) {
     .join("")}</ul>`;
 }
 
-function renderSpecTable(cm, nameA, nameB, perspective) {
+function renderSpecTable(data, nameA, nameB) {
+  const cm = data.comparison_matrix;
+  const perspective = data.perspective;
   document.getElementById("col-header-a").innerHTML = escapeHtml(nameA) + roleTag(perspective, "a");
   document.getElementById("col-header-b").innerHTML = escapeHtml(nameB) + roleTag(perspective, "b");
   const textOrDash = (value) =>
@@ -1352,6 +1354,37 @@ function renderSpecTable(cm, nameA, nameB, perspective) {
       type ? DOCUMENT_TYPE_LABELS[type] || "Other document" : `<span class="text-ink-muted">Not specified</span>`;
     rows.unshift(["Document type", typeCell(types.device_a), typeCell(types.device_b)]);
   }
+  // Which model (or the built-in parser) read each document; older records
+  // only know whether it was an AI read.
+  const readWith = (device) => {
+    const named = (cm.extracted_with || {})[device];
+    if (named) return escapeHtml(named);
+    const source = data[`extraction_source_${device}`];
+    if (source === "llm") return "AI model";
+    if (source === "heuristic") return "Built-in parser";
+    return `<span class="text-ink-muted">Not recorded</span>`;
+  };
+  rows.unshift(["Read with", readWith("device_a"), readWith("device_b")]);
+  // Only an AI read fills these, so show each row only when either side has it.
+  const has = (value) => value != null && value !== "" && !(Array.isArray(value) && value.length === 0);
+  const present = (values) => values && (has(values.device_a) || has(values.device_b));
+  const steps = cm.step_count;
+  if (present(steps)) {
+    const stepCell = (n) => (n != null ? `${n}` : `<span class="text-ink-muted">Not specified</span>`);
+    rows.push(["Setup steps", stepCell(steps.device_a), stepCell(steps.device_b)]);
+  }
+  const difficulty = cm.setup_difficulty;
+  if (present(difficulty)) {
+    const difficultyCell = (value) =>
+      value ? escapeHtml(value.charAt(0).toUpperCase() + value.slice(1)) : `<span class="text-ink-muted">Not specified</span>`;
+    rows.push(["Setup difficulty", difficultyCell(difficulty.device_a), difficultyCell(difficulty.device_b)]);
+  }
+  [
+    ["Setup strengths", cm.setup_strengths],
+    ["Setup gaps", cm.setup_gaps],
+  ].forEach(([label, values]) => {
+    if (present(values)) rows.push([label, listOrDash(values.device_a), listOrDash(values.device_b)]);
+  });
   // Open-ended specs (power, certifications...) come from the documents
   // themselves, so the names are escaped like any other extracted text.
   const specCell = (value) =>
@@ -1452,7 +1485,7 @@ function renderResults(data) {
   const isSales = data.perspective === "sales";
   document.getElementById("talk-track-heading").textContent = isSales ? "Sales talk track" : "Summary";
   document.getElementById("copy-btn").textContent = isSales ? "Copy talk track" : "Copy summary";
-  renderSpecTable(cm, nameA, nameB, data.perspective);
+  renderSpecTable(data, nameA, nameB);
   renderAssessment(data, nameA, nameB);
   renderLedGuide(cm, nameA, nameB, data.perspective);
 

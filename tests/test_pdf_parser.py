@@ -1,12 +1,14 @@
 import io
 import re
 
+import pytest
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import LETTER
 from reportlab.pdfgen.canvas import Canvas
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
 
-from app.tools.pdf_parser import extract_text_from_pdf
+from app.tools import pdf_parser
+from app.tools.pdf_parser import PdfRejectedError, extract_text_from_pdf
 
 
 def _build_pdf(pages: list[list[str]]) -> bytes:
@@ -131,3 +133,15 @@ class TestTableExtraction:
             "PON" in line and "SC/APC fiber" in line and "Connects to ONT" in line
             for line in table_lines
         )
+
+
+class TestPageLimit:
+    def test_pdf_over_the_page_limit_is_rejected(self, monkeypatch):
+        monkeypatch.setattr(pdf_parser, "MAX_PDF_PAGES", 2)
+        pdf_bytes = _build_pdf([["one"], ["two"], ["three"]])
+        with pytest.raises(PdfRejectedError, match="has 3 pages; the limit is 2"):
+            extract_text_from_pdf(pdf_bytes)
+
+    def test_pdf_at_the_page_limit_is_read(self, monkeypatch):
+        monkeypatch.setattr(pdf_parser, "MAX_PDF_PAGES", 2)
+        assert "two" in extract_text_from_pdf(_build_pdf([["one"], ["two"]]))

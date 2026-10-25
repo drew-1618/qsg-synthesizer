@@ -67,6 +67,26 @@ _COMPARISON_ROWS = [
     ("Form Factor", "form_factor"),
     ("Capabilities", "capabilities"),
 ]
+# Only the LLM fills these, so they're shown only when either side has one
+# (never for heuristic-only comparisons or records saved before them).
+_SETUP_ROWS = [
+    ("Setup Steps", "step_count"),
+    ("Setup Difficulty", "setup_difficulty"),
+    ("Setup Strengths", "setup_strengths"),
+    ("Setup Gaps", "setup_gaps"),
+]
+
+
+def _comparison_rows(cm: dict) -> list[tuple[str, str]]:
+    def present(key: str) -> bool:
+        values = cm.get(key) or {}
+        return any(
+            values.get(d) not in (None, "", []) for d in ("device_a", "device_b")
+        )
+
+    # Records saved before extractors were named have no "Read With" row.
+    read_with = [("Read With", "extracted_with")] if present("extracted_with") else []
+    return read_with + _COMPARISON_ROWS + [r for r in _SETUP_ROWS if present(r[1])]
 
 
 def _names(battlecard: BattlecardResponse) -> tuple[str, str]:
@@ -166,7 +186,10 @@ def _matrix_value(cm: dict, key: str, device: str):
         and cm.get("provisioning_methods", {}).get(device) == []
     ):
         return "Not specified"
-    return cm.get(key, {}).get(device)
+    value = cm.get(key, {}).get(device)
+    if key == "setup_difficulty" and value:
+        return str(value).capitalize()
+    return value
 
 
 def _plain_cell(value) -> str:
@@ -204,7 +227,7 @@ def battlecard_to_markdown(battlecard: BattlecardResponse) -> str:
         f"| Attribute | {_md_cell(label_a)} | {_md_cell(label_b)} |",
         "|---|---|---|",
     ]
-    for label, key in _COMPARISON_ROWS:
+    for label, key in _comparison_rows(cm):
         cell_a = _plain_cell(_matrix_value(cm, key, "device_a"))
         cell_b = _plain_cell(_matrix_value(cm, key, "device_b"))
         lines.append(f"| {label} | {cell_a} | {cell_b} |")
@@ -281,7 +304,7 @@ def battlecard_to_pdf_bytes(battlecard: BattlecardResponse) -> bytes:
     ]
 
     rows: list[list] = [["Attribute", label_a, label_b]]
-    for label, key in _COMPARISON_ROWS:
+    for label, key in _comparison_rows(cm):
         cell_a = _cell_flowable(_matrix_value(cm, key, "device_a"))
         cell_b = _cell_flowable(_matrix_value(cm, key, "device_b"))
         rows.append([label, cell_a, cell_b])

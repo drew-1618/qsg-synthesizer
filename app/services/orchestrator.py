@@ -53,7 +53,11 @@ from app.schemas import (
     ProvisioningMethod,
     SpecValue,
 )
-from app.tools.capability_compare import parse_speed_mbps, rank_wifi_standard
+from app.tools.capability_compare import (
+    capability_key,
+    parse_speed_mbps,
+    rank_wifi_standard,
+)
 from app.tools.led_normalizer import LEDState, led_sort_key, normalize_led
 from app.tools.net_validator import InvalidNetworkInput, classify_ip
 from app.tools.port_counter import expand_port_range
@@ -74,6 +78,7 @@ logger = logging.getLogger(__name__)
 
 _AGENTS_DIR = Path(__file__).resolve().parents[2] / ".claude" / "agents"
 _ANTHROPIC_EXTRACTOR_MODEL = "claude-haiku-5-5"
+# Overridable with GEMINI_MODEL, e.g. to trade free-tier quota for quality.
 _GEMINI_EXTRACTOR_MODEL = "gemini-2.5-flash-lite"
 
 # Bounds on the LLM call: untrusted PDF text must not be able to run up an
@@ -89,6 +94,13 @@ _EXTRACTION_TOOL_NAME = "record_qsg_extraction"
 _CHUNK_CHARS = 60_000
 _MAX_CHUNKS = 8
 _CHUNK_WORKERS = 4
+# Gemini's free tier allows few requests per minute, and both devices are
+# read at once, so its sections go out two at a time.
+_GEMINI_CHUNK_WORKERS = 2
+# Gemini's SDK doesn't retry by default (Anthropic's gets max_retries=1).
+# Attempts include the first call; 429s are the free tier's per-minute limit.
+_GEMINI_RETRY_ATTEMPTS = 3
+_GEMINI_RETRY_STATUS_CODES = [429, 500, 502, 503, 504]
 # Open-ended spec rows kept per device, so one verbose datasheet can't flood
 # the comparison table.
 _MAX_SPEC_ROWS = 40
@@ -499,8 +511,36 @@ def _is_auth_error(exc: Exception) -> bool:
     return status == 400 and "api key" in str(exc).lower()
 
 
+def _is_rate_limited(exc: Exception) -> bool:
+    status = getattr(exc, "status_code", None) or getattr(exc, "code", None)
+    return status == 429
+
+
+def _fallback_warning(provider: str, exc: Exception, user_key: bool) -> str:
+    """What to tell the user when an LLM call fails and the built-in parser
+    reads the document instead, so a weaker result never goes unexplained."""
+    if user_key:
+        return _user_key_warning(provider, exc)
+    name = _PROVIDER_NAMES[provider]
+    if _is_rate_limited(exc):
+        return (
+            f"The server's {name} key hit its rate limit, so this document was "
+            "read with the built-in parser. Wait a minute and rerun."
+        )
+    return (
+        f"The {name} request failed, so this document was read with the "
+        "built-in parser. Rerun to try again; if it keeps happening, check the "
+        "server's API key and quota."
+    )
+
+
 def _user_key_warning(provider: str, exc: Exception) -> str:
     name = _PROVIDER_NAMES[provider]
+    if _is_rate_limited(exc):
+        return (
+            f"The {name} key in your settings hit its rate limit, so this "
+            "document was read with the built-in parser. Wait a minute and rerun."
+        )
     if _is_auth_error(exc):
         return (
             f"The {name} key in your settings was rejected, so this document was "
@@ -592,26 +632,48 @@ def _extract_via_anthropic(
     raise ValueError("LLM response contained no tool_use block")
 
 
+def _gemini_model() -> str:
+    return os.environ.get("GEMINI_MODEL", "").strip() or _GEMINI_EXTRACTOR_MODEL
+
+
 def _extract_via_gemini(
     document_text: str, source_document: str, api_key: Optional[str] = None
 ) -> QSGExtraction:
     client = genai.Client(
         api_key=api_key or os.environ["GEMINI_API_KEY"],
-        http_options=gemini_types.HttpOptions(timeout=int(_LLM_TIMEOUT_SECONDS * 1000)),
+        http_options=gemini_types.HttpOptions(
+            timeout=int(_LLM_TIMEOUT_SECONDS * 1000),
+            retry_options=gemini_types.HttpRetryOptions(
+                attempts=_GEMINI_RETRY_ATTEMPTS,
+                initial_delay=2.0,
+                max_delay=20.0,
+                http_status_codes=_GEMINI_RETRY_STATUS_CODES,
+            ),
+        ),
     )
     system_prompt = _load_agent_system_prompt("qsg_extractor.md")
+    # The schema constrains decoding to QSGExtraction's shape, as the forced
+    # tool call does for Anthropic; JSON mode alone only promises valid JSON.
     response = client.models.generate_content(
-        model=_GEMINI_EXTRACTOR_MODEL,
+        model=_gemini_model(),
         contents=_llm_user_content(document_text, source_document),
         config=gemini_types.GenerateContentConfig(
             system_instruction=system_prompt,
             response_mime_type="application/json",
+            response_json_schema=QSGExtraction.model_json_schema(),
             max_output_tokens=_LLM_MAX_OUTPUT_TOKENS,
             automatic_function_calling=gemini_types.AutomaticFunctionCallingConfig(
                 disable=True
             ),
         ),
     )
+    candidates = getattr(response, "candidates", None) or []
+    if (
+        candidates
+        and getattr(candidates[0], "finish_reason", None)
+        == gemini_types.FinishReason.MAX_TOKENS
+    ):
+        raise ValueError("LLM output truncated at max_output_tokens")
     if not response.text:
         raise ValueError("Gemini response contained no text")
     return _validate_extraction(_parse_json_payload(response.text))
@@ -657,8 +719,7 @@ def _extract_single(
                 source_document,
                 exc_info=True,
             )
-            if api_key:
-                warnings.append(_user_key_warning(provider, exc))
+            warnings.append(_fallback_warning(provider, exc, user_key=bool(api_key)))
     else:
         logger.debug(
             "No LLM provider configured; using heuristic parser for %r",
@@ -779,6 +840,7 @@ def _extract_in_parts(
     extractor: Callable[[str, str], QSGExtraction],
     document_text: str,
     source_document: str,
+    max_workers: int = _CHUNK_WORKERS,
 ) -> tuple[QSGExtraction, list[str]]:
     """Run the bounded extractor once per section of a long document and merge.
 
@@ -805,7 +867,7 @@ def _extract_in_parts(
 
     parts = [first]
     failed = 0
-    with ThreadPoolExecutor(max_workers=_CHUNK_WORKERS) as pool:
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
         for future in [pool.submit(run, i) for i in range(1, total)]:
             try:
                 parts.append(future.result())
@@ -833,7 +895,14 @@ def _extract_document(
     if provider and len(document_text) > MAX_LLM_INPUT_CHARS:
         try:
             extraction, warnings = _extract_in_parts(
-                _extractor_for(provider, api_key), document_text, source_document
+                _extractor_for(provider, api_key),
+                document_text,
+                source_document,
+                max_workers=(
+                    _GEMINI_CHUNK_WORKERS
+                    if provider == _PROVIDER_GEMINI
+                    else _CHUNK_WORKERS
+                ),
             )
             return extraction, EXTRACTION_SOURCE_LLM, warnings
         except Exception as exc:
@@ -847,7 +916,7 @@ def _extract_document(
             return (
                 _heuristic_extract_qsg(document_text, source_document),
                 EXTRACTION_SOURCE_HEURISTIC,
-                [_user_key_warning(provider, exc)] if api_key else [],
+                [_fallback_warning(provider, exc, user_key=bool(api_key))],
             )
     return _extract_single(document_text, source_document, llm)
 
@@ -943,6 +1012,20 @@ def _normalize_specs(specs: list[SpecItem]) -> list[SpecValue]:
     ]
 
 
+BUILT_IN_PARSER_LABEL = "Built-in parser"
+
+
+def _extracted_with(source: str, llm: Optional[LLMOverride]) -> str:
+    if source != EXTRACTION_SOURCE_LLM:
+        return BUILT_IN_PARSER_LABEL
+    provider, _ = _resolve_llm(llm)
+    if provider == _PROVIDER_GEMINI:
+        return f"Gemini ({_gemini_model()})"
+    if provider == _PROVIDER_ANTHROPIC:
+        return f"Anthropic ({_ANTHROPIC_EXTRACTOR_MODEL})"
+    return "AI model"
+
+
 def extract_device_spec(
     document_text: str, source_document: str, llm: Optional[LLMOverride] = None
 ) -> DeviceSpec:
@@ -953,6 +1036,7 @@ def extract_device_spec(
     )
     spec = _normalize_to_device_spec(extraction)
     spec.extraction_source = source
+    spec.extracted_with = _extracted_with(source, llm)
     spec.extraction_warnings = warnings
     return spec
 
@@ -987,13 +1071,26 @@ NO_ADVANTAGES_MESSAGE = (
 )
 
 
-def _compute_friction_score(spec: DeviceSpec) -> int:
+# Setup procedures longer than these add 1 and 2 points of friction.
+_LONG_SETUP_STEPS = 8
+_VERY_LONG_SETUP_STEPS = 15
+
+
+def _compute_friction_score(spec: DeviceSpec, count_steps: bool = False) -> int:
+    """`count_steps` adds the procedure length; the caller sets it only when
+    both devices have a step count, so one side's missing count (the
+    heuristic parser never sets one) can't make the other look worse."""
     score = 1
     score += min(len(spec.required_tools), 4)
     if spec.provisioning_method not in _REMOTE_PROVISIONING_METHODS:
         score += 3
     if spec.provisioning_method == ProvisioningMethod.CONSOLE:
         score += 2
+    if count_steps and spec.step_count is not None:
+        if spec.step_count > _VERY_LONG_SETUP_STEPS:
+            score += 2
+        elif spec.step_count > _LONG_SETUP_STEPS:
+            score += 1
     return max(1, min(10, score))
 
 
@@ -1002,6 +1099,10 @@ def _build_comparison_matrix(device_a: DeviceSpec, device_b: DeviceSpec) -> dict
         "model_name": {
             "device_a": device_a.model_name,
             "device_b": device_b.model_name,
+        },
+        "extracted_with": {
+            "device_a": device_a.extracted_with,
+            "device_b": device_b.extracted_with,
         },
         "default_ip": {
             "device_a": device_a.default_ip,
@@ -1048,6 +1149,20 @@ def _build_comparison_matrix(device_a: DeviceSpec, device_b: DeviceSpec) -> dict
             "device_a": device_a.document_type,
             "device_b": device_b.document_type,
         },
+        # The LLM's read of the setup; None/[] for heuristic extraction.
+        "step_count": {
+            "device_a": device_a.step_count,
+            "device_b": device_b.step_count,
+        },
+        "setup_difficulty": {
+            "device_a": device_a.setup_difficulty,
+            "device_b": device_b.setup_difficulty,
+        },
+        "setup_strengths": {
+            "device_a": device_a.strengths,
+            "device_b": device_b.strengths,
+        },
+        "setup_gaps": {"device_a": device_a.gaps, "device_b": device_b.gaps},
         "extra_specs": _merge_spec_rows(device_a, device_b),
     }
 
@@ -1142,8 +1257,10 @@ def _build_key_advantages(
                 f"{device_a.wan_speed})."
             )
 
-    caps_a_only = [c for c in device_a.capabilities if c not in device_b.capabilities]
-    caps_b_only = [c for c in device_b.capabilities if c not in device_a.capabilities]
+    keys_a = {capability_key(c) for c in device_a.capabilities}
+    keys_b = {capability_key(c) for c in device_b.capabilities}
+    caps_a_only = [c for c in device_a.capabilities if capability_key(c) not in keys_b]
+    caps_b_only = [c for c in device_b.capabilities if capability_key(c) not in keys_a]
     advantages_a.extend(f"Unique capability: {c}" for c in caps_a_only)
     advantages_b.extend(f"Unique capability: {c}" for c in caps_b_only)
 
@@ -1286,8 +1403,11 @@ def synthesize_battlecard(
     score_a: Optional[int] = None
     score_b: Optional[int] = None
     if _is_install_document(device_a) and _is_install_document(device_b):
-        score_a = _compute_friction_score(device_a)
-        score_b = _compute_friction_score(device_b)
+        count_steps = (
+            device_a.step_count is not None and device_b.step_count is not None
+        )
+        score_a = _compute_friction_score(device_a, count_steps)
+        score_b = _compute_friction_score(device_b, count_steps)
         talk_track = _build_sales_talk_track(
             device_a, score_a, device_b, score_b, perspective, advantages_a
         )

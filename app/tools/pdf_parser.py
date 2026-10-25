@@ -15,6 +15,15 @@ import pymupdf4llm
 
 from app.tools.text_cleaning import clean_text
 
+# Quick start guides and datasheets run to a few dozen pages; layout analysis
+# of a huge PDF would tie up a worker thread for minutes.
+MAX_PDF_PAGES = 200
+
+
+class PdfRejectedError(ValueError):
+    """A readable PDF the app won't process; the message is user-facing and
+    completes a sentence starting with the file name."""
+
 
 def extract_text_from_pdf(pdf_bytes: bytes) -> str:
     """Extract cleaned Markdown from a PDF's raw bytes.
@@ -27,6 +36,16 @@ def extract_text_from_pdf(pdf_bytes: bytes) -> str:
     """
     document = pymupdf.open(stream=pdf_bytes, filetype="pdf")
     try:
+        if document.needs_pass:
+            raise PdfRejectedError(
+                "is password-protected. Save a copy without the password and "
+                "upload that instead."
+            )
+        if document.page_count > MAX_PDF_PAGES:
+            raise PdfRejectedError(
+                f"has {document.page_count} pages; the limit is {MAX_PDF_PAGES}. "
+                "Upload just the setup or specifications section."
+            )
         text = pymupdf4llm.to_markdown(document)
     finally:
         document.close()

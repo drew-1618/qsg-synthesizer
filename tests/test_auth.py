@@ -11,6 +11,7 @@ import logging
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.services.auth import auth_enabled
 
 client = TestClient(app)
 
@@ -99,3 +100,13 @@ def test_api_docs_open_by_default_without_configured_credentials(monkeypatch):
 
     assert client.get("/docs").status_code == 200
     assert client.get("/openapi.json").status_code == 200
+
+
+def test_auth_enabled_reflects_configured_credentials(monkeypatch):
+    monkeypatch.delenv("APP_USERNAME", raising=False)
+    monkeypatch.delenv("APP_PASSWORD", raising=False)
+    assert not auth_enabled()
+    monkeypatch.setenv("APP_USERNAME", "admin")
+    assert not auth_enabled()
+    monkeypatch.setenv("APP_PASSWORD", "s3cret")
+    assert auth_enabled()
