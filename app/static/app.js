@@ -724,7 +724,9 @@ function setLoading(isLoading) {
   status.innerHTML = `
     <span class="flex items-start gap-2">
       <span class="led-dot led-dot--amber led-dot--blinking mt-1.5" aria-hidden="true"></span>
-      <span id="compare-status-text" class="flex-1">Comparing Device A and Device B…</span>
+      <span id="compare-status-text" class="flex-1">${
+        state.mode === "sales" ? "Comparing your device with the competitor…" : "Comparing Device A and Device B…"
+      }</span>
       <span id="compare-elapsed" class="shrink-0 whitespace-nowrap font-mono tabular-nums" aria-hidden="true">0&nbsp;s</span>
     </span>`;
   const started = Date.now();
