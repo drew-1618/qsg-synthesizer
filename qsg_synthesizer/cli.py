@@ -1,8 +1,9 @@
 """`qsg-synthesizer` command: start the dashboard on this computer.
 
 Installed by `uv tool install` / `pipx install` (see README). Loads a `.env`
-from the current directory if there is one, starts uvicorn and opens the
-dashboard in the default browser.
+from the current directory if there is one (or --env-file), starts uvicorn
+and opens the dashboard in the default browser. `qsg-synthesizer autostart
+on|off|status` manages starting it at login (see autostart.py).
 """
 
 from __future__ import annotations
@@ -15,14 +16,18 @@ import sys
 import threading
 import urllib.request
 import webbrowser
+from pathlib import Path
 from typing import Optional, Sequence
 
 from dotenv import find_dotenv, load_dotenv
 
-from qsg_synthesizer.paths import APP_NAME
+from qsg_synthesizer import autostart
+from qsg_synthesizer.paths import APP_NAME, default_data_dir
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8000
+# Rotated to .1 at startup once it passes this size.
+_MAX_LOG_BYTES = 5 * 1024 * 1024
 
 
 def _parse_args(argv: Optional[Sequence[str]]) -> argparse.Namespace:
@@ -44,7 +49,63 @@ def _parse_args(argv: Optional[Sequence[str]]) -> argparse.Namespace:
     parser.add_argument(
         "--no-browser", action="store_true", help="don't open the dashboard"
     )
+    parser.add_argument(
+        "--env-file",
+        type=Path,
+        help="settings file to load (default: .env in the current folder)",
+    )
+    parser.add_argument(
+        "--log-file", type=Path, help="write output here instead of the terminal"
+    )
+    commands = parser.add_subparsers(dest="command")
+    start_at_login = commands.add_parser(
+        "autostart",
+        help="start QSG Synthesizer whenever you log in",
+        description=(
+            "Start QSG Synthesizer whenever you log in, so the installed app "
+            "always finds it running. Uses the --port and .env in effect now."
+        ),
+    )
+    start_at_login.add_argument("action", choices=("on", "off", "status"))
     return parser.parse_args(argv)
+
+
+def default_log_file() -> Path:
+    return default_data_dir() / f"{APP_NAME}.log"
+
+
+def _redirect_output(log_file: Path) -> None:
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    if log_file.exists() and log_file.stat().st_size > _MAX_LOG_BYTES:
+        log_file.replace(log_file.with_name(log_file.name + ".1"))
+    stream = open(log_file, "a", encoding="utf-8", buffering=1)
+    sys.stdout = sys.stderr = stream
+
+
+def _env_file(args: argparse.Namespace) -> Optional[Path]:
+    if args.env_file is not None:
+        return args.env_file.resolve()
+    found = find_dotenv(usecwd=True)
+    return Path(found).resolve() if found else None
+
+
+def _autostart(args: argparse.Namespace) -> None:
+    try:
+        if args.action == "on":
+            env_file = _env_file(args)
+            print(autostart.enable(args.port, default_log_file(), env_file))
+            if env_file:
+                print(f"It reads its settings from {env_file}.")
+            print(f"Output goes to {default_log_file()}.")
+        elif args.action == "off":
+            print(autostart.disable())
+        else:
+            state = "on" if autostart.is_enabled() else "off"
+            url = f"http://127.0.0.1:{args.port}/"
+            running = "running" if _already_running(url) else "not running"
+            print(f"Autostart is {state}; the app is {running} at {url}")
+    except autostart.AutostartError as exc:
+        sys.exit(str(exc))
 
 
 def _port_is_free(host: str, port: int) -> bool:
@@ -71,8 +132,15 @@ def _already_running(url: str) -> bool:
 
 def main(argv: Optional[Sequence[str]] = None) -> None:
     args = _parse_args(argv)
+    if args.command == "autostart":
+        _autostart(args)
+        return
+    if args.log_file is not None:
+        _redirect_output(args.log_file)
     # Before importing the app: it reads HISTORY_DIR and the keys at import.
-    load_dotenv(find_dotenv(usecwd=True))
+    env_file = _env_file(args)
+    if env_file is not None:
+        load_dotenv(env_file)
 
     import uvicorn
 
