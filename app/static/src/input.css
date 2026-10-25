@@ -56,6 +56,7 @@
   --color-danger: #b3261e;
   --color-danger-hover: #8f1d17;
   --color-danger-text: #b3261e;
+  --color-on-danger: #ffffff;
   --color-scrim: rgb(28 33 39 / 0.4);
   --color-led-green: #2e9e5b;
   --color-led-amber: #e0a100;
@@ -96,6 +97,7 @@
     --color-danger: #c93c34;
     --color-danger-hover: #a8312b;
     --color-danger-text: #ef7b73;
+    --color-on-danger: #ffffff;
     --color-scrim: rgb(0 0 0 / 0.6);
     --color-led-off: #3b454e;
   }
@@ -170,6 +172,42 @@
       animation: confirmPop 0.15s ease-out;
     }
   }
+  /* History drawer slides in from the right and back out on close. Closing
+     needs `overlay`/`display` to transition discretely; browsers without it
+     still slide in and simply close without the exit. */
+  @media (prefers-reduced-motion: no-preference) {
+    .drawer-slide,
+    .drawer-slide::backdrop {
+      transition:
+        translate 0.2s ease-in,
+        opacity 0.2s ease-in,
+        overlay 0.2s allow-discrete,
+        display 0.2s allow-discrete;
+    }
+    .drawer-slide {
+      translate: 100% 0;
+    }
+    .drawer-slide::backdrop {
+      opacity: 0;
+    }
+    .drawer-slide[open] {
+      translate: 0 0;
+      transition-timing-function: ease-out;
+    }
+    .drawer-slide[open]::backdrop {
+      opacity: 1;
+      transition-timing-function: ease-out;
+    }
+    @starting-style {
+      .drawer-slide[open] {
+        translate: 100% 0;
+      }
+      .drawer-slide[open]::backdrop {
+        opacity: 0;
+      }
+    }
+  }
+
   @keyframes confirmPop {
     from {
       opacity: 0;
