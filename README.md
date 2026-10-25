@@ -42,6 +42,10 @@ as Markdown or PDF.
   and API behind HTTP Basic Auth; `/healthz` always stays open for health
   checks. Neither is set by default, so local dev and the test suite run
   open.)
+- `FORWARDED_ALLOW_IPS` (optional — read by uvicorn itself. Behind a reverse
+  proxy, set it to the proxy's IP so the per-client rate limits see real client
+  addresses instead of counting every request against the proxy. Defaults to
+  `127.0.0.1`.)
 - `LOG_LEVEL` (optional — defaults to `INFO`; set to `DEBUG` for extra detail
   like which extraction path, LLM or heuristic, each request took)
 - `HISTORY_DIR` (optional — defaults to `<repo>/data/history`; point a second
