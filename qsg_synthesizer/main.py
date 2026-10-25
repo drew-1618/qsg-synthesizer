@@ -375,7 +375,7 @@ def _llm_override(
 
 @router.get("/api/v1/settings")
 def get_settings() -> dict:
-    """What "Server default" means in the dashboard's settings, and the models
+    """What "Default" means in the dashboard's settings, and the models
     each provider offers (with the one used when none is picked)."""
     return {
         "server_provider": server_llm_provider(),

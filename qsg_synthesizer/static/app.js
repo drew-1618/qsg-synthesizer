@@ -143,7 +143,7 @@ function syncModelSelect(provider) {
   // A saved model the server no longer offers falls back to its default.
   if (!ids.includes(llmSettings.models[provider])) llmSettings.models[provider] = "";
   settingsModelSelect.innerHTML = [
-    `<option value="">Server default (${escapeHtml(options.default)})</option>`,
+    `<option value="">Default (${escapeHtml(options.default)})</option>`,
     ...options.choices.map(
       (choice) => `<option value="${escapeHtml(choice.id)}">${escapeHtml(choice.label)}</option>`
     ),
