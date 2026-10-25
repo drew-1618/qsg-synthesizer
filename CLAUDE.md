@@ -15,6 +15,7 @@ A containerized FastAPI service running a multi-agent pipeline that ingests tele
 npm install && npm run build:css                 # only after changing Tailwind classes in index.html/app.js
 python sample_docs/generate_samples.py           # regenerate the sample QSG PDFs
 docker compose up --build                        # .env optional (cp .env.example .env for server keys)
+uv tool install . && qsg-synthesizer             # installed-package path (app/cli.py), as users run it
 ```
 
 ## Repository Standards
@@ -94,6 +95,11 @@ Things that span multiple files:
   errors show inline in `#export-dialog`; keep new export formats going through both helpers.
 - Two schema layers with two provisioning enums: the raw 6-value `RawProvisioningMethod` in
   `app/models/schemas.py` and the 4-value API `ProvisioningMethod` in `app/schemas.py`.
+- Paths go through `app/paths.py`: the repo's `.claude/agents` and `sample_docs` when present
+  (checkout, Docker), else copies the wheel bundles into `app/_bundled/` (`force-include` in
+  `pyproject.toml`). History defaults to `<repo>/data/history` in a checkout, the per-user data
+  folder for an installed package, and the Dockerfile sets `HISTORY_DIR`. `pyproject.toml`
+  dependencies must match `requirements.txt` (enforced by `tests/test_packaging.py`).
 - `.claude/agents/*.md` are read at runtime, so the Dockerfile copies `.claude/`, and
   `.dockerignore` must not exclude `*.md` there. `sample_docs/*.pdf` likewise ship in the
   image for `GET /api/v1/samples`, and the tests read `sample_docs/*.md|pdf`.

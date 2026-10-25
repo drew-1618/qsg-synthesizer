@@ -58,6 +58,35 @@ jobs:
       - name: Run tests
         run: pytest -q
 
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build the wheel
+        run: pip install build==1.2.2 && python -m build --wheel
+
+      - name: Install it in a clean environment and run the command
+        run: |
+          python -m venv /tmp/qsg
+          /tmp/qsg/bin/pip install dist/*.whl
+          cd /tmp
+          XDG_DATA_HOME=/tmp/qsg-data /tmp/qsg/bin/qsg-synthesizer --port 8001 --no-browser &
+          for i in $(seq 1 15); do
+            curl -fs http://localhost:8001/healthz && break
+            sleep 2
+          done
+          curl -fs http://localhost:8001/api/v1/samples > /dev/null
+          /tmp/qsg/bin/python -c "from app.services.orchestrator import _load_agent_system_prompt as p; assert p('qsg_extractor.md')"
+          curl -fs -X POST http://localhost:8001/api/v1/compare \
+            -F device_a_file=@$GITHUB_WORKSPACE/sample_docs/device_a_qsg.md \
+            -F device_b_file=@$GITHUB_WORKSPACE/sample_docs/device_b_qsg.md > /dev/null
+          ls /tmp/qsg-data/qsg-synthesizer/history/*.json
+
   docker:
     runs-on: ubuntu-latest
     steps:

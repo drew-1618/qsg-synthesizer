@@ -20,7 +20,6 @@ if "PYTEST_VERSION" not in os.environ:
 import base64
 import hashlib
 import logging
-from pathlib import Path
 from typing import Literal, Optional
 
 from fastapi import (
@@ -40,6 +39,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from app.logging_config import configure_logging
+from app.paths import PACKAGE_DIR, resource_dir
 from app.schemas import (
     CompareResponse,
     DeviceSpec,
@@ -75,16 +75,18 @@ from app.tools.document_parser import (
 
 configure_logging()
 logger = logging.getLogger(__name__)
-if not auth_enabled():
+# Set by the `qsg-synthesizer` command; unknown (plain uvicorn, Docker) counts
+# as reachable from elsewhere.
+_LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+if not auth_enabled() and os.environ.get("QSG_BIND_HOST") not in _LOOPBACK_HOSTS:
     logger.warning(
         "APP_USERNAME/APP_PASSWORD are not set: the dashboard and API are open "
         "to anyone who can reach this server. Set both before exposing it "
         "beyond localhost."
     )
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-STATIC_DIR = BASE_DIR / "app" / "static"
-SAMPLE_DOCS_DIR = BASE_DIR / "sample_docs"
+STATIC_DIR = PACKAGE_DIR / "static"
+SAMPLE_DOCS_DIR = resource_dir("sample_docs")
 
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20MB per uploaded document
 MIN_TEXT_CHARS = 50  # below this (ignoring whitespace) there is nothing to extract from

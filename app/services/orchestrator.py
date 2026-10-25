@@ -31,7 +31,6 @@ import re
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from functools import partial
-from pathlib import Path
 from typing import Callable, Hashable, Iterable, Literal, Optional, TypeVar
 
 from pydantic import ValidationError
@@ -45,6 +44,7 @@ from app.models.schemas import (
     RawProvisioningMethod,
     SpecItem,
 )
+from app.paths import resource_dir
 from app.schemas import (
     BattlecardResponse,
     DeviceSpec,
@@ -76,7 +76,7 @@ except ImportError:  # pragma: no cover - exercised only when package absent
 
 logger = logging.getLogger(__name__)
 
-_AGENTS_DIR = Path(__file__).resolve().parents[2] / ".claude" / "agents"
+_AGENTS_DIR = resource_dir("agents")
 _ANTHROPIC_EXTRACTOR_MODEL = "claude-haiku-5-5"
 # Overridable with GEMINI_MODEL, e.g. to trade free-tier quota for quality.
 _GEMINI_EXTRACTOR_MODEL = "gemini-2.5-flash-lite"

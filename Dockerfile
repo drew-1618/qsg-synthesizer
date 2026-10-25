@@ -26,6 +26,7 @@ COPY .claude ./.claude
 COPY sample_docs ./sample_docs
 
 ENV PATH=/home/appuser/.local/bin:$PATH \
+    HISTORY_DIR=/app/data/history \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 

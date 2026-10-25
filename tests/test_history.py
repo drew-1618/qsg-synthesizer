@@ -62,13 +62,13 @@ class TestResolveHistoryDir:
             Path("/repo"), "/tmp/qsg-scratch-history"
         ) == Path("/tmp/qsg-scratch-history")
 
-    def test_falls_back_to_base_dir_when_unset(self):
-        assert history._resolve_history_dir(Path("/repo"), None) == Path(
+    def test_falls_back_to_data_dir_when_unset(self):
+        assert history._resolve_history_dir(Path("/repo/data"), None) == Path(
             "/repo/data/history"
         )
 
-    def test_falls_back_to_base_dir_when_empty_string(self):
-        assert history._resolve_history_dir(Path("/repo"), "") == Path(
+    def test_falls_back_to_data_dir_when_empty_string(self):
+        assert history._resolve_history_dir(Path("/repo/data"), "") == Path(
             "/repo/data/history"
         )
 
