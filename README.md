@@ -9,6 +9,50 @@ risks, competitive advantages, and a competitive sales talk track. Every
 synthesized battlecard is saved to a browsable history and can be exported
 as Markdown or PDF.
 
+## Run it yourself
+
+Everything runs on your own computer: there's no account, and your documents
+and history stay on your machine. You need either Docker, or Python 3.11+ with
+[uv](https://docs.astral.sh/uv/) (or pipx).
+
+**With Docker**
+
+```bash
+docker run -d --name qsg-synthesizer -p 127.0.0.1:8000:8000 \
+  -v qsg-history:/app/data/history ghcr.io/drew-1618/qsg-synthesizer:latest
+```
+
+Then open <http://localhost:8000>. History is kept in the `qsg-history` volume.
+
+**Without Docker**
+
+```bash
+uv tool install git+https://github.com/drew-1618/qsg-synthesizer
+qsg-synthesizer
+```
+
+(or `pipx install git+https://github.com/drew-1618/qsg-synthesizer`). The
+command opens the dashboard in your browser; `qsg-synthesizer --help` lists the
+port and other options. History is saved in your user data folder
+(`~/.local/share/qsg-synthesizer` on Linux, `~/Library/Application Support/qsg-synthesizer`
+on macOS, `%LOCALAPPDATA%\qsg-synthesizer` on Windows), and the command prints
+the exact path at startup. To update, run the install command again with
+`--reinstall` (`uv`) or `--force` (`pipx`).
+
+**Reading documents with AI (optional)**
+
+Out of the box, documents are read by a built-in parser and nothing leaves your
+computer. It works best on guides laid out like the samples. For anything else,
+open **Settings** in the dashboard, pick Anthropic or Google Gemini, paste your
+API key and choose a model. The key stays in your browser and is sent only to
+that provider, along with the text of the documents you compare.
+
+To set keys once for every browser instead, put them in a `.env` file (see
+[`.env.example`](.env.example)): in the folder you run `qsg-synthesizer` from,
+or pass it to Docker with `--env-file .env`.
+
+Licensed under the [MIT License](LICENSE).
+
 ## Architecture
 
 1. **Extraction** (one document in, structured facts out) — delegated to the

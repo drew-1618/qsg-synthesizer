@@ -7,6 +7,8 @@ name = "qsg-synthesizer"
 version = "0.1.0"
 description = "Compare telecom quick start guides and datasheets into a usability battlecard."
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 # Same pins as requirements.txt (tests/test_packaging.py keeps them in sync);
 # exact pins are fine because `uv tool install` / `pipx` give the app its own
