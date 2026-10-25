@@ -61,7 +61,8 @@ applyTheme(document.documentElement.dataset.theme === "dark" ? "dark" : "light")
 // The provider choice is remembered in localStorage. Keys go to localStorage
 // only when "Remember keys" is on, otherwise sessionStorage, so they clear
 // with the tab. They are sent as headers with compare requests and never
-// stored on the server.
+// stored on the server. The model picked per provider ("" = the server's
+// default for it) is remembered with the provider choice.
 const LLM_STORAGE_KEY = "qsg-llm";
 const LLM_KEYS_STORAGE_KEY = "qsg-llm-keys";
 const LLM_PROVIDERS = ["server", "anthropic", "gemini", "heuristic"];
@@ -81,10 +82,12 @@ function loadLlmSettings() {
   const remember = saved.remember === true;
   const keys = readStored(remember ? localStorage : sessionStorage, LLM_KEYS_STORAGE_KEY);
   const asKey = (value) => (typeof value === "string" ? value : "");
+  const models = saved.models && typeof saved.models === "object" ? saved.models : {};
   return {
     provider: LLM_PROVIDERS.includes(saved.provider) ? saved.provider : "server",
     remember,
     keys: { anthropic: asKey(keys.anthropic), gemini: asKey(keys.gemini) },
+    models: { anthropic: asKey(models.anthropic), gemini: asKey(models.gemini) },
   };
 }
 
@@ -94,7 +97,11 @@ function saveLlmSettings() {
   try {
     localStorage.setItem(
       LLM_STORAGE_KEY,
-      JSON.stringify({ provider: llmSettings.provider, remember: llmSettings.remember })
+      JSON.stringify({
+        provider: llmSettings.provider,
+        remember: llmSettings.remember,
+        models: llmSettings.models,
+      })
     );
     const [keep, drop] = llmSettings.remember ? [localStorage, sessionStorage] : [sessionStorage, localStorage];
     keep.setItem(LLM_KEYS_STORAGE_KEY, JSON.stringify(llmSettings.keys));
@@ -111,13 +118,36 @@ function llmHeaders() {
   const headers = { "X-LLM-Provider": provider };
   const key = llmSettings.keys[provider];
   if (key) headers["X-LLM-API-Key"] = key;
+  const model = llmSettings.models[provider];
+  if (model) headers["X-LLM-Model"] = model;
   return headers;
 }
 
 const settingsDialog = document.getElementById("settings-dialog");
 const settingsKeyInput = document.getElementById("settings-key");
 const settingsKeyReveal = document.getElementById("settings-key-reveal");
-let serverProviderLoaded = false;
+const settingsModelSelect = document.getElementById("settings-model");
+let serverSettingsLoaded = false;
+// Per provider: { default, choices: [{ id, label }] }, from GET /api/v1/settings.
+let serverModels = {};
+
+// The picker offers the server's list; without it (not loaded yet, or the
+// request failed) it stays hidden and the server's default model is used.
+function syncModelSelect(provider) {
+  const options = serverModels[provider];
+  document.getElementById("settings-model-row").classList.toggle("hidden", !options);
+  if (!options) return;
+  const ids = options.choices.map((choice) => choice.id);
+  // A saved model the server no longer offers falls back to its default.
+  if (!ids.includes(llmSettings.models[provider])) llmSettings.models[provider] = "";
+  settingsModelSelect.innerHTML = [
+    `<option value="">Server default (${escapeHtml(options.default)})</option>`,
+    ...options.choices.map(
+      (choice) => `<option value="${escapeHtml(choice.id)}">${escapeHtml(choice.label)}</option>`
+    ),
+  ].join("");
+  settingsModelSelect.value = llmSettings.models[provider];
+}
 
 function syncSettingsDialog() {
   const theme = storedTheme() || "system";
@@ -130,6 +160,7 @@ function syncSettingsDialog() {
   const name = LLM_PROVIDER_NAMES[llmSettings.provider];
   document.getElementById("settings-key-section").classList.toggle("hidden", !name);
   if (!name) return;
+  syncModelSelect(llmSettings.provider);
   document.getElementById("settings-key-label").textContent = `${name} API key`;
   settingsKeyInput.value = llmSettings.keys[llmSettings.provider];
   document.getElementById("settings-key-hint").textContent =
@@ -137,17 +168,21 @@ function syncSettingsDialog() {
   document.getElementById("settings-remember").checked = llmSettings.remember;
 }
 
-async function loadServerProvider() {
-  if (serverProviderLoaded) return;
+async function loadServerSettings() {
+  if (serverSettingsLoaded) return;
   try {
     const res = await fetch("/api/v1/settings");
     if (!res.ok) return;
-    const { server_provider: provider } = await res.json();
+    const { server_provider: provider, models } = await res.json();
     document.getElementById("settings-server-hint").textContent =
       `(${LLM_PROVIDER_NAMES[provider] || "built-in parser"})`;
-    serverProviderLoaded = true;
+    serverModels = models || {};
+    serverSettingsLoaded = true;
+    if (settingsDialog.open && LLM_PROVIDER_NAMES[llmSettings.provider]) {
+      syncModelSelect(llmSettings.provider);
+    }
   } catch {
-    // Leave the hint empty; the option still works.
+    // Leave the hint empty and the model picker hidden; both options still work.
   }
 }
 
@@ -161,7 +196,7 @@ document.getElementById("settings-toggle").addEventListener("click", () => {
   setKeyRevealed(false);
   syncSettingsDialog();
   settingsDialog.showModal();
-  loadServerProvider();
+  loadServerSettings();
 });
 document.getElementById("settings-done").addEventListener("click", () => settingsDialog.close());
 settingsDialog.addEventListener("click", (e) => {
@@ -178,6 +213,9 @@ settingsDialog.addEventListener("change", (e) => {
     saveLlmSettings();
     setKeyRevealed(false);
     syncSettingsDialog();
+  } else if (input === settingsModelSelect) {
+    llmSettings.models[llmSettings.provider] = input.value;
+    saveLlmSettings();
   } else if (input.id === "settings-remember") {
     llmSettings.remember = input.checked;
     saveLlmSettings();

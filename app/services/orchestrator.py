@@ -80,6 +80,19 @@ _AGENTS_DIR = Path(__file__).resolve().parents[2] / ".claude" / "agents"
 _ANTHROPIC_EXTRACTOR_MODEL = "claude-haiku-5-5"
 # Overridable with GEMINI_MODEL, e.g. to trade free-tier quota for quality.
 _GEMINI_EXTRACTOR_MODEL = "gemini-2.5-flash-lite"
+# Models the dashboard's Settings may pick per request, as (id, label). A
+# fixed list, so a request can't name a typo or an expensive model to run on
+# the server's key; the server's own default needn't be on it.
+LLM_MODEL_CHOICES: dict[str, list[tuple[str, str]]] = {
+    "anthropic": [
+        ("claude-haiku-5-5", "Claude Haiku 5.5 (fast, low cost)"),
+        ("claude-sonnet-5-5", "Claude Sonnet 5.5 (more thorough)"),
+    ],
+    "gemini": [
+        ("gemini-2.5-flash-lite", "Gemini 2.5 Flash-Lite (most free-tier quota)"),
+        ("gemini-2.5-flash", "Gemini 2.5 Flash (more thorough)"),
+    ],
+}
 
 # Bounds on the LLM call: untrusted PDF text must not be able to run up an
 # unbounded bill or tie up a worker thread on a hung connection.
@@ -121,13 +134,15 @@ class LLMOverride:
 
     `heuristic` skips the LLM. A provider with `api_key` uses that key for
     this request only; without one it uses the server's key for that
-    provider. The key is never stored or logged."""
+    provider. The key is never stored or logged. `model` (one of
+    LLM_MODEL_CHOICES) replaces the provider's default model."""
 
     provider: Literal["anthropic", "gemini", "heuristic"]
     api_key: Optional[str] = None
+    model: Optional[str] = None
 
     def __repr__(self) -> str:  # keep the key out of tracebacks and logs
-        return f"LLMOverride(provider={self.provider!r})"
+        return f"LLMOverride(provider={self.provider!r}, model={self.model!r})"
 
 
 # ---------------------------------------------------------------------------
@@ -495,11 +510,26 @@ def _resolve_llm(llm: Optional[LLMOverride]) -> tuple[Optional[str], Optional[st
     return None, None
 
 
+def _requested_model(provider: str, llm: Optional[LLMOverride]) -> Optional[str]:
+    """The request's model for `provider`, if it chose one for that provider."""
+    if llm is None or llm.provider != provider:
+        return None
+    return llm.model
+
+
+def default_model(provider: str) -> str:
+    """The model the server uses for `provider` when a request doesn't pick one."""
+    if provider == _PROVIDER_GEMINI:
+        return _gemini_model()
+    return _ANTHROPIC_EXTRACTOR_MODEL
+
+
 def _extractor_for(
-    provider: str, api_key: Optional[str]
+    provider: str, api_key: Optional[str], model: Optional[str] = None
 ) -> Callable[[str, str], QSGExtraction]:
     extractor = _PROVIDER_EXTRACTORS[provider]
-    return partial(extractor, api_key=api_key) if api_key else extractor
+    options = {k: v for k, v in (("api_key", api_key), ("model", model)) if v}
+    return partial(extractor, **options) if options else extractor
 
 
 def _is_auth_error(exc: Exception) -> bool:
@@ -596,7 +626,10 @@ def _validate_extraction(payload: object) -> QSGExtraction:
 
 
 def _extract_via_anthropic(
-    document_text: str, source_document: str, api_key: Optional[str] = None
+    document_text: str,
+    source_document: str,
+    api_key: Optional[str] = None,
+    model: Optional[str] = None,
 ) -> QSGExtraction:
     # With no key the SDK reads ANTHROPIC_API_KEY from the environment.
     client = anthropic.Anthropic(
@@ -606,7 +639,7 @@ def _extract_via_anthropic(
     # Forcing a tool call makes the API return schema-shaped JSON instead of
     # free text we'd have to parse.
     response = client.messages.create(
-        model=_ANTHROPIC_EXTRACTOR_MODEL,
+        model=model or _ANTHROPIC_EXTRACTOR_MODEL,
         max_tokens=_LLM_MAX_OUTPUT_TOKENS,
         system=system_prompt,
         tools=[
@@ -637,7 +670,10 @@ def _gemini_model() -> str:
 
 
 def _extract_via_gemini(
-    document_text: str, source_document: str, api_key: Optional[str] = None
+    document_text: str,
+    source_document: str,
+    api_key: Optional[str] = None,
+    model: Optional[str] = None,
 ) -> QSGExtraction:
     client = genai.Client(
         api_key=api_key or os.environ["GEMINI_API_KEY"],
@@ -655,7 +691,7 @@ def _extract_via_gemini(
     # The schema constrains decoding to QSGExtraction's shape, as the forced
     # tool call does for Anthropic; JSON mode alone only promises valid JSON.
     response = client.models.generate_content(
-        model=_gemini_model(),
+        model=model or _gemini_model(),
         contents=_llm_user_content(document_text, source_document),
         config=gemini_types.GenerateContentConfig(
             system_instruction=system_prompt,
@@ -706,7 +742,9 @@ def _extract_single(
     if provider:
         try:
             return (
-                _extractor_for(provider, api_key)(document_text, source_document),
+                _extractor_for(provider, api_key, _requested_model(provider, llm))(
+                    document_text, source_document
+                ),
                 EXTRACTION_SOURCE_LLM,
                 warnings,
             )
@@ -895,7 +933,7 @@ def _extract_document(
     if provider and len(document_text) > MAX_LLM_INPUT_CHARS:
         try:
             extraction, warnings = _extract_in_parts(
-                _extractor_for(provider, api_key),
+                _extractor_for(provider, api_key, _requested_model(provider, llm)),
                 document_text,
                 source_document,
                 max_workers=(
@@ -1019,11 +1057,10 @@ def _extracted_with(source: str, llm: Optional[LLMOverride]) -> str:
     if source != EXTRACTION_SOURCE_LLM:
         return BUILT_IN_PARSER_LABEL
     provider, _ = _resolve_llm(llm)
-    if provider == _PROVIDER_GEMINI:
-        return f"Gemini ({_gemini_model()})"
-    if provider == _PROVIDER_ANTHROPIC:
-        return f"Anthropic ({_ANTHROPIC_EXTRACTOR_MODEL})"
-    return "AI model"
+    if provider not in _PROVIDER_NAMES:
+        return "AI model"
+    model = _requested_model(provider, llm) or default_model(provider)
+    return f"{_PROVIDER_NAMES[provider]} ({model})"
 
 
 def extract_device_spec(

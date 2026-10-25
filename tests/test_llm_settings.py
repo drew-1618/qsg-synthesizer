@@ -181,6 +181,88 @@ def test_rate_limits_say_to_wait(user_key):
     assert "Wait a minute" in response.json()["warnings"][0]
 
 
+class TestModelChoice:
+    def _gemini_compare(self, headers):
+        with (
+            patch.dict("os.environ", {**NO_SERVER_KEYS, "GEMINI_API_KEY": "server-g"}),
+            patch("app.services.orchestrator.genai") as mock_genai,
+        ):
+            client_mock = mock_genai.Client.return_value
+            client_mock.models.generate_content.return_value = _fake_gemini_response(
+                _FAKE_EXTRACTION
+            )
+            response = _compare(headers)
+        return response, client_mock.models.generate_content
+
+    def test_chosen_model_is_used_and_shown(self):
+        response, generate = self._gemini_compare(
+            {"X-LLM-Provider": "gemini", "X-LLM-Model": "gemini-2.5-flash"}
+        )
+        assert response.status_code == 200
+        assert {c.kwargs["model"] for c in generate.call_args_list} == {
+            "gemini-2.5-flash"
+        }
+        read_with = response.json()["comparison_matrix"]["extracted_with"]
+        assert read_with["device_a"] == "Gemini (gemini-2.5-flash)"
+
+    def test_without_a_model_the_default_is_used(self):
+        response, generate = self._gemini_compare({"X-LLM-Provider": "gemini"})
+        assert generate.call_args.kwargs["model"] == "gemini-2.5-flash-lite"
+
+    def test_chosen_anthropic_model_reaches_the_client(self):
+        with (
+            patch.dict("os.environ", NO_SERVER_KEYS),
+            patch("app.services.orchestrator.anthropic") as mock_anthropic,
+        ):
+            mock_client = _anthropic_mock(mock_anthropic)
+            _compare(
+                {
+                    "X-LLM-Provider": "anthropic",
+                    "X-LLM-API-Key": USER_KEY,
+                    "X-LLM-Model": "claude-sonnet-5-5",
+                }
+            )
+        assert mock_client.messages.create.call_args.kwargs["model"] == (
+            "claude-sonnet-5-5"
+        )
+
+    def test_rerun_uses_the_requested_model(self):
+        with patch.dict("os.environ", NO_SERVER_KEYS):
+            first = _compare({}).json()
+        with (
+            patch.dict("os.environ", {**NO_SERVER_KEYS, "GEMINI_API_KEY": "server-g"}),
+            patch("app.services.orchestrator.genai") as mock_genai,
+        ):
+            generate = mock_genai.Client.return_value.models.generate_content
+            generate.return_value = _fake_gemini_response(_FAKE_EXTRACTION)
+            client.post(
+                f"/api/v1/history/{first['history_id']}/rerun",
+                headers={"X-LLM-Provider": "gemini", "X-LLM-Model": "gemini-2.5-flash"},
+            )
+        assert generate.call_args.kwargs["model"] == "gemini-2.5-flash"
+
+    def test_model_from_another_provider_is_rejected(self):
+        response = _compare(
+            {"X-LLM-Provider": "gemini", "X-LLM-Model": "claude-sonnet-5-5"}
+        )
+        assert response.status_code == 422
+        assert "isn't available for this provider" in response.json()["detail"]
+
+    def test_model_not_on_the_list_is_rejected(self):
+        response = _compare({"X-LLM-Provider": "gemini", "X-LLM-Model": "gemini-ultra"})
+        assert response.status_code == 422
+
+    def test_model_without_provider_is_rejected(self):
+        response = _compare({"X-LLM-Model": "gemini-2.5-flash"})
+        assert response.status_code == 422
+
+    def test_model_with_the_built_in_parser_is_rejected(self):
+        response = _compare(
+            {"X-LLM-Provider": "heuristic", "X-LLM-Model": "gemini-2.5-flash"}
+        )
+        assert response.status_code == 422
+
+
 class TestHeaderValidation:
     def test_unknown_provider_is_rejected(self):
         response = _compare({"X-LLM-Provider": "openai"})
@@ -210,13 +292,20 @@ class TestSettingsEndpoint:
             patch.dict("os.environ", {**NO_SERVER_KEYS, "GEMINI_API_KEY": "g"}),
             patch("app.services.orchestrator.genai", MagicMock()),
         ):
-            assert client.get("/api/v1/settings").json() == {
-                "server_provider": "gemini"
-            }
+            assert client.get("/api/v1/settings").json()["server_provider"] == "gemini"
 
     def test_reports_none_without_server_keys(self):
         with patch.dict("os.environ", NO_SERVER_KEYS):
-            assert client.get("/api/v1/settings").json() == {"server_provider": None}
+            assert client.get("/api/v1/settings").json()["server_provider"] is None
+
+    def test_lists_each_providers_models_and_default(self):
+        with patch.dict("os.environ", {**NO_SERVER_KEYS, "GEMINI_MODEL": "gemini-x"}):
+            models = client.get("/api/v1/settings").json()["models"]
+        assert models["gemini"]["default"] == "gemini-x"
+        assert models["anthropic"]["default"] == "claude-haiku-5-5"
+        gemini_ids = [choice["id"] for choice in models["gemini"]["choices"]]
+        assert gemini_ids == ["gemini-2.5-flash-lite", "gemini-2.5-flash"]
+        assert all(choice["label"] for choice in models["gemini"]["choices"])
 
     def test_requires_auth_once_configured(self, monkeypatch):
         monkeypatch.setenv("APP_USERNAME", "admin")
