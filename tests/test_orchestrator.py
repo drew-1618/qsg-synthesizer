@@ -119,7 +119,7 @@ class TestExtractViaGemini:
             assert result.provisioning_methods == ["TR-069"]
             mock_client.models.generate_content.assert_called_once()
             _, kwargs = mock_client.models.generate_content.call_args
-            assert kwargs["model"] == "gemini-2.5-flash"
+            assert kwargs["model"] == "gemini-2.5-flash-lite"
             assert "some document text" in kwargs["contents"]
 
     def test_falls_back_to_heuristic_on_api_error(self, caplog):

@@ -15,7 +15,7 @@ as Markdown or PDF.
    bounded `qsg_extractor` subagent (`.claude/agents/qsg_extractor.md`) when
    an `ANTHROPIC_API_KEY` and/or `GEMINI_API_KEY` is set, so raw multi-page
    documents are never dumped into the orchestrator's own prompt. Anthropic
-   (Haiku) is used if its key is present, Gemini (`gemini-2.5-flash`)
+   (Haiku) is used if its key is present, Gemini (`gemini-2.5-flash-lite`)
    otherwise — see `LLM_PROVIDER` below to force one explicitly. Without a
    usable key (or if the API call fails), a deterministic regex/heuristic
    parser produces the same shape, so the app and test suite never fail

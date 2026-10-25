@@ -74,7 +74,7 @@ logger = logging.getLogger(__name__)
 
 _AGENTS_DIR = Path(__file__).resolve().parents[2] / ".claude" / "agents"
 _ANTHROPIC_EXTRACTOR_MODEL = "claude-haiku-5-5"
-_GEMINI_EXTRACTOR_MODEL = "gemini-2.5-flash"
+_GEMINI_EXTRACTOR_MODEL = "gemini-2.5-flash-lite"
 
 # Bounds on the LLM call: untrusted PDF text must not be able to run up an
 # unbounded bill or tie up a worker thread on a hung connection.
@@ -607,6 +607,9 @@ def _extract_via_gemini(
             system_instruction=system_prompt,
             response_mime_type="application/json",
             max_output_tokens=_LLM_MAX_OUTPUT_TOKENS,
+            automatic_function_calling=gemini_types.AutomaticFunctionCallingConfig(
+                disable=True
+            ),
         ),
     )
     if not response.text:
