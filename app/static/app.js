@@ -881,12 +881,12 @@ function historyRow(item, { title, subtitle }) {
   return `
     <li class="flex items-center gap-1">
       <button type="button" data-history-id="${item.id}"${isCurrent ? ' aria-current="true"' : ""}
-              class="flex-1 min-w-0 text-left py-3 px-2 -mx-2 rounded-control hover:bg-plate transition-colors ${isCurrent ? "bg-plate" : ""}">
+              class="flex-1 min-w-0 text-left py-3 px-2 -mx-2 rounded-control ring-1 ring-inset hover:bg-plate transition-colors ${isCurrent ? "bg-plate ring-action" : "ring-transparent hover:ring-ink-muted"}">
         ${title}
         ${subtitle}
       </button>
       <button type="button" data-delete-id="${item.id}" aria-label="Delete comparison: ${plainLabel}, ${escapeHtml(formatTimestamp(item.created_at))}"
-              class="shrink-0 w-9 h-9 inline-flex items-center justify-center rounded-control text-ink-muted hover:text-danger-text hover:bg-plate">
+              class="shrink-0 w-9 h-9 inline-flex items-center justify-center rounded-control text-lg leading-none text-ink-muted hover:text-on-danger hover:bg-danger transition-colors">
         &times;
       </button>
     </li>`;
@@ -906,7 +906,7 @@ function historyCard(item, { timestamp, trailing, stacked = false }) {
     ? "relative isolate mb-1 before:absolute before:inset-x-2 before:-bottom-1 before:h-2 before:-z-10 before:rounded-b-control before:border before:border-t-0 before:border-line before:bg-plate"
     : "";
   return `
-    <div class="${layer} flex items-center gap-1 rounded-control border ${isCurrent ? "border-action" : "border-line"} bg-plate px-2">
+    <div class="${layer} flex items-center gap-1 rounded-control border ${isCurrent ? "border-action" : "border-line has-[[data-history-id]:hover]:border-ink-muted"} bg-plate px-2 transition-colors">
       <button type="button" data-history-id="${item.id}"${isCurrent ? ' aria-current="true"' : ""}
               class="flex-1 min-w-0 text-left py-3 rounded-control">
         ${historyLabel(item)}
@@ -921,7 +921,7 @@ function singleHistoryRow(item) {
   const plainLabel = `${escapeHtml(item.device_a_name)} vs ${escapeHtml(item.device_b_name)}`;
   const deleteBtn = `
     <button type="button" data-delete-id="${item.id}" aria-label="Delete comparison: ${plainLabel}, ${escapeHtml(formatTimestamp(item.created_at))}"
-            class="shrink-0 w-9 h-9 inline-flex items-center justify-center rounded-control text-ink-muted hover:text-danger-text hover:bg-plate-hover">
+            class="shrink-0 w-9 h-9 inline-flex items-center justify-center rounded-control text-lg leading-none text-ink-muted hover:text-on-danger hover:bg-danger transition-colors">
       &times;
     </button>`;
   return `<li>${historyCard(item, { timestamp: formatTimestamp(item.created_at), trailing: deleteBtn })}</li>`;
@@ -948,14 +948,14 @@ function stackedHistoryRows(stack, index) {
   const dedupe = copies
     ? `<li class="pt-1 pb-2">
          <button type="button" data-dedupe-id="${stack.latest.id}" data-dedupe-count="${copies}"
-                 class="text-sm font-medium text-ink-muted hover:text-danger-text underline underline-offset-2 rounded-control">
+                 class="text-sm font-medium text-ink-muted hover:text-danger-text underline underline-offset-2 rounded-control transition-colors">
            Delete ${copies} older ${copies === 1 ? "copy" : "copies"}
          </button>
        </li>`
     : "";
   const toggle = `
     <button type="button" data-stack-toggle="${escapeHtml(stack.key)}" aria-expanded="${isExpanded}" aria-controls="${panelId}"
-            class="shrink-0 inline-flex items-center gap-1 h-9 px-2 rounded-control text-sm text-ink-muted hover:text-ink hover:bg-plate-hover">
+            class="shrink-0 inline-flex items-center gap-1 h-9 px-2 rounded-control text-sm text-ink-muted hover:text-on-action hover:bg-action transition-colors">
       <span class="font-mono tabular-nums">${members.length}</span> runs
       <svg class="w-4 h-4 transition-transform ${isExpanded ? "rotate-180" : ""}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <path d="M6 9l6 6 6-6" />

@@ -136,7 +136,7 @@ everything else stays quiet. Sentence case, no all-caps labels, no tinted-card-f
   Not Inter. To update, reinstall from `@fontsource-variable/*` and copy the woff2 files.
 - Palette (Tailwind `@theme` tokens in `input.css`): `panel` #eef0ee, `plate` #f9faf8, `ink`
   #1c2127, `ink-muted` #56616b, `line` #c9d0cb, `bezel` #2b333b, `action` #0d6b6b, `danger` #b3261e (destructive
-  actions, error borders), plus
+  actions, error borders; text on it uses `on-danger`), plus
   `led-green/amber/red/blue` for status only. Use the tokens, never raw hex in markup or JS.
 - Themes: light and dark share the same token names. Dark overrides them in
   `:root[data-theme="dark"]` in `input.css`; never branch on theme in markup, use tokens (e.g.
@@ -153,5 +153,6 @@ everything else stays quiet. Sentence case, no all-caps labels, no tinted-card-f
   LED animation duration).
 - Rebuild CSS with `npm run build:css` after changing classes or theme tokens.
 - Dialogs are native `<dialog>` elements (history drawer, `confirmDialog()`), so focus trap, Esc
-  and top-layer stacking come from the browser. Error text should say what happened and what to do
+  and top-layer stacking come from the browser. The drawer's slide (`.drawer-slide` in `input.css`) is pure CSS
+  (`@starting-style` + `allow-discrete`) and respects reduced motion; no JS waits on it. Error text should say what happened and what to do
   next (`describeFailure()` in `app.js`); the open comparison is mirrored in the URL as `?id=`.

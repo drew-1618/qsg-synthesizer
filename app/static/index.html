@@ -208,12 +208,12 @@
 
   <!-- History drawer: a native modal dialog, so focus trap, Esc and focus return come from the browser -->
   <dialog id="history-drawer" aria-labelledby="history-heading"
-          class="ml-auto mr-0 my-0 h-dvh max-h-none w-full max-w-md p-0 bg-panel text-ink border-l border-line backdrop:bg-scrim overscroll-contain">
+          class="drawer-slide ml-auto mr-0 my-0 h-dvh max-h-none w-full max-w-md p-0 bg-panel text-ink border-l border-line backdrop:bg-scrim overscroll-contain">
     <div class="flex h-full flex-col">
       <div class="flex items-center justify-between gap-3 px-5 py-4 border-b border-line">
         <h2 id="history-heading" class="font-heading font-semibold text-xl">History</h2>
         <button id="history-close" type="button"
-                class="text-sm font-medium px-3 py-1.5 rounded-control border border-line bg-plate hover:bg-plate-hover transition-colors">
+                class="text-sm font-medium px-3 py-1.5 rounded-control border border-line bg-plate hover:bg-plate-hover hover:border-ink-muted transition-colors">
           Close
         </button>
       </div>
@@ -233,7 +233,7 @@
       </div>
       <div class="px-5 py-3 border-t border-line">
         <button id="clear-history-btn" type="button"
-                class="hidden text-sm font-medium text-ink-muted hover:text-ink underline underline-offset-2 rounded-control">
+                class="hidden text-sm font-medium text-ink-muted hover:text-danger-text underline underline-offset-2 rounded-control transition-colors">
           Clear history
         </button>
       </div>
@@ -372,7 +372,7 @@
         Cancel
       </button>
       <button id="confirm-ok-btn" type="button"
-              class="font-semibold text-white bg-danger hover:bg-danger-hover px-4 py-2.5 rounded-control transition-colors">
+              class="font-semibold text-on-danger bg-danger hover:bg-danger-hover px-4 py-2.5 rounded-control transition-colors">
         Confirm
       </button>
     </div>
