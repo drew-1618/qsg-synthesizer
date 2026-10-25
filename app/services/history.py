@@ -308,10 +308,12 @@ def delete_comparison(history_id: str) -> bool:
     if not _ID_PATTERN.match(history_id):
         return False
     path = HISTORY_DIR / f"{history_id}.json"
-    if not path.exists():
-        return False
     freed = _source_hashes(history_id)
-    path.unlink()
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        # Never existed, or a concurrent delete got there first.
+        return False
     _remove_orphan_sources(freed)
     return True
 
@@ -341,7 +343,10 @@ def clear_history() -> int:
         return 0
     deleted = 0
     for path in HISTORY_DIR.glob("*.json"):
-        path.unlink()
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            continue
         deleted += 1
     shutil.rmtree(_sources_dir(), ignore_errors=True)
     return deleted

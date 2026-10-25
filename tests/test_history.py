@@ -269,3 +269,17 @@ class TestSources:
 
 def test_forget_all_sources_with_no_history():
     assert history.forget_all_sources() == 0
+
+
+def test_delete_after_a_concurrent_delete_reports_not_found(monkeypatch):
+    record = history.save_comparison(_make_battlecard())
+    path = history.HISTORY_DIR / f"{record.id}.json"
+    real_source_hashes = history._source_hashes
+
+    def delete_meanwhile(history_id):
+        hashes = real_source_hashes(history_id)
+        path.unlink()  # the other request wins the race
+        return hashes
+
+    monkeypatch.setattr(history, "_source_hashes", delete_meanwhile)
+    assert history.delete_comparison(record.id) is False
