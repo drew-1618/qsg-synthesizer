@@ -9,6 +9,50 @@ risks, competitive advantages, and a competitive sales talk track. Every
 synthesized battlecard is saved to a browsable history and can be exported
 as Markdown or PDF.
 
+## Run it yourself
+
+Everything runs on your own computer: there's no account, and your documents
+and history stay on your machine. You need either Docker, or Python 3.11+ with
+[uv](https://docs.astral.sh/uv/) (or pipx).
+
+**With Docker**
+
+```bash
+docker run -d --name qsg-synthesizer -p 127.0.0.1:8000:8000 \
+  -v qsg-history:/app/data/history ghcr.io/drew-1618/qsg-synthesizer:latest
+```
+
+Then open <http://localhost:8000>. History is kept in the `qsg-history` volume.
+
+**Without Docker**
+
+```bash
+uv tool install git+https://github.com/drew-1618/qsg-synthesizer
+qsg-synthesizer
+```
+
+(or `pipx install git+https://github.com/drew-1618/qsg-synthesizer`). The
+command opens the dashboard in your browser; `qsg-synthesizer --help` lists the
+port and other options. History is saved in your user data folder
+(`~/.local/share/qsg-synthesizer` on Linux, `~/Library/Application Support/qsg-synthesizer`
+on macOS, `%LOCALAPPDATA%\qsg-synthesizer` on Windows), and the command prints
+the exact path at startup. To update, run the install command again with
+`--reinstall` (`uv`) or `--force` (`pipx`).
+
+**Reading documents with AI (optional)**
+
+Out of the box, documents are read by a built-in parser and nothing leaves your
+computer. It works best on guides laid out like the samples. For anything else,
+open **Settings** in the dashboard, pick Anthropic or Google Gemini, paste your
+API key and choose a model. The key stays in your browser and is sent only to
+that provider, along with the text of the documents you compare.
+
+To set keys once for every browser instead, put them in a `.env` file (see
+[`.env.example`](.env.example)): in the folder you run `qsg-synthesizer` from,
+or pass it to Docker with `--env-file .env`.
+
+Licensed under the [MIT License](LICENSE).
+
 ## Architecture
 
 1. **Extraction** (one document in, structured facts out) — delegated to the
@@ -21,12 +65,12 @@ as Markdown or PDF.
    usable key (or if the API call fails), a deterministic regex/heuristic
    parser produces the same shape, so the app and test suite never fail
    hard on missing credentials.
-2. **Normalization** — IP classification (`app/tools/net_validator.py`)
-   and LED-state normalization (`app/tools/led_normalizer.py`) are always
+2. **Normalization** — IP classification (`qsg_synthesizer/tools/net_validator.py`)
+   and LED-state normalization (`qsg_synthesizer/tools/led_normalizer.py`) are always
    deterministic, never LLM-guessed.
 3. **Synthesis** — two normalized `DeviceSpec`s are compared into a
    `BattlecardResponse` via a deterministic scoring/rules engine
-   (`app/services/orchestrator.py`).
+   (`qsg_synthesizer/services/orchestrator.py`).
 
 ## Requirements
 
@@ -63,7 +107,7 @@ as Markdown or PDF.
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 cp .env.example .env   # optionally set ANTHROPIC_API_KEY
-.venv/bin/uvicorn app.main:app --reload
+.venv/bin/uvicorn qsg_synthesizer.main:app --reload
 ```
 
 Open `http://127.0.0.1:8000/` for the dashboard, or `http://127.0.0.1:8000/docs`
@@ -74,23 +118,23 @@ for the OpenAPI docs.
 The dashboard's styling is compiled ahead of time with the Tailwind CLI rather
 than loaded from `cdn.tailwindcss.com` (that CDN build is JIT-compiled in the
 browser on every page load and Tailwind's own docs say not to use it in
-production). The compiled, minified `app/static/tailwind.css` is committed to
+production). The compiled, minified `qsg_synthesizer/static/tailwind.css` is committed to
 the repo, so **no Node/npm install is needed just to run the app**. Only
-regenerate it after changing Tailwind classes in `app/static/index.html` or
-`app/static/app.js`:
+regenerate it after changing Tailwind classes in `qsg_synthesizer/static/index.html` or
+`qsg_synthesizer/static/app.js`:
 
 ```bash
 npm install
 npm run build:css
 ```
 
-Source input is `app/static/src/input.css`; `package.json` pins the Tailwind
+Source input is `qsg_synthesizer/static/src/input.css`; `package.json` pins the Tailwind
 CLI version used to generate the committed output.
 
 ## Running with Docker
 
 ```bash
-cp .env.example .env   # required - docker-compose.yml expects this file to exist
+cp .env.example .env   # optional - only for keys/auth; Settings also takes API keys
 docker compose up --build
 ```
 
@@ -162,7 +206,7 @@ files against the OSV/PyPA advisory databases.
 - `DELETE /api/v1/history/{id}` — remove one comparison from history
 - `DELETE /api/v1/history` — clear all comparison history
 
-Both `compare-*` endpoints return a `BattlecardResponse` (see `app/schemas.py`), save it to
+Both `compare-*` endpoints return a `BattlecardResponse` (see `qsg_synthesizer/schemas.py`), save it to
 history, and are rate-limited to 10 requests/minute per IP (`/export.*` is limited to
 20/minute); exceeding the limit returns `429` with a `Retry-After` header.
 
@@ -170,12 +214,12 @@ history, and are rate-limited to 10 requests/minute per IP (`/export.*` is limit
 
 Each `compare-*` call is persisted as its own JSON file under `data/history/` (git-ignored,
 created on first use) — no database. Records are kept newest-first and auto-pruned beyond the
-50 most recent (`MAX_HISTORY_ENTRIES` in `app/services/history.py`). The dashboard's "Recent
+50 most recent (`MAX_HISTORY_ENTRIES` in `qsg_synthesizer/services/history.py`). The dashboard's "Recent
 Comparisons" panel lists, reloads, deletes, and exports from this store.
 
 ## Logging
 
-Configured once at startup (`app/logging_config.py`) to stdout as one JSON object per line
+Configured once at startup (`qsg_synthesizer/logging_config.py`) to stdout as one JSON object per line
 (`{"timestamp", "level", "logger", "message"}`, plus `"exception"` when a traceback is
 attached), level controlled by `LOG_LEVEL` (default `INFO`) — easy to pipe into a log
 aggregator without a reformatting step. Uvicorn's own access log is unaffected and stays in

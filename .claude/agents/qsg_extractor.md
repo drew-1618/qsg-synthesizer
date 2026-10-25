@@ -81,7 +81,7 @@ doesn't mention, and use the device name from the label for `device_name`.
 
 ## Hard constraints
 
-- This schema mirrors `QSGExtraction` in `app/models/schemas.py`. Your
+- This schema mirrors `QSGExtraction` in `qsg_synthesizer/models/schemas.py`. Your
   output must be valid JSON that parses against that model: correct field
   names, correct types, no extra top-level fields.
 - If a field cannot be determined from the document, use `null` (for

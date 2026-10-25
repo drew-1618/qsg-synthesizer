@@ -29,7 +29,7 @@ from reportlab.platypus import (
     TableStyle,
 )
 
-from app.schemas import BattlecardResponse
+from qsg_synthesizer.schemas import BattlecardResponse
 
 _styles = getSampleStyleSheet()
 _H1 = ParagraphStyle("ExportTitle", parent=_styles["Title"], fontSize=18, spaceAfter=10)

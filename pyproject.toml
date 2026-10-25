@@ -1,7 +1,45 @@
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
 [project]
 name = "qsg-synthesizer"
 version = "0.1.0"
+description = "Compare telecom quick start guides and datasheets into a usability battlecard."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
+# Same pins as requirements.txt (tests/test_packaging.py keeps them in sync);
+# exact pins are fine because `uv tool install` / `pipx` give the app its own
+# environment.
+dependencies = [
+    "fastapi==0.141.1",
+    "uvicorn==0.54.0",
+    "pydantic==2.13.5",
+    "pymupdf4llm==1.28.2",
+    "PyMuPDF==1.28.2",
+    "reportlab==4.2.5",
+    "python-multipart==0.0.32",
+    "anthropic==2.3.0",
+    "google-genai==2.25.0",
+    "python-dotenv==1.2.3",
+    "python-docx==1.2.0",
+    "lxml==6.1.3",
+]
+
+[project.scripts]
+qsg-synthesizer = "qsg_synthesizer.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["qsg_synthesizer"]
+
+# Read at runtime from the repo in a checkout or Docker (see
+# qsg_synthesizer/paths.py); an installed package gets these copies instead.
+[tool.hatch.build.targets.wheel.force-include]
+".claude/agents/qsg_extractor.md" = "qsg_synthesizer/_bundled/agents/qsg_extractor.md"
+"sample_docs/device_a_qsg.pdf" = "qsg_synthesizer/_bundled/sample_docs/device_a_qsg.pdf"
+"sample_docs/device_b_qsg.pdf" = "qsg_synthesizer/_bundled/sample_docs/device_b_qsg.pdf"
 
 [tool.ruff]
 target-version = "py311"
@@ -9,10 +47,11 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "I"]
 
-# app/main.py must call load_dotenv() before its app.* imports (see that
-# file's comment) - E402 would otherwise flag every import after it.
+# qsg_synthesizer/main.py must call load_dotenv() before its own package's
+# imports (see that file's comment) - E402 would otherwise flag every import
+# after it.
 [tool.ruff.lint.per-file-ignores]
-"app/main.py" = ["E402"]
+"qsg_synthesizer/main.py" = ["E402"]
 
 [tool.black]
 target-version = ["py311"]
@@ -22,7 +61,7 @@ pythonpath = ["."]
 
 [tool.mypy]
 python_version = "3.11"
-files = ["app"]
+files = ["qsg_synthesizer"]
 
 # pymupdf/pymupdf4llm ship no stubs/py.typed marker, and following into
 # their transitive deps (pymupdf_layout -> onnxruntime -> numpy) pulls in

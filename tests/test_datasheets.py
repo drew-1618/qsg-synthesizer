@@ -5,10 +5,10 @@ from pathlib import Path
 
 import pytest
 
-from app.models.schemas import DocumentType, QSGExtraction, SpecItem
-from app.schemas import DeviceSpec, ProvisioningMethod, SpecValue
-from app.services import orchestrator
-from app.services.orchestrator import (
+from qsg_synthesizer.models.schemas import DocumentType, QSGExtraction, SpecItem
+from qsg_synthesizer.schemas import DeviceSpec, ProvisioningMethod, SpecValue
+from qsg_synthesizer.services import orchestrator
+from qsg_synthesizer.services.orchestrator import (
     NO_RISKS_MESSAGE,
     _build_key_risks,
     _heuristic_extract_qsg,

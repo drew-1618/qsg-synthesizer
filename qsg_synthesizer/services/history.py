@@ -8,10 +8,13 @@ records use it, so a comparison can be rerun; a text is deleted once no
 record refers to it. Tests monkeypatch `HISTORY_DIR` to a
 temp directory so the real suite never touches this module's default path.
 
-`HISTORY_DIR` defaults to `<repo>/data/history` but can be overridden via the
-`HISTORY_DIR` environment variable — set this when running an ad hoc/throwaway
-server (manual verification, a script, CI) alongside an already-running dev
-server, so the two don't share and clobber the same on-disk history.
+`HISTORY_DIR` defaults to `<repo>/data/history` in a source checkout and to
+the per-user data folder for an installed package (see
+qsg_synthesizer/paths.py), but can be overridden via the `HISTORY_DIR`
+environment variable — set this when
+running an ad hoc/throwaway server (manual verification, a script, CI)
+alongside an already-running dev server, so the two don't share and clobber
+the same on-disk history.
 """
 
 from __future__ import annotations
@@ -29,7 +32,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional, Sequence
 
-from app.schemas import (
+from qsg_synthesizer.paths import default_data_dir
+from qsg_synthesizer.schemas import (
     BattlecardResponse,
     HistoryRecord,
     HistoryStack,
@@ -38,12 +42,11 @@ from app.schemas import (
 )
 
 
-def _resolve_history_dir(base_dir: Path, env_override: Optional[str]) -> Path:
-    return Path(env_override) if env_override else base_dir / "data" / "history"
+def _resolve_history_dir(data_dir: Path, env_override: Optional[str]) -> Path:
+    return Path(env_override) if env_override else data_dir / "history"
 
 
-BASE_DIR = Path(__file__).resolve().parent.parent.parent
-HISTORY_DIR = _resolve_history_dir(BASE_DIR, os.environ.get("HISTORY_DIR"))
+HISTORY_DIR = _resolve_history_dir(default_data_dir(), os.environ.get("HISTORY_DIR"))
 
 MAX_HISTORY_ENTRIES = 50
 

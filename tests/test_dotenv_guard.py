@@ -1,4 +1,5 @@
-"""The load_dotenv() guard in app/main.py keeps tests from reading real API keys."""
+"""The load_dotenv() guard in qsg_synthesizer/main.py keeps tests from reading
+real API keys."""
 
 import os
 import subprocess
@@ -10,7 +11,7 @@ _SCRIPT = (
     "import dotenv\n"
     "calls = []\n"
     "dotenv.load_dotenv = lambda *a, **k: calls.append(1)\n"
-    "import app.main\n"
+    "import qsg_synthesizer.main\n"
     "print(len(calls))\n"
 )
 

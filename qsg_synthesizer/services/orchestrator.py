@@ -18,8 +18,8 @@ Two stages, matching the two isolated subagents in `.claude/agents/`:
    scores.
 
 Raw extraction never validates or classifies IPs/LEDs itself — that
-normalization always goes through `app/tools/net_validator.py` and
-`app/tools/led_normalizer.py`.
+normalization always goes through `qsg_synthesizer/tools/net_validator.py` and
+`qsg_synthesizer/tools/led_normalizer.py`.
 """
 
 from __future__ import annotations
@@ -31,12 +31,11 @@ import re
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from functools import partial
-from pathlib import Path
 from typing import Callable, Hashable, Iterable, Literal, Optional, TypeVar
 
 from pydantic import ValidationError
 
-from app.models.schemas import (
+from qsg_synthesizer.models.schemas import (
     DROPPABLE_FIELDS,
     CablingPort,
     DocumentType,
@@ -45,7 +44,8 @@ from app.models.schemas import (
     RawProvisioningMethod,
     SpecItem,
 )
-from app.schemas import (
+from qsg_synthesizer.paths import resource_dir
+from qsg_synthesizer.schemas import (
     BattlecardResponse,
     DeviceSpec,
     LEDStatus,
@@ -53,14 +53,14 @@ from app.schemas import (
     ProvisioningMethod,
     SpecValue,
 )
-from app.tools.capability_compare import (
+from qsg_synthesizer.tools.capability_compare import (
     capability_key,
     parse_speed_mbps,
     rank_wifi_standard,
 )
-from app.tools.led_normalizer import LEDState, led_sort_key, normalize_led
-from app.tools.net_validator import InvalidNetworkInput, classify_ip
-from app.tools.port_counter import expand_port_range
+from qsg_synthesizer.tools.led_normalizer import LEDState, led_sort_key, normalize_led
+from qsg_synthesizer.tools.net_validator import InvalidNetworkInput, classify_ip
+from qsg_synthesizer.tools.port_counter import expand_port_range
 
 try:
     import anthropic
@@ -76,7 +76,7 @@ except ImportError:  # pragma: no cover - exercised only when package absent
 
 logger = logging.getLogger(__name__)
 
-_AGENTS_DIR = Path(__file__).resolve().parents[2] / ".claude" / "agents"
+_AGENTS_DIR = resource_dir("agents")
 _ANTHROPIC_EXTRACTOR_MODEL = "claude-haiku-5-5"
 # Overridable with GEMINI_MODEL, e.g. to trade free-tier quota for quality.
 _GEMINI_EXTRACTOR_MODEL = "gemini-2.5-flash-lite"

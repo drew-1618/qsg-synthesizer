@@ -13,7 +13,7 @@ from __future__ import annotations
 import pymupdf
 import pymupdf4llm
 
-from app.tools.text_cleaning import clean_text
+from qsg_synthesizer.tools.text_cleaning import clean_text
 
 # Quick start guides and datasheets run to a few dozen pages; layout analysis
 # of a huge PDF would tie up a worker thread for minutes.

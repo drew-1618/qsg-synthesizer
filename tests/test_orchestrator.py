@@ -2,10 +2,10 @@ import json
 import logging
 from unittest.mock import MagicMock, patch
 
-from app.models.schemas import QSGExtraction
-from app.schemas import DeviceSpec, ProvisioningMethod
-from app.services import orchestrator
-from app.services.orchestrator import (
+from qsg_synthesizer.models.schemas import QSGExtraction
+from qsg_synthesizer.schemas import DeviceSpec, ProvisioningMethod
+from qsg_synthesizer.services import orchestrator
+from qsg_synthesizer.services.orchestrator import (
     NO_ADVANTAGES_MESSAGE,
     NO_RISKS_MESSAGE,
     _build_key_risks,
@@ -15,7 +15,7 @@ from app.services.orchestrator import (
     extract_qsg_fields,
     synthesize_battlecard,
 )
-from app.tools.led_normalizer import LEDState
+from qsg_synthesizer.tools.led_normalizer import LEDState
 
 _FAKE_EXTRACTION = {
     "device_name": "NovaFiber GX400",
@@ -42,7 +42,7 @@ class TestExtractViaAnthropic:
     def test_uses_anthropic_when_key_and_package_present(self):
         with (
             patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}),
-            patch("app.services.orchestrator.anthropic") as mock_anthropic,
+            patch("qsg_synthesizer.services.orchestrator.anthropic") as mock_anthropic,
         ):
             mock_client = MagicMock()
             mock_client.messages.create.return_value = _fake_anthropic_response(
@@ -63,14 +63,16 @@ class TestExtractViaAnthropic:
     def test_falls_back_to_heuristic_on_api_error(self, caplog):
         with (
             patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}),
-            patch("app.services.orchestrator.anthropic") as mock_anthropic,
+            patch("qsg_synthesizer.services.orchestrator.anthropic") as mock_anthropic,
         ):
             mock_client = MagicMock()
             mock_client.messages.create.side_effect = RuntimeError("api unreachable")
             mock_anthropic.Anthropic.return_value = mock_client
 
             document_text = "# LegacyLink RG-210\n\nSome QSG content."
-            with caplog.at_level(logging.WARNING, logger="app.services.orchestrator"):
+            with caplog.at_level(
+                logging.WARNING, logger="qsg_synthesizer.services.orchestrator"
+            ):
                 result = extract_qsg_fields(document_text, "device_b_qsg.md")
 
             assert result == _heuristic_extract_qsg(document_text, "device_b_qsg.md")
@@ -106,7 +108,7 @@ class TestExtractViaGemini:
                     "LLM_PROVIDER": "",
                 },
             ),
-            patch("app.services.orchestrator.genai") as mock_genai,
+            patch("qsg_synthesizer.services.orchestrator.genai") as mock_genai,
         ):
             mock_client = MagicMock()
             mock_client.models.generate_content.return_value = _fake_gemini_response(
@@ -141,7 +143,7 @@ class TestExtractViaGemini:
                     "GEMINI_MODEL": " gemini-2.5-flash ",
                 },
             ),
-            patch("app.services.orchestrator.genai") as mock_genai,
+            patch("qsg_synthesizer.services.orchestrator.genai") as mock_genai,
         ):
             client = mock_genai.Client.return_value
             client.models.generate_content.return_value = _fake_gemini_response(
@@ -159,7 +161,7 @@ class TestExtractViaGemini:
                 "os.environ",
                 {"ANTHROPIC_API_KEY": "", "GEMINI_API_KEY": "k", "LLM_PROVIDER": ""},
             ),
-            patch("app.services.orchestrator.genai") as mock_genai,
+            patch("qsg_synthesizer.services.orchestrator.genai") as mock_genai,
         ):
             response = _fake_gemini_response(_FAKE_EXTRACTION)
             response.candidates = [
@@ -183,7 +185,7 @@ class TestExtractViaGemini:
                     "LLM_PROVIDER": "",
                 },
             ),
-            patch("app.services.orchestrator.genai") as mock_genai,
+            patch("qsg_synthesizer.services.orchestrator.genai") as mock_genai,
         ):
             mock_client = MagicMock()
             mock_client.models.generate_content.side_effect = RuntimeError(
@@ -192,7 +194,9 @@ class TestExtractViaGemini:
             mock_genai.Client.return_value = mock_client
 
             document_text = "# LegacyLink RG-210\n\nSome QSG content."
-            with caplog.at_level(logging.WARNING, logger="app.services.orchestrator"):
+            with caplog.at_level(
+                logging.WARNING, logger="qsg_synthesizer.services.orchestrator"
+            ):
                 result = extract_qsg_fields(document_text, "device_b_qsg.md")
 
             assert result == _heuristic_extract_qsg(document_text, "device_b_qsg.md")
@@ -234,7 +238,9 @@ class TestSelectLlmProvider:
             "os.environ",
             {"ANTHROPIC_API_KEY": "a", "GEMINI_API_KEY": "", "LLM_PROVIDER": "bogus"},
         ):
-            with caplog.at_level(logging.WARNING, logger="app.services.orchestrator"):
+            with caplog.at_level(
+                logging.WARNING, logger="qsg_synthesizer.services.orchestrator"
+            ):
                 assert _select_llm_provider() == "anthropic"
             assert "Unrecognized LLM_PROVIDER" in caplog.text
 
@@ -257,7 +263,7 @@ class TestLlmProviderOverrideEndToEnd:
                     "LLM_PROVIDER": "gemini",
                 },
             ),
-            patch("app.services.orchestrator.anthropic") as mock_anthropic,
+            patch("qsg_synthesizer.services.orchestrator.anthropic") as mock_anthropic,
         ):
             document_text = "# Device\n\nSome QSG content."
             result = extract_qsg_fields(document_text, "d.md")
@@ -494,7 +500,7 @@ class TestLlmHardening:
     def _run_anthropic(self, response, text="doc"):
         with (
             patch.dict("os.environ", {"ANTHROPIC_API_KEY": "k"}),
-            patch("app.services.orchestrator.anthropic") as mock_anthropic,
+            patch("qsg_synthesizer.services.orchestrator.anthropic") as mock_anthropic,
         ):
             client = MagicMock()
             client.messages.create.return_value = response
@@ -594,7 +600,7 @@ class TestLlmFailureModes:
                 "os.environ",
                 {"ANTHROPIC_API_KEY": "", "GEMINI_API_KEY": "k", "LLM_PROVIDER": ""},
             ),
-            patch("app.services.orchestrator.genai") as mock_genai,
+            patch("qsg_synthesizer.services.orchestrator.genai") as mock_genai,
         ):
             client = MagicMock()
             client.models.generate_content.return_value = MagicMock(text=text)
@@ -669,7 +675,7 @@ class TestLlmFailureModes:
     def test_anthropic_receives_extractor_system_prompt(self):
         with (
             patch.dict("os.environ", {"ANTHROPIC_API_KEY": "k", "LLM_PROVIDER": ""}),
-            patch("app.services.orchestrator.anthropic") as mock_anthropic,
+            patch("qsg_synthesizer.services.orchestrator.anthropic") as mock_anthropic,
         ):
             client = MagicMock()
             client.messages.create.return_value = _fake_anthropic_response(
@@ -685,7 +691,7 @@ class TestLlmFailureModes:
         bad = _fake_anthropic_response({"device_name": 5, "led_indicators": "x"})
         with (
             patch.dict("os.environ", {"ANTHROPIC_API_KEY": "k", "LLM_PROVIDER": ""}),
-            patch("app.services.orchestrator.anthropic") as mock_anthropic,
+            patch("qsg_synthesizer.services.orchestrator.anthropic") as mock_anthropic,
         ):
             mock_anthropic.Anthropic.return_value.messages.create.return_value = bad
             _, source = orchestrator._extract_with_source("# Doc\n", "d.md")
@@ -821,7 +827,7 @@ class TestExtractedWith:
                 "os.environ",
                 {"ANTHROPIC_API_KEY": "", "GEMINI_API_KEY": "k", "LLM_PROVIDER": ""},
             ),
-            patch("app.services.orchestrator.genai") as mock_genai,
+            patch("qsg_synthesizer.services.orchestrator.genai") as mock_genai,
         ):
             client = mock_genai.Client.return_value
             client.models.generate_content.return_value = _fake_gemini_response(
@@ -836,7 +842,7 @@ class TestExtractedWith:
                 "os.environ",
                 {"ANTHROPIC_API_KEY": "", "GEMINI_API_KEY": "k", "LLM_PROVIDER": ""},
             ),
-            patch("app.services.orchestrator.genai") as mock_genai,
+            patch("qsg_synthesizer.services.orchestrator.genai") as mock_genai,
         ):
             client = mock_genai.Client.return_value
             client.models.generate_content.side_effect = RuntimeError("down")

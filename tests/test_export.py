@@ -2,8 +2,8 @@
 
 from datetime import datetime
 
-from app.schemas import BattlecardResponse
-from app.services.export import (
+from qsg_synthesizer.schemas import BattlecardResponse
+from qsg_synthesizer.services.export import (
     battlecard_to_markdown,
     battlecard_to_pdf_bytes,
     default_export_basename,

@@ -10,8 +10,8 @@ import logging
 
 from fastapi.testclient import TestClient
 
-from app.main import app
-from app.services.auth import auth_enabled
+from qsg_synthesizer.main import app
+from qsg_synthesizer.services.auth import auth_enabled
 
 client = TestClient(app)
 
@@ -35,7 +35,7 @@ def test_protected_route_requires_auth_once_configured(monkeypatch, caplog):
     monkeypatch.setenv("APP_USERNAME", "admin")
     monkeypatch.setenv("APP_PASSWORD", "hunter2")
 
-    with caplog.at_level(logging.WARNING, logger="app.services.auth"):
+    with caplog.at_level(logging.WARNING, logger="qsg_synthesizer.services.auth"):
         response = client.get("/api/v1/samples")
     assert response.status_code == 401
     assert response.headers["www-authenticate"] == "Basic"

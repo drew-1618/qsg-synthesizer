@@ -72,6 +72,29 @@
     <section id="compare-section" aria-labelledby="compare-heading" class="space-y-5">
       <h2 id="compare-heading" class="font-heading font-semibold text-xl">Add the two documents to compare</h2>
 
+      <!-- Shown by syncAiHint() in app.js when no AI is set up -->
+      <div id="ai-hint" role="note" class="hidden">
+        <div class="flex items-start gap-3 bg-plate border border-line rounded-control p-4 text-sm">
+          <span class="led-dot led-dot--blue mt-1.5" aria-hidden="true"></span>
+          <div class="flex-1 flex flex-col sm:flex-row sm:items-start gap-3">
+            <p class="flex-1">
+              Documents are read with the built-in parser, which works best on guides laid out like the samples.
+              For any other document, add an Anthropic or Gemini API key in Settings.
+            </p>
+            <div class="flex shrink-0 gap-2">
+              <button id="ai-hint-settings" type="button"
+                      class="text-sm font-medium px-3 py-1.5 rounded-control border border-line bg-plate hover:bg-plate-hover transition-colors">
+                Open Settings
+              </button>
+              <button id="ai-hint-dismiss" type="button"
+                      class="text-sm font-medium px-3 py-1.5 rounded-control text-ink-muted hover:bg-plate-hover transition-colors">
+                Dismiss
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <fieldset id="mode-control" class="space-y-2">
         <legend class="sr-only">Comparison mode</legend>
         <div class="inline-flex rounded-control border border-line bg-plate p-1">
@@ -294,7 +317,7 @@
         <div class="space-y-2 text-sm">
             <label class="flex items-center gap-2 cursor-pointer">
               <input type="radio" name="llm-provider" value="server" class="accent-action" checked />
-              <span>Server default <span id="settings-server-hint" class="text-ink-muted"></span></span>
+              <span>Default <span id="settings-server-hint" class="text-ink-muted"></span></span>
             </label>
             <label class="flex items-center gap-2 cursor-pointer">
               <input type="radio" name="llm-provider" value="anthropic" class="accent-action" />
@@ -328,12 +351,12 @@
         </div>
         <p id="settings-key-hint" class="text-sm text-ink-muted"></p>
         <label class="flex items-center gap-2 text-sm cursor-pointer">
-          <input id="settings-remember" type="checkbox" class="accent-action" />
+          <input id="settings-remember" type="checkbox" class="accent-action" checked />
           Remember keys on this device
         </label>
         <p class="text-sm text-ink-muted">
-          Keys stay in this browser and are sent only with your compare requests. The server passes them to the
-          provider and never saves them. Without "remember", they clear when you close the tab.
+          Keys stay in this browser and go only to the provider you pick, with your compare requests. The app
+          never writes them to disk. Without "remember", they clear when you close the tab.
         </p>
         <button id="settings-forget" type="button"
                 class="text-sm font-medium text-ink-muted hover:text-danger-text underline underline-offset-2 rounded-control">
@@ -348,7 +371,8 @@
           Keep documents so comparisons can be rerun
         </label>
         <p class="text-sm text-ink-muted">
-          The text read from each document is saved on the server with its comparison and deleted with it.
+          The text read from each document is saved with its comparison, in the app's data folder on the
+          computer running it, and deleted with it.
           Turn this off to keep only the battlecard. This applies to new comparisons.
         </p>
         <button id="settings-forget-documents" type="button"
