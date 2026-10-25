@@ -296,6 +296,26 @@ def delete_comparison(history_id: str) -> bool:
     return True
 
 
+def forget_all_sources() -> int:
+    """Drop every kept input text, leaving the battlecards. Returns how many
+    records lose their documents (and with them, Rerun)."""
+    if not HISTORY_DIR.exists():
+        return 0
+    forgotten = 0
+    for path in HISTORY_DIR.glob("*.json"):
+        try:
+            record = HistoryRecord.model_validate_json(path.read_text("utf-8"))
+        except (ValueError, OSError):
+            logger.warning("Unreadable history record %s", path.name)
+            continue
+        if record.sources:
+            record.sources = []
+            _write_atomic(path, record.model_dump_json())
+            forgotten += 1
+    shutil.rmtree(_sources_dir(), ignore_errors=True)
+    return forgotten
+
+
 def clear_history() -> int:
     if not HISTORY_DIR.exists():
         return 0

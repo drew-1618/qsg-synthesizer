@@ -260,3 +260,52 @@ class TestRerun:
             headers={"X-LLM-Provider": "openai"},
         )
         assert response.status_code == 422
+
+
+class TestKeepDocuments:
+    def _compare_without_keeping(self):
+        return client.post(
+            "/api/v1/compare",
+            data={
+                "device_a_text": (SAMPLE_DOCS_DIR / "device_a_qsg.md").read_text(
+                    "utf-8"
+                ),
+                "device_b_text": (SAMPLE_DOCS_DIR / "device_b_qsg.md").read_text(
+                    "utf-8"
+                ),
+                "keep_documents": "false",
+            },
+        )
+
+    def _source_files(self):
+        return list((history.HISTORY_DIR / "sources").glob("*.txt"))
+
+    def test_documents_are_kept_by_default(self):
+        record = history.get_comparison(_compare({}).json()["history_id"])
+        assert len(record.sources) == 2
+        assert len(self._source_files()) == 2
+
+    def test_turning_it_off_saves_only_the_battlecard(self):
+        data = self._compare_without_keeping().json()
+        record = history.get_comparison(data["history_id"])
+        assert record.sources == []
+        assert record.input_fingerprint is not None
+        assert self._source_files() == []
+        response = client.post(f"/api/v1/history/{data['history_id']}/rerun")
+        assert response.status_code == 409
+        assert "weren't kept" in response.json()["detail"]
+
+    def test_remove_saved_documents_keeps_the_battlecards(self):
+        kept = _compare({}).json()["history_id"]
+        self._compare_without_keeping()
+        response = client.delete("/api/v1/history/documents")
+        assert response.json() == {"forgotten": 1}
+        assert self._source_files() == []
+        assert history.count_comparisons() == 2
+        assert history.get_comparison(kept).sources == []
+        assert client.post(f"/api/v1/history/{kept}/rerun").status_code == 409
+
+    def test_remove_saved_documents_requires_auth(self, monkeypatch):
+        monkeypatch.setenv("APP_USERNAME", "admin")
+        monkeypatch.setenv("APP_PASSWORD", "hunter2")
+        assert client.delete("/api/v1/history/documents").status_code == 401

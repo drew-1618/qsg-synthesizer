@@ -112,7 +112,7 @@
         <div class="min-w-0 flex-1">
           <p id="result-bar-title" class="font-heading font-semibold truncate"></p>
           <p id="result-bar-meta" class="text-sm text-ink-muted"></p>
-          <p id="result-bar-note" class="hidden text-sm text-ink-muted">Saved before documents were kept, so it can&rsquo;t be rerun.</p>
+          <p id="result-bar-note" class="hidden text-sm text-ink-muted">This comparison&rsquo;s documents weren&rsquo;t kept, so it can&rsquo;t be rerun.</p>
         </div>
         <div class="flex flex-wrap items-center gap-2">
           <!-- Toggled as a wrapper: the button's inline-flex would override `hidden` -->
@@ -335,6 +335,23 @@
           Forget saved keys
         </button>
       </div>
+
+      <fieldset class="space-y-2">
+        <legend class="text-sm font-medium mb-2">History</legend>
+        <label class="flex items-center gap-2 text-sm cursor-pointer">
+          <input id="settings-keep-documents" type="checkbox" class="accent-action" checked />
+          Keep documents so comparisons can be rerun
+        </label>
+        <p class="text-sm text-ink-muted">
+          The text read from each document is saved on the server with its comparison and deleted with it.
+          Turn this off to keep only the battlecard. This applies to new comparisons.
+        </p>
+        <button id="settings-forget-documents" type="button"
+                class="text-sm font-medium text-ink-muted hover:text-danger-text underline underline-offset-2 rounded-control">
+          Remove documents already saved
+        </button>
+        <p id="settings-documents-status" role="status" class="text-sm text-ink-muted"></p>
+      </fieldset>
     </div>
     <div class="flex items-center justify-end mt-6">
       <button id="settings-done" type="button"

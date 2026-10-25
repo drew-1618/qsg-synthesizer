@@ -256,3 +256,7 @@ class TestSources:
         history.save_comparison(_make_battlecard(), sources=[("a", "x"), ("b", "y")])
         history.clear_history()
         assert not self._sources_dir().exists()
+
+
+def test_forget_all_sources_with_no_history():
+    assert history.forget_all_sources() == 0

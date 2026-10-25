@@ -197,6 +197,56 @@ document.getElementById("settings-forget").addEventListener("click", () => {
   settingsKeyInput.focus();
 });
 
+// ---- Settings: whether comparisons keep their documents (for Rerun) ----
+// On by default: the server is the user's own and Rerun needs the text. The
+// choice is per browser and sent with each compare as `keep_documents`.
+const KEEP_DOCUMENTS_STORAGE_KEY = "qsg-keep-documents";
+const keepDocumentsInput = document.getElementById("settings-keep-documents");
+const documentsStatus = document.getElementById("settings-documents-status");
+
+function keepDocuments() {
+  try {
+    return localStorage.getItem(KEEP_DOCUMENTS_STORAGE_KEY) !== "false";
+  } catch {
+    return keepDocumentsInput.checked;
+  }
+}
+
+document.getElementById("settings-toggle").addEventListener("click", () => {
+  keepDocumentsInput.checked = keepDocuments();
+  documentsStatus.textContent = "";
+});
+keepDocumentsInput.addEventListener("change", () => {
+  try {
+    localStorage.setItem(KEEP_DOCUMENTS_STORAGE_KEY, String(keepDocumentsInput.checked));
+  } catch {
+    // Storage unavailable: the checkbox still applies until the page reloads.
+  }
+});
+
+document.getElementById("settings-forget-documents").addEventListener("click", async () => {
+  const ok = await confirmDialog(
+    "Saved comparisons keep their battlecards, but none of them can be rerun afterwards. This can’t be undone.",
+    { title: "Remove saved documents?", confirmLabel: "Remove documents" }
+  );
+  if (!ok) return;
+  documentsStatus.textContent = "";
+  try {
+    const res = await fetch("/api/v1/history/documents", { method: "DELETE" });
+    const data = await readJson(res);
+    if (!res.ok) throw new Error(describeFailure(res, data, "Could not remove the saved documents."));
+    const n = data.forgotten;
+    documentsStatus.textContent =
+      n === 0 ? "No comparisons had saved documents." : `Removed documents from ${n} comparison${n === 1 ? "" : "s"}.`;
+    if (!document.getElementById("result-bar").classList.contains("hidden")) {
+      document.getElementById("rerun-control").classList.add("hidden");
+      document.getElementById("result-bar-note").classList.remove("hidden");
+    }
+  } catch (err) {
+    documentsStatus.textContent = describeException(err, "Could not remove the saved documents.");
+  }
+});
+
 let currentHistoryId = null;
 const HISTORY_PAGE_SIZE = 20;
 let historyOffset = 0;
@@ -230,7 +280,7 @@ function hideResults() {
 // form never sits above a result it didn't produce. `fromForm` says whether
 // the form still holds the documents behind the result (a fresh compare) or
 // not (opened from history); only then can "Change documents" reopen it.
-// `canRerun` is false for records saved before their documents were kept.
+// `canRerun` is false for records whose documents weren't kept.
 function showResultBar(data, { fromForm, createdAt, canRerun = true }) {
   const names = data.comparison_matrix.model_name;
   document.getElementById("result-bar-title").textContent = `${names.device_a} vs ${names.device_b}`;
@@ -702,6 +752,8 @@ async function synthesize() {
   try {
     const formData = new FormData();
     formData.append("mode", state.mode);
+    const keep = keepDocuments();
+    formData.append("keep_documents", String(keep));
     for (const id of ["a", "b"]) {
       const slot = state.slots[id];
       if (slot.mode === "file") {
@@ -717,7 +769,7 @@ async function synthesize() {
     setExportTarget(data.history_id);
     setUrlId(data.history_id);
     await loadHistory();
-    showResultBar(data, { fromForm: true, createdAt: new Date().toISOString() });
+    showResultBar(data, { fromForm: true, createdAt: new Date().toISOString(), canRerun: keep });
     renderResults(data);
   } catch (err) {
     showError(describeException(err, "The comparison failed. Try again."));

@@ -70,7 +70,10 @@ docker compose up --build                        # requires a .env file (cp .env
    `data/history/sources/<sha256>.txt` (one file per distinct text, listed in
    `HistoryRecord.sources`, deleted once no record uses them after a short grace period) so
    `POST /api/v1/history/{id}/rerun` can read them again with the request's `X-LLM-*` settings
-   and the record's mode; older records without sources get a 409.
+   and the record's mode; records without sources get a 409. Keeping them is on by default
+   and switchable per browser in Settings (`qsg-keep-documents`, sent as the `keep_documents`
+   form field of `POST /api/v1/compare`); `DELETE /api/v1/history/documents`
+   (`forget_all_sources`) strips them from every record but keeps the battlecards.
    In the UI, a result on screen replaces the form with `#result-bar` (`showResultBar()`):
    Rerun, Change documents (only after a fresh compare, when the form still holds the files)
    and New comparison.

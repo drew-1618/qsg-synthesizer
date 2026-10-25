@@ -214,14 +214,16 @@ def _synthesize_and_save(
     device_b: DeviceSpec,
     sources: list[tuple[str, str]],
     perspective: Optional[Perspective] = None,
+    keep_documents: bool = True,
 ) -> CompareResponse:
-    """`sources` are the (name, text) inputs, A then B, kept for reruns."""
+    """`sources` are the (name, text) inputs, A then B, kept for reruns
+    unless `keep_documents` is off."""
     battlecard = synthesize_battlecard(device_a, device_b, perspective)
     (_, text_a), (_, text_b) = sources
     record = history.save_comparison(
         battlecard,
         input_fingerprint=_input_fingerprint(text_a, text_b),
-        sources=sources,
+        sources=sources if keep_documents else (),
     )
     return CompareResponse(**battlecard.model_dump(), history_id=record.id)
 
@@ -361,6 +363,7 @@ def compare_documents(
     device_b_text: Optional[str] = Form(None, max_length=MAX_TEXT_CHARS),
     device_b_name: Optional[str] = Form(None, max_length=200),
     mode: Literal["sales", "neutral"] = Form("sales"),
+    keep_documents: bool = Form(True),
     llm_provider: Optional[str] = Header(None, alias="X-LLM-Provider"),
     llm_api_key: Optional[str] = Header(None, alias="X-LLM-API-Key"),
 ) -> CompareResponse:
@@ -373,7 +376,11 @@ def compare_documents(
     )
     device_a, device_b = extract_device_specs(text_a, source_a, text_b, source_b, llm)
     return _synthesize_and_save(
-        device_a, device_b, [(source_a, text_a), (source_b, text_b)], mode
+        device_a,
+        device_b,
+        [(source_a, text_a), (source_b, text_b)],
+        mode,
+        keep_documents,
     )
 
 
@@ -481,6 +488,12 @@ def export_history_pdf(
     )
 
 
+# Registered before /history/{history_id} so "documents" isn't taken for an id.
+@router.delete("/api/v1/history/documents")
+def forget_history_documents() -> dict:
+    return {"forgotten": history.forget_all_sources()}
+
+
 @router.delete("/api/v1/history/{history_id}", status_code=204, response_class=Response)
 def delete_history_item(history_id: str) -> Response:
     if not history.delete_comparison(history_id):
@@ -509,8 +522,8 @@ def rerun_history_item(
         raise HTTPException(
             status_code=409,
             detail=(
-                "This comparison was saved before documents were kept, so it "
-                "can't be rerun. Upload the documents again to compare them."
+                "This comparison's documents weren't kept, so it can't be "
+                "rerun. Upload the documents again to compare them."
             ),
         )
     (name_a, text_a), (name_b, text_b) = sources
