@@ -29,8 +29,8 @@ def test_get_samples_returns_base64_encoded_pdfs():
     response = client.get("/api/v1/samples")
     assert response.status_code == 200
     data = response.json()
-    assert data["device_a"]["filename"] == "device_a_qsg.pdf"
-    assert data["device_b"]["filename"] == "device_b_qsg.pdf"
+    assert data["device_a"]["filename"] == "NovaFiber-GX400-QSG.pdf"
+    assert data["device_b"]["filename"] == "LegacyLink-RG-210-QSG.pdf"
     assert len(data["device_a"]["content_base64"]) > 0
     assert len(data["device_b"]["content_base64"]) > 0
 

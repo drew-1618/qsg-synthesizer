@@ -151,20 +151,22 @@ def serve_dashboard() -> FileResponse:
 def get_samples() -> dict:
     """Base64-encoded sample QSG PDFs, for the dashboard's 1-click demo."""
 
-    def _encode(filename: str) -> dict:
+    # Served under product names, like real uploads, so they read right in
+    # either mode; the repo files keep their device_a/device_b names.
+    def _encode(filename: str, served_name: str) -> dict:
         path = SAMPLE_DOCS_DIR / filename
         if not path.exists():
             raise HTTPException(
                 status_code=404, detail=f"Sample '{filename}' not found."
             )
         return {
-            "filename": filename,
+            "filename": served_name,
             "content_base64": base64.b64encode(path.read_bytes()).decode("ascii"),
         }
 
     return {
-        "device_a": _encode("device_a_qsg.pdf"),
-        "device_b": _encode("device_b_qsg.pdf"),
+        "device_a": _encode("device_a_qsg.pdf", "NovaFiber-GX400-QSG.pdf"),
+        "device_b": _encode("device_b_qsg.pdf", "LegacyLink-RG-210-QSG.pdf"),
     }
 
 
