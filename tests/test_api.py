@@ -20,7 +20,7 @@ client = TestClient(app)
 def test_healthz():
     response = client.get("/healthz")
     assert response.status_code == 200
-    assert response.json() == {"status": "healthy"}
+    assert response.json() == {"status": "healthy", "app": "qsg-synthesizer"}
 
 
 def test_root_serves_dashboard_html():

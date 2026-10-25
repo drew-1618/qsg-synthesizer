@@ -2,7 +2,11 @@
 and the `qsg-synthesizer` command."""
 
 import os
+import socket
+import threading
 import tomllib
+from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from unittest.mock import patch
 
@@ -87,6 +91,8 @@ class TestCli:
         # the suite must never pick those up (see tests/test_dotenv_guard.py).
         # It also sets QSG_BIND_HOST; monkeypatch removes it again afterwards.
         monkeypatch.setenv("QSG_BIND_HOST", "")
+        # Don't depend on whether something (e.g. a dev server) holds port 8000.
+        monkeypatch.setattr(cli, "_port_is_free", lambda host, port: True)
         with patch.object(cli, "load_dotenv") as load:
             yield load
 
@@ -126,3 +132,74 @@ class TestCli:
             cli.main(["--host", "0.0.0.0"])
         assert run.call_args.kwargs["host"] == "0.0.0.0"
         assert timer.call_args.kwargs["args"] == ("http://127.0.0.1:8000/",)
+
+
+class TestPortInUse:
+    @pytest.fixture(autouse=True)
+    def no_dotenv(self, monkeypatch):
+        monkeypatch.setenv("QSG_BIND_HOST", "")
+        with patch.object(cli, "load_dotenv"):
+            yield
+
+    def test_opens_the_running_app_instead_of_starting_another(self, monkeypatch):
+        monkeypatch.setattr(cli, "_port_is_free", lambda host, port: False)
+        monkeypatch.setattr(cli, "_already_running", lambda url: True)
+        with (
+            patch("uvicorn.run") as run,
+            patch.object(cli.webbrowser, "open") as browse,
+        ):
+            cli.main([])
+        run.assert_not_called()
+        browse.assert_called_once_with("http://127.0.0.1:8000/")
+
+    def test_another_program_on_the_port_is_a_clear_error(self, monkeypatch):
+        monkeypatch.setattr(cli, "_port_is_free", lambda host, port: False)
+        monkeypatch.setattr(cli, "_already_running", lambda url: False)
+        with patch("uvicorn.run") as run, pytest.raises(SystemExit) as exit_info:
+            cli.main([])
+        run.assert_not_called()
+        assert "Port 8000 is in use by another program" in str(exit_info.value)
+
+    def test_port_check_sees_a_bound_socket(self):
+        with socket.socket() as held:
+            held.bind(("127.0.0.1", 0))
+            held.listen()
+            port = held.getsockname()[1]
+            assert not cli._port_is_free("127.0.0.1", port)
+        assert cli._port_is_free("127.0.0.1", port)
+
+    def test_recognises_its_own_health_check(self):
+        for body, expected in (
+            (b'{"status": "healthy", "app": "qsg-synthesizer"}', True),
+            (b'{"status": "ok"}', False),
+            (b"<html>not json</html>", False),
+        ):
+            with _http_server(body) as url:
+                assert cli._already_running(url) is expected
+
+    def test_nothing_listening_is_not_running(self):
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+        assert cli._already_running(f"http://127.0.0.1:{port}/") is False
+
+
+@contextmanager
+def _http_server(body: bytes):
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}/"
+    finally:
+        server.shutdown()
+        server.server_close()

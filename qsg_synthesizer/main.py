@@ -39,7 +39,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from qsg_synthesizer.logging_config import configure_logging
-from qsg_synthesizer.paths import PACKAGE_DIR, resource_dir
+from qsg_synthesizer.paths import APP_NAME, PACKAGE_DIR, resource_dir
 from qsg_synthesizer.schemas import (
     CompareResponse,
     DeviceSpec,
@@ -153,7 +153,9 @@ router = APIRouter(dependencies=[Depends(require_auth)])
 
 @app.get("/healthz")
 def healthz() -> dict:
-    return {"status": "healthy"}
+    # "app" lets the qsg-synthesizer command tell its own server from another
+    # program on the same port.
+    return {"status": "healthy", "app": APP_NAME}
 
 
 @router.get("/", include_in_schema=False)
