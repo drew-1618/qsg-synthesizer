@@ -57,7 +57,9 @@ from app.services.auth import (
     verify_credentials,
 )
 from app.services.orchestrator import (
+    LLM_MODEL_CHOICES,
     LLMOverride,
+    default_model,
     extract_device_specs,
     server_llm_provider,
     synthesize_battlecard,
@@ -328,14 +330,16 @@ def _resolve_document(
 
 
 def _llm_override(
-    provider: Optional[str], api_key: Optional[str]
+    provider: Optional[str], api_key: Optional[str], model: Optional[str] = None
 ) -> Optional[LLMOverride]:
     """Build the request's extractor choice from the dashboard's settings
     headers. Validated by hand so a rejected key never appears in the error."""
+    model = (model or "").strip() or None
     if not provider:
-        if api_key:
+        if api_key or model:
             raise HTTPException(
-                status_code=422, detail="Choose an AI provider to use with the key."
+                status_code=422,
+                detail="Choose an AI provider to use with the key or model.",
             )
         return None
     provider = provider.strip().lower()
@@ -352,13 +356,35 @@ def _llm_override(
             status_code=422,
             detail="That API key doesn't look valid. Paste it again in Settings.",
         )
-    return LLMOverride(provider=provider, api_key=key)  # type: ignore[arg-type]
+    if model is not None and model not in {
+        model_id for model_id, _ in LLM_MODEL_CHOICES.get(provider, [])
+    }:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "That model isn't available for this provider. "
+                "Pick another in Settings."
+            ),
+        )
+    return LLMOverride(
+        provider=provider, api_key=key, model=model  # type: ignore[arg-type]
+    )
 
 
 @router.get("/api/v1/settings")
 def get_settings() -> dict:
-    """What "Server default" means in the dashboard's settings."""
-    return {"server_provider": server_llm_provider()}
+    """What "Server default" means in the dashboard's settings, and the models
+    each provider offers (with the one used when none is picked)."""
+    return {
+        "server_provider": server_llm_provider(),
+        "models": {
+            provider: {
+                "default": default_model(provider),
+                "choices": [{"id": i, "label": label} for i, label in choices],
+            }
+            for provider, choices in LLM_MODEL_CHOICES.items()
+        },
+    }
 
 
 @router.post(
@@ -377,8 +403,9 @@ def compare_documents(
     keep_documents: bool = Form(True),
     llm_provider: Optional[str] = Header(None, alias="X-LLM-Provider"),
     llm_api_key: Optional[str] = Header(None, alias="X-LLM-API-Key"),
+    llm_model: Optional[str] = Header(None, alias="X-LLM-Model", max_length=100),
 ) -> CompareResponse:
-    llm = _llm_override(llm_provider, llm_api_key)
+    llm = _llm_override(llm_provider, llm_api_key, llm_model)
     text_a, source_a = _resolve_document(
         "Device A", device_a_file, device_a_text, device_a_name
     )
@@ -523,10 +550,11 @@ def rerun_history_item(
     history_id: str,
     llm_provider: Optional[str] = Header(None, alias="X-LLM-Provider"),
     llm_api_key: Optional[str] = Header(None, alias="X-LLM-API-Key"),
+    llm_model: Optional[str] = Header(None, alias="X-LLM-Model", max_length=100),
 ) -> CompareResponse:
     """Read a saved comparison's documents again (with the request's AI
     settings) and save the result as a new record."""
-    llm = _llm_override(llm_provider, llm_api_key)
+    llm = _llm_override(llm_provider, llm_api_key, llm_model)
     record = _get_history_record_or_404(history_id)
     sources = history.load_sources(record)
     if sources is None:
