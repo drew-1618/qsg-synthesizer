@@ -25,14 +25,19 @@ COPY qsg_synthesizer ./qsg_synthesizer
 COPY .claude ./.claude
 COPY sample_docs ./sample_docs
 
+# ORT_DISABLE_TELEMETRY: see qsg_synthesizer/__init__.py; set here too so
+# nothing in the image can load ONNX Runtime with telemetry on.
 ENV PATH=/home/appuser/.local/bin:$PATH \
     HISTORY_DIR=/app/data/history \
+    ORT_DISABLE_TELEMETRY=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
-# Created here so a named volume mounted over it inherits appuser ownership
+# Code and packages stay root-owned (read-only to the app), so an exploited
+# app process can't rewrite them. Only the history folder is appuser's, created
+# here so a named volume mounted over it inherits that ownership.
 RUN mkdir -p /app/data/history \
-    && chown -R appuser:appuser /app /home/appuser/.local
+    && chown appuser:appuser /app/data /app/data/history
 
 USER appuser
 
