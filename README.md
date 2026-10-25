@@ -110,7 +110,7 @@ cp .env.example .env   # optionally set ANTHROPIC_API_KEY
 .venv/bin/uvicorn qsg_synthesizer.main:app --reload
 ```
 
-Open `http://127.0.0.1:8000/` for the dashboard, or `http://127.0.0.1:8000/docs`
+Open `http://localhost:8000/` for the dashboard, or `http://localhost:8000/docs`
 for the OpenAPI docs.
 
 ## Frontend build (Tailwind CSS)

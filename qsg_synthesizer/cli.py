@@ -26,6 +26,11 @@ from qsg_synthesizer.paths import APP_NAME, default_data_dir
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8000
+# The address the dashboard is opened at. Browsers treat localhost and
+# 127.0.0.1 as different sites, each with its own settings, saved keys and
+# installed app, so this must match the README's Docker instructions.
+BROWSER_HOST = "localhost"
+_LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1", "0.0.0.0", "::"}
 # Rotated to .1 at startup once it passes this size.
 _MAX_LOG_BYTES = 5 * 1024 * 1024
 
@@ -101,8 +106,9 @@ def _autostart(args: argparse.Namespace) -> None:
             print(autostart.disable())
         else:
             state = "on" if autostart.is_enabled() else "off"
-            url = f"http://127.0.0.1:{args.port}/"
-            running = "running" if _already_running(url) else "not running"
+            probe = _probe_url(DEFAULT_HOST, args.port)
+            running = "running" if _already_running(probe) else "not running"
+            url = _browser_url(DEFAULT_HOST, args.port)
             print(f"Autostart is {state}; the app is {running} at {url}")
     except autostart.AutostartError as exc:
         sys.exit(str(exc))
@@ -119,6 +125,16 @@ def _port_is_free(host: str, port: int) -> bool:
         except OSError:
             return False
     return True
+
+
+def _browser_url(host: str, port: int) -> str:
+    return f"http://{BROWSER_HOST if host in _LOCAL_HOSTS else host}:{port}/"
+
+
+def _probe_url(host: str, port: int) -> str:
+    # 127.0.0.1, not localhost: uvicorn listens on IPv4, and some systems try
+    # localhost's IPv6 address first and hang on it.
+    return f"http://{'127.0.0.1' if host in _LOCAL_HOSTS else host}:{port}/"
 
 
 def _already_running(url: str) -> bool:
@@ -149,10 +165,9 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     # Lets qsg_synthesizer.main skip its "auth is off" warning when only this computer
     # can connect.
     os.environ["QSG_BIND_HOST"] = args.host
-    browse_host = "127.0.0.1" if args.host in ("0.0.0.0", "::") else args.host
-    url = f"http://{browse_host}:{args.port}/"
+    url = _browser_url(args.host, args.port)
     if not _port_is_free(args.host, args.port):
-        if _already_running(url):
+        if _already_running(_probe_url(args.host, args.port)):
             # e.g. started at login: just open it.
             print(f"QSG Synthesizer is already running: {url}", flush=True)
             if not args.no_browser:

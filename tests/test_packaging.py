@@ -105,15 +105,21 @@ class TestCli:
         run.assert_called_once_with(
             "qsg_synthesizer.main:app", host="127.0.0.1", port=8000
         )
-        assert timer.call_args.kwargs["args"] == ("http://127.0.0.1:8000/",)
+        assert timer.call_args.kwargs["args"] == ("http://localhost:8000/",)
         out = capsys.readouterr().out
-        assert "http://127.0.0.1:8000/" in out
+        assert "http://localhost:8000/" in out
         assert "History is saved in" in out
 
     def test_tells_the_app_which_address_it_listens_on(self):
         with patch("uvicorn.run"), patch.object(cli.threading, "Timer"):
             cli.main(["--host", "127.0.0.1"])
         assert os.environ["QSG_BIND_HOST"] == "127.0.0.1"
+
+    def test_browser_url_matches_the_docs_and_probe_avoids_ipv6(self):
+        assert cli._browser_url("127.0.0.1", 8000) == "http://localhost:8000/"
+        assert cli._browser_url("0.0.0.0", 8000) == "http://localhost:8000/"
+        assert cli._browser_url("10.0.0.5", 8000) == "http://10.0.0.5:8000/"
+        assert cli._probe_url("127.0.0.1", 8000) == "http://127.0.0.1:8000/"
 
     def test_no_browser_and_custom_port(self):
         with (
@@ -131,7 +137,7 @@ class TestCli:
         ):
             cli.main(["--host", "0.0.0.0"])
         assert run.call_args.kwargs["host"] == "0.0.0.0"
-        assert timer.call_args.kwargs["args"] == ("http://127.0.0.1:8000/",)
+        assert timer.call_args.kwargs["args"] == ("http://localhost:8000/",)
 
 
 class TestPortInUse:
@@ -150,7 +156,7 @@ class TestPortInUse:
         ):
             cli.main([])
         run.assert_not_called()
-        browse.assert_called_once_with("http://127.0.0.1:8000/")
+        browse.assert_called_once_with("http://localhost:8000/")
 
     def test_another_program_on_the_port_is_a_clear_error(self, monkeypatch):
         monkeypatch.setattr(cli, "_port_is_free", lambda host, port: False)
