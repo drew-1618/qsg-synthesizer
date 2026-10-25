@@ -513,6 +513,7 @@ class TestPdfUploadErrors:
             },
         )
         assert response.status_code == 400
+        assert "'a.pdf' is password-protected" in response.json()["detail"]
         assert client.get("/api/v1/history").json()["total"] == 0
 
 

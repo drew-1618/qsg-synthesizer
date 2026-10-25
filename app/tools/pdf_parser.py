@@ -36,6 +36,11 @@ def extract_text_from_pdf(pdf_bytes: bytes) -> str:
     """
     document = pymupdf.open(stream=pdf_bytes, filetype="pdf")
     try:
+        if document.needs_pass:
+            raise PdfRejectedError(
+                "is password-protected. Save a copy without the password and "
+                "upload that instead."
+            )
         if document.page_count > MAX_PDF_PAGES:
             raise PdfRejectedError(
                 f"has {document.page_count} pages; the limit is {MAX_PDF_PAGES}. "
