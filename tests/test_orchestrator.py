@@ -2,6 +2,7 @@ import json
 import logging
 from unittest.mock import MagicMock, patch
 
+from app.models.schemas import QSGExtraction
 from app.schemas import DeviceSpec, ProvisioningMethod
 from app.services import orchestrator
 from app.services.orchestrator import (
@@ -121,6 +122,32 @@ class TestExtractViaGemini:
             _, kwargs = mock_client.models.generate_content.call_args
             assert kwargs["model"] == "gemini-2.5-flash-lite"
             assert "some document text" in kwargs["contents"]
+            assert (
+                kwargs["config"].response_json_schema
+                == QSGExtraction.model_json_schema()
+            )
+
+    def test_truncated_reply_falls_back_to_heuristic(self):
+        from google.genai import types as gemini_types
+
+        with (
+            patch.dict(
+                "os.environ",
+                {"ANTHROPIC_API_KEY": "", "GEMINI_API_KEY": "k", "LLM_PROVIDER": ""},
+            ),
+            patch("app.services.orchestrator.genai") as mock_genai,
+        ):
+            response = _fake_gemini_response(_FAKE_EXTRACTION)
+            response.candidates = [
+                MagicMock(finish_reason=gemini_types.FinishReason.MAX_TOKENS)
+            ]
+            mock_genai.Client.return_value.models.generate_content.return_value = (
+                response
+            )
+            document_text = "# LegacyLink RG-210\n\nSome QSG content."
+            result = extract_qsg_fields(document_text, "doc.md")
+
+        assert result == _heuristic_extract_qsg(document_text, "doc.md")
 
     def test_falls_back_to_heuristic_on_api_error(self, caplog):
         with (

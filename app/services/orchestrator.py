@@ -628,18 +628,28 @@ def _extract_via_gemini(
         http_options=gemini_types.HttpOptions(timeout=int(_LLM_TIMEOUT_SECONDS * 1000)),
     )
     system_prompt = _load_agent_system_prompt("qsg_extractor.md")
+    # The schema constrains decoding to QSGExtraction's shape, as the forced
+    # tool call does for Anthropic; JSON mode alone only promises valid JSON.
     response = client.models.generate_content(
         model=_GEMINI_EXTRACTOR_MODEL,
         contents=_llm_user_content(document_text, source_document),
         config=gemini_types.GenerateContentConfig(
             system_instruction=system_prompt,
             response_mime_type="application/json",
+            response_json_schema=QSGExtraction.model_json_schema(),
             max_output_tokens=_LLM_MAX_OUTPUT_TOKENS,
             automatic_function_calling=gemini_types.AutomaticFunctionCallingConfig(
                 disable=True
             ),
         ),
     )
+    candidates = getattr(response, "candidates", None) or []
+    if (
+        candidates
+        and getattr(candidates[0], "finish_reason", None)
+        == gemini_types.FinishReason.MAX_TOKENS
+    ):
+        raise ValueError("LLM output truncated at max_output_tokens")
     if not response.text:
         raise ValueError("Gemini response contained no text")
     return _validate_extraction(_parse_json_payload(response.text))
