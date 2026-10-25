@@ -15,7 +15,8 @@ as Markdown or PDF.
    bounded `qsg_extractor` subagent (`.claude/agents/qsg_extractor.md`) when
    an `ANTHROPIC_API_KEY` and/or `GEMINI_API_KEY` is set, so raw multi-page
    documents are never dumped into the orchestrator's own prompt. Anthropic
-   (Haiku) is used if its key is present, Gemini (`gemini-2.5-flash-lite`)
+   (Haiku) is used if its key is present, Gemini (`gemini-2.5-flash-lite`,
+   or `GEMINI_MODEL`)
    otherwise — see `LLM_PROVIDER` below to force one explicitly. Without a
    usable key (or if the API call fails), a deterministic regex/heuristic
    parser produces the same shape, so the app and test suite never fail
@@ -38,6 +39,9 @@ as Markdown or PDF.
   keys are present, else whichever one is set. Naming a provider whose
   key/package isn't available falls back to the heuristic parser rather
   than silently using the other provider.)
+- `GEMINI_MODEL` (optional — the Gemini model to extract with; defaults to
+  `gemini-2.5-flash-lite`, which has the most free-tier quota. Use e.g.
+  `gemini-2.5-flash` for better extraction at a lower request limit.)
 - `APP_USERNAME` / `APP_PASSWORD` (optional — set both to gate the dashboard
   and API behind HTTP Basic Auth; `/healthz` always stays open for health
   checks. Neither is set by default, so local dev and the test suite run

@@ -130,6 +130,27 @@ class TestExtractViaGemini:
             assert retry.attempts == 3
             assert 429 in retry.http_status_codes
 
+    def test_gemini_model_env_overrides_the_default(self):
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "ANTHROPIC_API_KEY": "",
+                    "GEMINI_API_KEY": "k",
+                    "LLM_PROVIDER": "",
+                    "GEMINI_MODEL": " gemini-2.5-flash ",
+                },
+            ),
+            patch("app.services.orchestrator.genai") as mock_genai,
+        ):
+            client = mock_genai.Client.return_value
+            client.models.generate_content.return_value = _fake_gemini_response(
+                _FAKE_EXTRACTION
+            )
+            extract_qsg_fields("some document text", "doc.md")
+            _, kwargs = client.models.generate_content.call_args
+        assert kwargs["model"] == "gemini-2.5-flash"
+
     def test_truncated_reply_falls_back_to_heuristic(self):
         from google.genai import types as gemini_types
 

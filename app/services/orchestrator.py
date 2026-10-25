@@ -78,6 +78,7 @@ logger = logging.getLogger(__name__)
 
 _AGENTS_DIR = Path(__file__).resolve().parents[2] / ".claude" / "agents"
 _ANTHROPIC_EXTRACTOR_MODEL = "claude-haiku-5-5"
+# Overridable with GEMINI_MODEL, e.g. to trade free-tier quota for quality.
 _GEMINI_EXTRACTOR_MODEL = "gemini-2.5-flash-lite"
 
 # Bounds on the LLM call: untrusted PDF text must not be able to run up an
@@ -631,6 +632,10 @@ def _extract_via_anthropic(
     raise ValueError("LLM response contained no tool_use block")
 
 
+def _gemini_model() -> str:
+    return os.environ.get("GEMINI_MODEL", "").strip() or _GEMINI_EXTRACTOR_MODEL
+
+
 def _extract_via_gemini(
     document_text: str, source_document: str, api_key: Optional[str] = None
 ) -> QSGExtraction:
@@ -650,7 +655,7 @@ def _extract_via_gemini(
     # The schema constrains decoding to QSGExtraction's shape, as the forced
     # tool call does for Anthropic; JSON mode alone only promises valid JSON.
     response = client.models.generate_content(
-        model=_GEMINI_EXTRACTOR_MODEL,
+        model=_gemini_model(),
         contents=_llm_user_content(document_text, source_document),
         config=gemini_types.GenerateContentConfig(
             system_instruction=system_prompt,
