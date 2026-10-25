@@ -801,3 +801,22 @@ class TestUnhandledErrors:
         assert response.json() == {"detail": "Internal server error"}
         assert "disk on fire" not in response.text
         assert "Unhandled exception" in caplog.text
+
+
+class TestCrossOrigin:
+    def test_preflight_from_other_origin_is_not_allowed(self):
+        response = client.options(
+            "/api/v1/history",
+            headers={
+                "Origin": "https://evil.example",
+                "Access-Control-Request-Method": "DELETE",
+            },
+        )
+        assert "access-control-allow-origin" not in response.headers
+
+    def test_simple_request_gets_no_cors_header(self):
+        response = client.get(
+            "/api/v1/settings", headers={"Origin": "https://evil.example"}
+        )
+        assert response.status_code == 200
+        assert "access-control-allow-origin" not in response.headers

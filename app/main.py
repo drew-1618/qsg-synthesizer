@@ -35,7 +35,6 @@ from fastapi import (
     Request,
     UploadFile,
 )
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -91,13 +90,9 @@ app = FastAPI(
     version="0.1.0",
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# No CORS middleware on purpose: the dashboard is served from this same
+# origin, and allowing other origins would let any page open in the browser
+# call the API (clear history, spend the server's LLM key) while auth is off.
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
