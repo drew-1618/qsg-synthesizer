@@ -68,7 +68,8 @@ docker compose up --build                        # requires a .env file (cp .env
    marks older runs of identical documents as `redundant_ids`, which
    `DELETE /api/v1/history/{id}/copies` removes. The two input texts are kept as
    `data/history/sources/<sha256>.txt` (one file per distinct text, listed in
-   `HistoryRecord.sources`, deleted once no record uses them after a short grace period) so
+   `HistoryRecord.sources`; deleting a record removes the texts only it used at once, and
+any other unreferenced text goes after a short grace period) so
    `POST /api/v1/history/{id}/rerun` can read them again with the request's `X-LLM-*` settings
    and the record's mode; records without sources get a 409. Keeping them is on by default
    and switchable per browser in Settings (`qsg-keep-documents`, sent as the `keep_documents`
