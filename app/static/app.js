@@ -59,8 +59,8 @@ applyTheme(document.documentElement.dataset.theme === "dark" ? "dark" : "light")
 
 // ---- Settings: which AI reads documents, with the user's own keys ----
 // The provider choice is remembered in localStorage. Keys go to localStorage
-// only when "Remember keys" is on, otherwise sessionStorage, so they clear
-// with the tab. They are sent as headers with compare requests and never
+// when "Remember keys" is on (the default: the app normally runs on the
+// user's own computer), otherwise sessionStorage, so they clear with the tab. They are sent as headers with compare requests and never
 // stored on the server. The model picked per provider ("" = the server's
 // default for it) is remembered with the provider choice.
 const LLM_STORAGE_KEY = "qsg-llm";
@@ -79,7 +79,7 @@ function readStored(storage, key) {
 
 function loadLlmSettings() {
   const saved = readStored(localStorage, LLM_STORAGE_KEY);
-  const remember = saved.remember === true;
+  const remember = saved.remember !== false;
   const keys = readStored(remember ? localStorage : sessionStorage, LLM_KEYS_STORAGE_KEY);
   const asKey = (value) => (typeof value === "string" ? value : "");
   const models = saved.models && typeof saved.models === "object" ? saved.models : {};
@@ -128,6 +128,8 @@ const settingsKeyInput = document.getElementById("settings-key");
 const settingsKeyReveal = document.getElementById("settings-key-reveal");
 const settingsModelSelect = document.getElementById("settings-model");
 let serverSettingsLoaded = false;
+// The provider the app's own configuration (.env) uses; null for none.
+let serverProvider;
 // Per provider: { default, choices: [{ id, label }] }, from GET /api/v1/settings.
 let serverModels = {};
 
@@ -164,7 +166,7 @@ function syncSettingsDialog() {
   document.getElementById("settings-key-label").textContent = `${name} API key`;
   settingsKeyInput.value = llmSettings.keys[llmSettings.provider];
   document.getElementById("settings-key-hint").textContent =
-    `Without a key, the server's own ${name} key is used if it has one. Otherwise documents are read with the built-in parser.`;
+    `Without a key here, a ${name} key from the app's .env file is used if there is one. Otherwise documents are read with the built-in parser.`;
   document.getElementById("settings-remember").checked = llmSettings.remember;
 }
 
@@ -174,10 +176,13 @@ async function loadServerSettings() {
     const res = await fetch("/api/v1/settings");
     if (!res.ok) return;
     const { server_provider: provider, models } = await res.json();
-    document.getElementById("settings-server-hint").textContent =
-      `(${LLM_PROVIDER_NAMES[provider] || "built-in parser"})`;
+    document.getElementById("settings-server-hint").textContent = provider
+      ? `(${LLM_PROVIDER_NAMES[provider]} key from .env)`
+      : "(built-in parser)";
+    serverProvider = provider || null;
     serverModels = models || {};
     serverSettingsLoaded = true;
+    syncAiHint();
     if (settingsDialog.open && LLM_PROVIDER_NAMES[llmSettings.provider]) {
       syncModelSelect(llmSettings.provider);
     }
@@ -192,12 +197,47 @@ function setKeyRevealed(revealed) {
   settingsKeyReveal.textContent = revealed ? "Hide" : "Show";
 }
 
-document.getElementById("settings-toggle").addEventListener("click", () => {
+function openSettings() {
   setKeyRevealed(false);
   syncSettingsDialog();
   settingsDialog.showModal();
   loadServerSettings();
+}
+document.getElementById("settings-toggle").addEventListener("click", openSettings);
+
+// ---- First-run hint: no AI set up, so the built-in parser reads everything ----
+const AI_HINT_DISMISSED_KEY = "qsg-ai-hint-dismissed";
+
+function aiConfigured() {
+  const { provider } = llmSettings;
+  if (provider === "heuristic") return true; // chosen on purpose
+  if (provider === "server") return Boolean(serverProvider);
+  return Boolean(llmSettings.keys[provider]) || serverProvider === provider;
+}
+
+function syncAiHint() {
+  let dismissed = false;
+  try {
+    dismissed = localStorage.getItem(AI_HINT_DISMISSED_KEY) === "1";
+  } catch {
+    // Storage unavailable: show the hint until it's dismissed this visit.
+  }
+  // Until the server's configuration is known, assume it's set up.
+  const show = serverSettingsLoaded && !dismissed && !aiConfigured();
+  document.getElementById("ai-hint").classList.toggle("hidden", !show);
+}
+
+document.getElementById("ai-hint-settings").addEventListener("click", openSettings);
+document.getElementById("ai-hint-dismiss").addEventListener("click", () => {
+  try {
+    localStorage.setItem(AI_HINT_DISMISSED_KEY, "1");
+  } catch {
+    // Storage unavailable: hidden for this visit only.
+  }
+  document.getElementById("ai-hint").classList.add("hidden");
 });
+settingsDialog.addEventListener("close", syncAiHint);
+loadServerSettings();
 document.getElementById("settings-done").addEventListener("click", () => settingsDialog.close());
 settingsDialog.addEventListener("click", (e) => {
   if (e.target === settingsDialog) settingsDialog.close();
