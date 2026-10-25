@@ -1,6 +1,10 @@
 import pytest
 
-from app.tools.capability_compare import parse_speed_mbps, rank_wifi_standard
+from app.tools.capability_compare import (
+    capability_key,
+    parse_speed_mbps,
+    rank_wifi_standard,
+)
 from app.tools.led_normalizer import LEDState, normalize_led
 from app.tools.net_validator import (
     InvalidNetworkInput,
@@ -133,3 +137,15 @@ class TestMultiStandardWifiRank:
 
 def test_parse_speed_ignores_bare_dot():
     assert parse_speed_mbps("Up to . Gbps") is None
+
+
+class TestCapabilityKey:
+    def test_same_feature_worded_differently_matches(self):
+        assert capability_key("Mesh Wi-Fi support") == capability_key(
+            "Supports WiFi mesh"
+        )
+        assert capability_key("USB 3.0 port") == capability_key("usb 3.0 PORT.")
+
+    def test_different_features_do_not_match(self):
+        assert capability_key("USB 3.0 port") != capability_key("USB 2.0 port")
+        assert capability_key("Mesh Wi-Fi") != capability_key("Guest Wi-Fi")

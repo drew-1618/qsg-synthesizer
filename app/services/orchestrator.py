@@ -53,7 +53,11 @@ from app.schemas import (
     ProvisioningMethod,
     SpecValue,
 )
-from app.tools.capability_compare import parse_speed_mbps, rank_wifi_standard
+from app.tools.capability_compare import (
+    capability_key,
+    parse_speed_mbps,
+    rank_wifi_standard,
+)
 from app.tools.led_normalizer import LEDState, led_sort_key, normalize_led
 from app.tools.net_validator import InvalidNetworkInput, classify_ip
 from app.tools.port_counter import expand_port_range
@@ -1202,8 +1206,10 @@ def _build_key_advantages(
                 f"{device_a.wan_speed})."
             )
 
-    caps_a_only = [c for c in device_a.capabilities if c not in device_b.capabilities]
-    caps_b_only = [c for c in device_b.capabilities if c not in device_a.capabilities]
+    keys_a = {capability_key(c) for c in device_a.capabilities}
+    keys_b = {capability_key(c) for c in device_b.capabilities}
+    caps_a_only = [c for c in device_a.capabilities if capability_key(c) not in keys_b]
+    caps_b_only = [c for c in device_b.capabilities if capability_key(c) not in keys_a]
     advantages_a.extend(f"Unique capability: {c}" for c in caps_a_only)
     advantages_b.extend(f"Unique capability: {c}" for c in caps_b_only)
 

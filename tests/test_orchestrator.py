@@ -726,3 +726,12 @@ class TestProvisioningMapping:
             orchestrator._select_primary_provisioning_method([raw.WEB_GUI, raw.TR069])
             == orchestrator.ProvisioningMethod.WEB_GUI
         )
+
+
+def test_reworded_shared_capability_is_not_unique_to_either_device():
+    base = dict(provisioning_method=ProvisioningMethod.WEB_GUI)
+    a = DeviceSpec(model_name="A", capabilities=["Mesh Wi-Fi support"], **base)
+    b = DeviceSpec(model_name="B", capabilities=["supports WiFi mesh", "VoIP"], **base)
+    battlecard = orchestrator.synthesize_battlecard(a, b)
+    assert battlecard.key_advantages_device_a == [orchestrator.NO_ADVANTAGES_MESSAGE]
+    assert battlecard.key_advantages_device_b == ["Unique capability: VoIP"]
