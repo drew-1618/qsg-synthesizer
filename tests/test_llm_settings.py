@@ -9,6 +9,7 @@ import logging
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -147,7 +148,7 @@ def test_other_failures_with_a_user_key_get_a_retry_hint():
     assert "Try again" in response.json()["warnings"][0]
 
 
-def test_server_key_failures_add_no_settings_warning():
+def test_server_key_failures_warn_without_pointing_at_settings():
     with (
         patch.dict("os.environ", {**NO_SERVER_KEYS, "ANTHROPIC_API_KEY": "server"}),
         patch("app.services.orchestrator.anthropic") as mock_anthropic,
@@ -155,7 +156,29 @@ def test_server_key_failures_add_no_settings_warning():
         _anthropic_mock(mock_anthropic, side_effect=_AuthError("bad"))
         response = _compare({})
 
-    assert response.json()["warnings"] == []
+    warnings = response.json()["warnings"]
+    assert len(warnings) == 2
+    assert all("read with the built-in parser" in w for w in warnings)
+    assert not any("Settings" in w for w in warnings)
+
+
+class _RateLimitError(Exception):
+    status_code = 429
+
+
+@pytest.mark.parametrize("user_key", [None, USER_KEY])
+def test_rate_limits_say_to_wait(user_key):
+    env = {**NO_SERVER_KEYS, "ANTHROPIC_API_KEY": "" if user_key else "server"}
+    headers = {"X-LLM-Provider": "anthropic", "X-LLM-API-Key": user_key or ""}
+    with (
+        patch.dict("os.environ", env),
+        patch("app.services.orchestrator.anthropic") as mock_anthropic,
+    ):
+        _anthropic_mock(mock_anthropic, side_effect=_RateLimitError("slow down"))
+        response = _compare(headers)
+
+    assert "rate limit" in response.json()["warnings"][0]
+    assert "Wait a minute" in response.json()["warnings"][0]
 
 
 class TestHeaderValidation:

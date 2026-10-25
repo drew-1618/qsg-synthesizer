@@ -499,8 +499,36 @@ def _is_auth_error(exc: Exception) -> bool:
     return status == 400 and "api key" in str(exc).lower()
 
 
+def _is_rate_limited(exc: Exception) -> bool:
+    status = getattr(exc, "status_code", None) or getattr(exc, "code", None)
+    return status == 429
+
+
+def _fallback_warning(provider: str, exc: Exception, user_key: bool) -> str:
+    """What to tell the user when an LLM call fails and the built-in parser
+    reads the document instead, so a weaker result never goes unexplained."""
+    if user_key:
+        return _user_key_warning(provider, exc)
+    name = _PROVIDER_NAMES[provider]
+    if _is_rate_limited(exc):
+        return (
+            f"The server's {name} key hit its rate limit, so this document was "
+            "read with the built-in parser. Wait a minute and rerun."
+        )
+    return (
+        f"The {name} request failed, so this document was read with the "
+        "built-in parser. Rerun to try again; if it keeps happening, check the "
+        "server's API key and quota."
+    )
+
+
 def _user_key_warning(provider: str, exc: Exception) -> str:
     name = _PROVIDER_NAMES[provider]
+    if _is_rate_limited(exc):
+        return (
+            f"The {name} key in your settings hit its rate limit, so this "
+            "document was read with the built-in parser. Wait a minute and rerun."
+        )
     if _is_auth_error(exc):
         return (
             f"The {name} key in your settings was rejected, so this document was "
@@ -657,8 +685,7 @@ def _extract_single(
                 source_document,
                 exc_info=True,
             )
-            if api_key:
-                warnings.append(_user_key_warning(provider, exc))
+            warnings.append(_fallback_warning(provider, exc, user_key=bool(api_key)))
     else:
         logger.debug(
             "No LLM provider configured; using heuristic parser for %r",
@@ -847,7 +874,7 @@ def _extract_document(
             return (
                 _heuristic_extract_qsg(document_text, source_document),
                 EXTRACTION_SOURCE_HEURISTIC,
-                [_user_key_warning(provider, exc)] if api_key else [],
+                [_fallback_warning(provider, exc, user_key=bool(api_key))],
             )
     return _extract_single(document_text, source_document, llm)
 

@@ -40,14 +40,14 @@ docker compose up --build                        # requires a .env file (cp .env
    - `extract_qsg_fields` produces a raw `QSGExtraction` (`app/models/schemas.py`) via an LLM
      (Anthropic or Gemini, chosen by `_select_llm_provider` / `LLM_PROVIDER`), using
      `.claude/agents/qsg_extractor.md` (frontmatter stripped) as the system prompt. With no
-     usable key, or on *any* API/parse error, it silently falls back to `_heuristic_extract_qsg`,
+     usable key, or on *any* API/parse error, it falls back to `_heuristic_extract_qsg`,
      a regex parser keyed on the heading names used in `sample_docs/*.md`.
    - The dashboard's Settings can override the provider per request: `POST /api/v1/compare`
      reads `X-LLM-Provider` (`anthropic`/`gemini`/`heuristic`) and `X-LLM-API-Key` into an
      `LLMOverride`, which `_resolve_llm` turns into (provider, key) and which is passed
      explicitly down to the extractors (not via contextvars, because of the thread pools).
-     User keys are never stored or logged server-side; a failing user key adds a warning
-     (`_user_key_warning`) instead of falling back silently. `GET /api/v1/settings` reports
+     User keys are never stored or logged server-side. Any failed LLM call (user or server
+     key) adds a user-facing warning via `_fallback_warning` instead of falling back silently. `GET /api/v1/settings` reports
      the server's own provider.
    - `_normalize_to_device_spec` converts it into the API-facing `DeviceSpec` (`app/schemas.py`)
      using the deterministic tools in `app/tools/`.
