@@ -879,9 +879,9 @@ function historyRow(item, { title, subtitle }) {
   const plainLabel = `${escapeHtml(item.device_a_name)} vs ${escapeHtml(item.device_b_name)}`;
   const isCurrent = item.id === currentHistoryId;
   return `
-    <li class="flex items-center gap-1">
+    <li class="flex items-center gap-2">
       <button type="button" data-history-id="${item.id}"${isCurrent ? ' aria-current="true"' : ""}
-              class="flex-1 min-w-0 text-left py-3 px-2 -mx-2 rounded-control ring-1 ring-inset hover:bg-plate transition-colors ${isCurrent ? "bg-plate ring-action" : "ring-transparent hover:ring-ink-muted"}">
+              class="flex-1 min-w-0 text-left py-3 px-2 rounded-control ring-1 ring-inset hover:bg-plate transition-colors ${isCurrent ? "bg-plate ring-action" : "ring-transparent hover:ring-ink-muted"}">
         ${title}
         ${subtitle}
       </button>
@@ -946,7 +946,7 @@ function stackedHistoryRows(stack, index) {
     .join("");
   const copies = stack.redundant_ids.length;
   const dedupe = copies
-    ? `<li class="pt-1 pb-2">
+    ? `<li class="pt-1 pb-2 px-2">
          <button type="button" data-dedupe-id="${stack.latest.id}" data-dedupe-count="${copies}"
                  class="text-sm font-medium text-ink-muted hover:text-danger-text underline underline-offset-2 rounded-control transition-colors">
            Delete ${copies} older ${copies === 1 ? "copy" : "copies"}
