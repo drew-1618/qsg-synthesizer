@@ -1051,13 +1051,26 @@ NO_ADVANTAGES_MESSAGE = (
 )
 
 
-def _compute_friction_score(spec: DeviceSpec) -> int:
+# Setup procedures longer than these add 1 and 2 points of friction.
+_LONG_SETUP_STEPS = 8
+_VERY_LONG_SETUP_STEPS = 15
+
+
+def _compute_friction_score(spec: DeviceSpec, count_steps: bool = False) -> int:
+    """`count_steps` adds the procedure length; the caller sets it only when
+    both devices have a step count, so one side's missing count (the
+    heuristic parser never sets one) can't make the other look worse."""
     score = 1
     score += min(len(spec.required_tools), 4)
     if spec.provisioning_method not in _REMOTE_PROVISIONING_METHODS:
         score += 3
     if spec.provisioning_method == ProvisioningMethod.CONSOLE:
         score += 2
+    if count_steps and spec.step_count is not None:
+        if spec.step_count > _VERY_LONG_SETUP_STEPS:
+            score += 2
+        elif spec.step_count > _LONG_SETUP_STEPS:
+            score += 1
     return max(1, min(10, score))
 
 
@@ -1366,8 +1379,11 @@ def synthesize_battlecard(
     score_a: Optional[int] = None
     score_b: Optional[int] = None
     if _is_install_document(device_a) and _is_install_document(device_b):
-        score_a = _compute_friction_score(device_a)
-        score_b = _compute_friction_score(device_b)
+        count_steps = (
+            device_a.step_count is not None and device_b.step_count is not None
+        )
+        score_a = _compute_friction_score(device_a, count_steps)
+        score_b = _compute_friction_score(device_b, count_steps)
         talk_track = _build_sales_talk_track(
             device_a, score_a, device_b, score_b, perspective, advantages_a
         )

@@ -756,3 +756,33 @@ def test_setup_assessment_reaches_the_comparison_matrix():
         "device_a": ["No default password listed"],
         "device_b": [],
     }
+
+
+class TestStepCountFriction:
+    def _spec(self, name, steps):
+        return DeviceSpec(
+            model_name=name,
+            provisioning_method=ProvisioningMethod.TR069,
+            step_count=steps,
+        )
+
+    def test_long_procedures_add_friction_when_both_sides_are_counted(self):
+        card = orchestrator.synthesize_battlecard(
+            self._spec("A", 4), self._spec("B", 20)
+        )
+        assert card.installation_friction_score_device_a == 1
+        assert card.installation_friction_score_device_b == 3
+
+    def test_moderately_long_procedure_adds_one_point(self):
+        card = orchestrator.synthesize_battlecard(
+            self._spec("A", 9), self._spec("B", 8)
+        )
+        assert card.installation_friction_score_device_a == 2
+        assert card.installation_friction_score_device_b == 1
+
+    def test_ignored_when_only_one_side_has_a_count(self):
+        card = orchestrator.synthesize_battlecard(
+            self._spec("A", 30), self._spec("B", None)
+        )
+        assert card.installation_friction_score_device_a == 1
+        assert card.installation_friction_score_device_b == 1
