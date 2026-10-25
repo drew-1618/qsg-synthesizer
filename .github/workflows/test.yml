@@ -63,6 +63,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Compose file is valid without a .env
+        run: docker compose config --quiet
+
       - name: Build image
         run: docker build -t qsg-synthesizer:ci .
 

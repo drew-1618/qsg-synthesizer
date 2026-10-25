@@ -90,7 +90,7 @@ CLI version used to generate the committed output.
 ## Running with Docker
 
 ```bash
-cp .env.example .env   # required - docker-compose.yml expects this file to exist
+cp .env.example .env   # optional - only for keys/auth; Settings also takes API keys
 docker compose up --build
 ```
 

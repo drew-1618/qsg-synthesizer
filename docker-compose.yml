@@ -8,7 +8,10 @@ services:
       # Use "8000:8000" to reach it from other machines, with auth on.
       - "127.0.0.1:8000:8000"
     env_file:
-      - .env
+      # Optional: without it the app reads documents with the built-in parser,
+      # and API keys can be added in the dashboard's Settings instead.
+      - path: .env
+        required: false
     restart: unless-stopped
     volumes:
       - qsg-history:/app/data/history

@@ -14,7 +14,7 @@ A containerized FastAPI service running a multi-agent pipeline that ingests tele
 .venv/bin/pip-audit -r requirements.txt -r requirements-dev.txt
 npm install && npm run build:css                 # only after changing Tailwind classes in index.html/app.js
 python sample_docs/generate_samples.py           # regenerate the sample QSG PDFs
-docker compose up --build                        # requires a .env file (cp .env.example .env)
+docker compose up --build                        # .env optional (cp .env.example .env for server keys)
 ```
 
 ## Repository Standards
