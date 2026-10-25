@@ -18,6 +18,7 @@ if "PYTEST_VERSION" not in os.environ:
     load_dotenv()
 
 import base64
+import hashlib
 import logging
 from pathlib import Path
 from typing import Literal, Optional
@@ -28,6 +29,7 @@ from fastapi import (
     FastAPI,
     File,
     Form,
+    Header,
     HTTPException,
     Query,
     Request,
@@ -44,12 +46,18 @@ from app.schemas import (
     DeviceSpec,
     HistoryPage,
     HistoryRecord,
+    HistoryStackPage,
     Perspective,
 )
 from app.services import export as export_service
 from app.services import history
 from app.services.auth import require_auth, security, verify_credentials
-from app.services.orchestrator import extract_device_specs, synthesize_battlecard
+from app.services.orchestrator import (
+    LLMOverride,
+    extract_device_specs,
+    server_llm_provider,
+    synthesize_battlecard,
+)
 from app.services.rate_limiter import RateLimiter
 from app.tools.document_parser import (
     DocumentParseError,
@@ -68,6 +76,8 @@ SAMPLE_DOCS_DIR = BASE_DIR / "sample_docs"
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20MB per uploaded document
 MIN_TEXT_CHARS = 50  # below this (ignoring whitespace) there is nothing to extract from
 MAX_TEXT_CHARS = 2_000_000  # cap for compare-text's raw device_*_text fields
+MAX_API_KEY_CHARS = 300
+LLM_PROVIDER_CHOICES = ("anthropic", "gemini", "heuristic")
 
 # Compare endpoints run the extraction+synthesis pipeline (the expensive
 # path); export endpoints only render an already-saved battlecard, so they
@@ -141,20 +151,22 @@ def serve_dashboard() -> FileResponse:
 def get_samples() -> dict:
     """Base64-encoded sample QSG PDFs, for the dashboard's 1-click demo."""
 
-    def _encode(filename: str) -> dict:
+    # Served under product names, like real uploads, so they read right in
+    # either mode; the repo files keep their device_a/device_b names.
+    def _encode(filename: str, served_name: str) -> dict:
         path = SAMPLE_DOCS_DIR / filename
         if not path.exists():
             raise HTTPException(
                 status_code=404, detail=f"Sample '{filename}' not found."
             )
         return {
-            "filename": filename,
+            "filename": served_name,
             "content_base64": base64.b64encode(path.read_bytes()).decode("ascii"),
         }
 
     return {
-        "device_a": _encode("device_a_qsg.pdf"),
-        "device_b": _encode("device_b_qsg.pdf"),
+        "device_a": _encode("device_a_qsg.pdf", "NovaFiber-GX400-QSG.pdf"),
+        "device_b": _encode("device_b_qsg.pdf", "LegacyLink-RG-210-QSG.pdf"),
     }
 
 
@@ -187,16 +199,34 @@ def compare_text(payload: CompareTextRequest) -> CompareResponse:
         payload.device_b_text,
         payload.device_b_name,
     )
-    return _synthesize_and_save(device_a, device_b)
+    sources = [
+        (payload.device_a_name, payload.device_a_text),
+        (payload.device_b_name, payload.device_b_text),
+    ]
+    return _synthesize_and_save(device_a, device_b, sources)
+
+
+def _input_fingerprint(text_a: str, text_b: str) -> str:
+    """Identifies a comparison's inputs, so history can spot exact reruns."""
+    return hashlib.sha256(f"{text_a}\0{text_b}".encode("utf-8")).hexdigest()
 
 
 def _synthesize_and_save(
     device_a: DeviceSpec,
     device_b: DeviceSpec,
+    sources: list[tuple[str, str]],
     perspective: Optional[Perspective] = None,
+    keep_documents: bool = True,
 ) -> CompareResponse:
+    """`sources` are the (name, text) inputs, A then B, kept for reruns
+    unless `keep_documents` is off."""
     battlecard = synthesize_battlecard(device_a, device_b, perspective)
-    record = history.save_comparison(battlecard)
+    (_, text_a), (_, text_b) = sources
+    record = history.save_comparison(
+        battlecard,
+        input_fingerprint=_input_fingerprint(text_a, text_b),
+        sources=sources if keep_documents else (),
+    )
     return CompareResponse(**battlecard.model_dump(), history_id=record.id)
 
 
@@ -257,15 +287,15 @@ def compare_pdfs(
 ) -> CompareResponse:
     device_a_text = _read_document_upload(device_a_pdf, pdf_only=True)
     device_b_text = _read_document_upload(device_b_pdf, pdf_only=True)
+    name_a = device_a_pdf.filename or "device_a.pdf"
+    name_b = device_b_pdf.filename or "device_b.pdf"
 
     device_a, device_b = extract_device_specs(
-        device_a_text,
-        device_a_pdf.filename or "device_a.pdf",
-        device_b_text,
-        device_b_pdf.filename or "device_b.pdf",
+        device_a_text, name_a, device_b_text, name_b
     )
-
-    return _synthesize_and_save(device_a, device_b)
+    return _synthesize_and_save(
+        device_a, device_b, [(name_a, device_a_text), (name_b, device_b_text)]
+    )
 
 
 def _resolve_document(
@@ -288,6 +318,40 @@ def _resolve_document(
     return _require_text(text or "", source_name), source_name
 
 
+def _llm_override(
+    provider: Optional[str], api_key: Optional[str]
+) -> Optional[LLMOverride]:
+    """Build the request's extractor choice from the dashboard's settings
+    headers. Validated by hand so a rejected key never appears in the error."""
+    if not provider:
+        if api_key:
+            raise HTTPException(
+                status_code=422, detail="Choose an AI provider to use with the key."
+            )
+        return None
+    provider = provider.strip().lower()
+    if provider not in LLM_PROVIDER_CHOICES:
+        raise HTTPException(
+            status_code=422,
+            detail="Unknown AI provider. Use anthropic, gemini or heuristic.",
+        )
+    key = (api_key or "").strip() or None
+    if key is not None and (
+        len(key) > MAX_API_KEY_CHARS or not all(33 <= ord(ch) <= 126 for ch in key)
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="That API key doesn't look valid. Paste it again in Settings.",
+        )
+    return LLMOverride(provider=provider, api_key=key)  # type: ignore[arg-type]
+
+
+@router.get("/api/v1/settings")
+def get_settings() -> dict:
+    """What "Server default" means in the dashboard's settings."""
+    return {"server_provider": server_llm_provider()}
+
+
 @router.post(
     "/api/v1/compare",
     response_model=CompareResponse,
@@ -301,15 +365,25 @@ def compare_documents(
     device_b_text: Optional[str] = Form(None, max_length=MAX_TEXT_CHARS),
     device_b_name: Optional[str] = Form(None, max_length=200),
     mode: Literal["sales", "neutral"] = Form("sales"),
+    keep_documents: bool = Form(True),
+    llm_provider: Optional[str] = Header(None, alias="X-LLM-Provider"),
+    llm_api_key: Optional[str] = Header(None, alias="X-LLM-API-Key"),
 ) -> CompareResponse:
+    llm = _llm_override(llm_provider, llm_api_key)
     text_a, source_a = _resolve_document(
         "Device A", device_a_file, device_a_text, device_a_name
     )
     text_b, source_b = _resolve_document(
         "Device B", device_b_file, device_b_text, device_b_name
     )
-    device_a, device_b = extract_device_specs(text_a, source_a, text_b, source_b)
-    return _synthesize_and_save(device_a, device_b, mode)
+    device_a, device_b = extract_device_specs(text_a, source_a, text_b, source_b, llm)
+    return _synthesize_and_save(
+        device_a,
+        device_b,
+        [(source_a, text_a), (source_b, text_b)],
+        mode,
+        keep_documents,
+    )
 
 
 @router.get("/api/v1/history", response_model=HistoryPage)
@@ -321,6 +395,24 @@ def get_history(
     return HistoryPage(
         items=history.list_comparisons(limit=limit, offset=offset, query=q),
         total=history.count_comparisons(query=q),
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/api/v1/history/stacks", response_model=HistoryStackPage)
+def get_history_stacks(
+    limit: int = Query(20, ge=1, le=history.MAX_HISTORY_ENTRIES),
+    offset: int = Query(0, ge=0),
+    q: Optional[str] = Query(None, max_length=200),
+) -> HistoryStackPage:
+    stacks, total, record_total = history.list_stacks(
+        limit=limit, offset=offset, query=q
+    )
+    return HistoryStackPage(
+        items=stacks,
+        total=total,
+        record_total=record_total,
         limit=limit,
         offset=offset,
     )
@@ -398,6 +490,12 @@ def export_history_pdf(
     )
 
 
+# Registered before /history/{history_id} so "documents" isn't taken for an id.
+@router.delete("/api/v1/history/documents")
+def forget_history_documents() -> dict:
+    return {"forgotten": history.forget_all_sources()}
+
+
 @router.delete("/api/v1/history/{history_id}", status_code=204, response_class=Response)
 def delete_history_item(history_id: str) -> Response:
     if not history.delete_comparison(history_id):
@@ -405,6 +503,46 @@ def delete_history_item(history_id: str) -> Response:
             status_code=404, detail=f"History item '{history_id}' not found."
         )
     return Response(status_code=204)
+
+
+@router.post(
+    "/api/v1/history/{history_id}/rerun",
+    response_model=CompareResponse,
+    dependencies=[Depends(compare_rate_limiter)],
+)
+def rerun_history_item(
+    history_id: str,
+    llm_provider: Optional[str] = Header(None, alias="X-LLM-Provider"),
+    llm_api_key: Optional[str] = Header(None, alias="X-LLM-API-Key"),
+) -> CompareResponse:
+    """Read a saved comparison's documents again (with the request's AI
+    settings) and save the result as a new record."""
+    llm = _llm_override(llm_provider, llm_api_key)
+    record = _get_history_record_or_404(history_id)
+    sources = history.load_sources(record)
+    if sources is None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This comparison's documents weren't kept, so it can't be "
+                "rerun. Upload the documents again to compare them."
+            ),
+        )
+    (name_a, text_a), (name_b, text_b) = sources
+    device_a, device_b = extract_device_specs(text_a, name_a, text_b, name_b, llm)
+    return _synthesize_and_save(
+        device_a, device_b, sources, record.battlecard.perspective
+    )
+
+
+@router.delete("/api/v1/history/{history_id}/copies")
+def delete_history_copies(history_id: str) -> dict:
+    deleted = history.delete_older_copies(history_id)
+    if deleted is None:
+        raise HTTPException(
+            status_code=404, detail=f"History item '{history_id}' not found."
+        )
+    return {"deleted": deleted}
 
 
 @router.delete("/api/v1/history")

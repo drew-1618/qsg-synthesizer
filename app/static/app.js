@@ -15,10 +15,12 @@ function slotHasContent(slot) {
   return slot.mode === "file" ? Boolean(slot.file) : slot.text.trim().length > 0;
 }
 // ---- Theme ----
-// Follows the OS until the user picks one; the pick is remembered per browser.
+// Follows the OS ("System") until the user picks one in Settings; the pick is
+// remembered per browser. The inline script in index.html applies it before
+// first paint.
 const THEME_STORAGE_KEY = "qsg-theme";
 const THEME_BAR_COLORS = { light: "#2b333b", dark: "#0c0f12" };
-const themeToggle = document.getElementById("theme-toggle");
+const darkSchemeQuery = window.matchMedia("(prefers-color-scheme: dark)");
 
 function storedTheme() {
   try {
@@ -29,35 +31,228 @@ function storedTheme() {
   }
 }
 
+function systemTheme() {
+  return darkSchemeQuery.matches ? "dark" : "light";
+}
+
 function applyTheme(theme) {
   document.documentElement.dataset.theme = theme;
-  // The button names the action, and its icon (swapped in CSS) shows the target mode.
-  const label = `Switch to ${theme === "dark" ? "light" : "dark"} theme`;
-  themeToggle.setAttribute("aria-label", label);
-  themeToggle.title = label;
   document.querySelector('meta[name="theme-color"]').content = THEME_BAR_COLORS[theme];
 }
 
-themeToggle.addEventListener("click", () => {
-  const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
-  applyTheme(next);
+// "light", "dark" or "system".
+function setThemePreference(preference) {
   try {
-    localStorage.setItem(THEME_STORAGE_KEY, next);
+    if (preference === "system") localStorage.removeItem(THEME_STORAGE_KEY);
+    else localStorage.setItem(THEME_STORAGE_KEY, preference);
   } catch {
     // Storage unavailable (e.g. private mode): the choice just won't persist.
   }
-});
+  applyTheme(preference === "system" ? systemTheme() : preference);
+}
 
-window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (e) => {
-  if (!storedTheme()) applyTheme(e.matches ? "dark" : "light");
+darkSchemeQuery.addEventListener("change", () => {
+  if (!storedTheme()) applyTheme(systemTheme());
 });
 
 applyTheme(document.documentElement.dataset.theme === "dark" ? "dark" : "light");
 
+// ---- Settings: which AI reads documents, with the user's own keys ----
+// The provider choice is remembered in localStorage. Keys go to localStorage
+// only when "Remember keys" is on, otherwise sessionStorage, so they clear
+// with the tab. They are sent as headers with compare requests and never
+// stored on the server.
+const LLM_STORAGE_KEY = "qsg-llm";
+const LLM_KEYS_STORAGE_KEY = "qsg-llm-keys";
+const LLM_PROVIDERS = ["server", "anthropic", "gemini", "heuristic"];
+const LLM_PROVIDER_NAMES = { anthropic: "Anthropic", gemini: "Gemini" };
+
+function readStored(storage, key) {
+  try {
+    const value = JSON.parse(storage.getItem(key));
+    return value && typeof value === "object" ? value : {};
+  } catch {
+    return {};
+  }
+}
+
+function loadLlmSettings() {
+  const saved = readStored(localStorage, LLM_STORAGE_KEY);
+  const remember = saved.remember === true;
+  const keys = readStored(remember ? localStorage : sessionStorage, LLM_KEYS_STORAGE_KEY);
+  const asKey = (value) => (typeof value === "string" ? value : "");
+  return {
+    provider: LLM_PROVIDERS.includes(saved.provider) ? saved.provider : "server",
+    remember,
+    keys: { anthropic: asKey(keys.anthropic), gemini: asKey(keys.gemini) },
+  };
+}
+
+const llmSettings = loadLlmSettings();
+
+function saveLlmSettings() {
+  try {
+    localStorage.setItem(
+      LLM_STORAGE_KEY,
+      JSON.stringify({ provider: llmSettings.provider, remember: llmSettings.remember })
+    );
+    const [keep, drop] = llmSettings.remember ? [localStorage, sessionStorage] : [sessionStorage, localStorage];
+    keep.setItem(LLM_KEYS_STORAGE_KEY, JSON.stringify(llmSettings.keys));
+    drop.removeItem(LLM_KEYS_STORAGE_KEY);
+  } catch {
+    // Storage unavailable: settings last until the page reloads.
+  }
+}
+
+// Headers for POST /api/v1/compare; none means the server's own configuration.
+function llmHeaders() {
+  const { provider } = llmSettings;
+  if (provider === "server") return {};
+  const headers = { "X-LLM-Provider": provider };
+  const key = llmSettings.keys[provider];
+  if (key) headers["X-LLM-API-Key"] = key;
+  return headers;
+}
+
+const settingsDialog = document.getElementById("settings-dialog");
+const settingsKeyInput = document.getElementById("settings-key");
+const settingsKeyReveal = document.getElementById("settings-key-reveal");
+let serverProviderLoaded = false;
+
+function syncSettingsDialog() {
+  const theme = storedTheme() || "system";
+  settingsDialog.querySelectorAll('input[name="theme"]').forEach((radio) => {
+    radio.checked = radio.value === theme;
+  });
+  settingsDialog.querySelectorAll('input[name="llm-provider"]').forEach((radio) => {
+    radio.checked = radio.value === llmSettings.provider;
+  });
+  const name = LLM_PROVIDER_NAMES[llmSettings.provider];
+  document.getElementById("settings-key-section").classList.toggle("hidden", !name);
+  if (!name) return;
+  document.getElementById("settings-key-label").textContent = `${name} API key`;
+  settingsKeyInput.value = llmSettings.keys[llmSettings.provider];
+  document.getElementById("settings-key-hint").textContent =
+    `Without a key, the server's own ${name} key is used if it has one. Otherwise documents are read with the built-in parser.`;
+  document.getElementById("settings-remember").checked = llmSettings.remember;
+}
+
+async function loadServerProvider() {
+  if (serverProviderLoaded) return;
+  try {
+    const res = await fetch("/api/v1/settings");
+    if (!res.ok) return;
+    const { server_provider: provider } = await res.json();
+    document.getElementById("settings-server-hint").textContent =
+      `(${LLM_PROVIDER_NAMES[provider] || "built-in parser"})`;
+    serverProviderLoaded = true;
+  } catch {
+    // Leave the hint empty; the option still works.
+  }
+}
+
+function setKeyRevealed(revealed) {
+  settingsKeyInput.type = revealed ? "text" : "password";
+  settingsKeyReveal.setAttribute("aria-pressed", String(revealed));
+  settingsKeyReveal.textContent = revealed ? "Hide" : "Show";
+}
+
+document.getElementById("settings-toggle").addEventListener("click", () => {
+  setKeyRevealed(false);
+  syncSettingsDialog();
+  settingsDialog.showModal();
+  loadServerProvider();
+});
+document.getElementById("settings-done").addEventListener("click", () => settingsDialog.close());
+settingsDialog.addEventListener("click", (e) => {
+  if (e.target === settingsDialog) settingsDialog.close();
+});
+settingsDialog.addEventListener("close", () => setKeyRevealed(false));
+
+settingsDialog.addEventListener("change", (e) => {
+  const input = e.target;
+  if (input.name === "theme") {
+    setThemePreference(input.value);
+  } else if (input.name === "llm-provider") {
+    llmSettings.provider = input.value;
+    saveLlmSettings();
+    setKeyRevealed(false);
+    syncSettingsDialog();
+  } else if (input.id === "settings-remember") {
+    llmSettings.remember = input.checked;
+    saveLlmSettings();
+  }
+});
+
+settingsKeyInput.addEventListener("input", () => {
+  llmSettings.keys[llmSettings.provider] = settingsKeyInput.value.trim();
+  saveLlmSettings();
+});
+settingsKeyReveal.addEventListener("click", () => setKeyRevealed(settingsKeyInput.type === "password"));
+
+document.getElementById("settings-forget").addEventListener("click", () => {
+  llmSettings.keys = { anthropic: "", gemini: "" };
+  saveLlmSettings();
+  settingsKeyInput.value = "";
+  settingsKeyInput.focus();
+});
+
+// ---- Settings: whether comparisons keep their documents (for Rerun) ----
+// On by default: the server is the user's own and Rerun needs the text. The
+// choice is per browser and sent with each compare as `keep_documents`.
+const KEEP_DOCUMENTS_STORAGE_KEY = "qsg-keep-documents";
+const keepDocumentsInput = document.getElementById("settings-keep-documents");
+const documentsStatus = document.getElementById("settings-documents-status");
+
+function keepDocuments() {
+  try {
+    return localStorage.getItem(KEEP_DOCUMENTS_STORAGE_KEY) !== "false";
+  } catch {
+    return keepDocumentsInput.checked;
+  }
+}
+
+document.getElementById("settings-toggle").addEventListener("click", () => {
+  keepDocumentsInput.checked = keepDocuments();
+  documentsStatus.textContent = "";
+});
+keepDocumentsInput.addEventListener("change", () => {
+  try {
+    localStorage.setItem(KEEP_DOCUMENTS_STORAGE_KEY, String(keepDocumentsInput.checked));
+  } catch {
+    // Storage unavailable: the checkbox still applies until the page reloads.
+  }
+});
+
+document.getElementById("settings-forget-documents").addEventListener("click", async () => {
+  const ok = await confirmDialog(
+    "Saved comparisons keep their battlecards, but none of them can be rerun afterwards. This can’t be undone.",
+    { title: "Remove saved documents?", confirmLabel: "Remove documents" }
+  );
+  if (!ok) return;
+  documentsStatus.textContent = "";
+  try {
+    const res = await fetch("/api/v1/history/documents", { method: "DELETE" });
+    const data = await readJson(res);
+    if (!res.ok) throw new Error(describeFailure(res, data, "Could not remove the saved documents."));
+    const n = data.forgotten;
+    documentsStatus.textContent =
+      n === 0 ? "No comparisons had saved documents." : `Removed documents from ${n} comparison${n === 1 ? "" : "s"}.`;
+    if (!document.getElementById("result-bar").classList.contains("hidden")) {
+      document.getElementById("rerun-control").classList.add("hidden");
+      document.getElementById("result-bar-note").classList.remove("hidden");
+    }
+  } catch (err) {
+    documentsStatus.textContent = describeException(err, "Could not remove the saved documents.");
+  }
+});
+
 let currentHistoryId = null;
 const HISTORY_PAGE_SIZE = 20;
 let historyOffset = 0;
-let historyItems = [];
+// Stacks group comparisons of the same device pair and mode (see history.py).
+let historyStacks = [];
+const expandedStacks = new Set();
 let historySearch = "";
 
 const EXPORT_FORMATS = {
@@ -78,6 +273,35 @@ function setExportTarget(historyId) {
 // now-unsaved battlecard on screen with only its export links disabled.
 function hideResults() {
   document.getElementById("results").classList.add("hidden");
+  showForm();
+}
+
+// While a result is on screen the form collapses into #result-bar, so an empty
+// form never sits above a result it didn't produce. `fromForm` says whether
+// the form still holds the documents behind the result (a fresh compare) or
+// not (opened from history); only then can "Change documents" reopen it.
+// `canRerun` is false for records whose documents weren't kept.
+function showResultBar(data, { fromForm, createdAt, canRerun = true }) {
+  const names = data.comparison_matrix.model_name;
+  document.getElementById("result-bar-title").textContent = `${names.device_a} vs ${names.device_b}`;
+  const mode = data.perspective === "sales" ? "Sales battlecard" : "Neutral comparison";
+  document.getElementById("result-bar-meta").textContent = `${mode} \u00b7 ${formatTimestamp(createdAt)}`;
+  document.getElementById("change-documents-btn").classList.toggle("hidden", !fromForm);
+  document.getElementById("rerun-control").classList.toggle("hidden", !canRerun);
+  document.getElementById("result-bar-note").classList.toggle("hidden", canRerun);
+  document.getElementById("compare-section").classList.add("hidden");
+  document.getElementById("result-bar").classList.remove("hidden");
+}
+
+function showForm() {
+  document.getElementById("result-bar").classList.add("hidden");
+  document.getElementById("compare-section").classList.remove("hidden");
+}
+
+function scrollToForm() {
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  window.scrollTo({ top: 0, behavior: reduceMotion ? "auto" : "smooth" });
+  document.getElementById("file-a").focus({ preventScroll: true });
 }
 
 function escapeHtml(str) {
@@ -323,11 +547,19 @@ function wireSlot(letter) {
   );
   zone.addEventListener("drop", (e) => setFile(e.dataTransfer.files[0]));
 
-  return setFile;
+  // Back to an empty upload slot, as on first load.
+  const reset = () => {
+    Object.assign(slotState, emptySlot());
+    textArea.value = "";
+    nameInput.value = "";
+    clearFile();
+  };
+
+  return { setFile, reset };
 }
 
-const setFileA = wireSlot("A");
-const setFileB = wireSlot("B");
+const slotA = wireSlot("A");
+const slotB = wireSlot("B");
 
 // ---- Comparison mode ----
 // Sales: side A is the user's own device and B the competitor's, and the talk
@@ -385,8 +617,8 @@ document.getElementById("load-samples-btn").addEventListener("click", async () =
     const res = await fetch("/api/v1/samples");
     const data = await readJson(res);
     if (!res.ok) throw new Error(describeFailure(res, data, "Could not load the sample guides."));
-    setFileA(base64ToFile(data.device_a.content_base64, data.device_a.filename));
-    setFileB(base64ToFile(data.device_b.content_base64, data.device_b.filename));
+    slotA.setFile(base64ToFile(data.device_a.content_base64, data.device_a.filename));
+    slotB.setFile(base64ToFile(data.device_b.content_base64, data.device_b.filename));
     await synthesize();
   } catch (err) {
     showError(describeException(err, "Could not load the sample guides."));
@@ -492,7 +724,9 @@ function setLoading(isLoading) {
   status.innerHTML = `
     <span class="flex items-start gap-2">
       <span class="led-dot led-dot--amber led-dot--blinking mt-1.5" aria-hidden="true"></span>
-      <span id="compare-status-text" class="flex-1">Comparing Device A and Device B…</span>
+      <span id="compare-status-text" class="flex-1">${
+        state.mode === "sales" ? "Comparing your device with the competitor…" : "Comparing Device A and Device B…"
+      }</span>
       <span id="compare-elapsed" class="shrink-0 whitespace-nowrap font-mono tabular-nums" aria-hidden="true">0&nbsp;s</span>
     </span>`;
   const started = Date.now();
@@ -520,6 +754,8 @@ async function synthesize() {
   try {
     const formData = new FormData();
     formData.append("mode", state.mode);
+    const keep = keepDocuments();
+    formData.append("keep_documents", String(keep));
     for (const id of ["a", "b"]) {
       const slot = state.slots[id];
       if (slot.mode === "file") {
@@ -529,12 +765,13 @@ async function synthesize() {
         if (slot.name.trim()) formData.append(`device_${id}_name`, slot.name.trim());
       }
     }
-    const res = await fetch("/api/v1/compare", { method: "POST", body: formData });
+    const res = await fetch("/api/v1/compare", { method: "POST", body: formData, headers: llmHeaders() });
     const data = await readJson(res);
     if (!res.ok) throw new Error(describeFailure(res, data, "The comparison failed."));
     setExportTarget(data.history_id);
     setUrlId(data.history_id);
     await loadHistory();
+    showResultBar(data, { fromForm: true, createdAt: new Date().toISOString(), canRerun: keep });
     renderResults(data);
   } catch (err) {
     showError(describeException(err, "The comparison failed. Try again."));
@@ -544,6 +781,57 @@ async function synthesize() {
 }
 
 document.getElementById("synthesize-btn").addEventListener("click", synthesize);
+
+// The result is already saved in history, so starting over needs no confirmation.
+document.getElementById("new-comparison-btn").addEventListener("click", () => {
+  slotA.reset();
+  slotB.reset();
+  clearError();
+  hideResults();
+  setExportTarget(null);
+  setUrlId(null);
+  renderHistoryList();
+  scrollToForm();
+});
+
+// Reads the open comparison's saved documents again with the AI chosen in
+// Settings; the new result is saved and lands in the same history stack.
+async function rerun() {
+  if (state.busy || !currentHistoryId) return;
+  const bar = document.getElementById("result-bar");
+  const setRerunning = (on) => {
+    state.busy = on;
+    bar.querySelectorAll("button").forEach((btn) => (btn.disabled = on));
+    document.getElementById("rerun-spinner").classList.toggle("hidden", !on);
+    document.getElementById("rerun-label").textContent = on ? "Rerunning\u2026" : "Rerun";
+  };
+  clearError();
+  setRerunning(true);
+  try {
+    const res = await fetch(`/api/v1/history/${currentHistoryId}/rerun`, { method: "POST", headers: llmHeaders() });
+    const data = await readJson(res);
+    if (!res.ok) throw new Error(describeFailure(res, data, "The rerun failed."));
+    const fromForm = !document.getElementById("change-documents-btn").classList.contains("hidden");
+    setExportTarget(data.history_id);
+    setUrlId(data.history_id);
+    await loadHistory();
+    showResultBar(data, { fromForm, createdAt: new Date().toISOString() });
+    renderResults(data);
+  } catch (err) {
+    showError(describeException(err, "The rerun failed. Try again."));
+  } finally {
+    setRerunning(false);
+  }
+}
+
+document.getElementById("rerun-btn").addEventListener("click", rerun);
+
+// Reopens the form with the documents that produced the result, so one side
+// can be swapped; the result stays below until the next compare.
+document.getElementById("change-documents-btn").addEventListener("click", () => {
+  showForm();
+  scrollToForm();
+});
 
 // ---- History drawer ----
 const HISTORY_ID_PATTERN = /^[0-9a-f]{32}$/;
@@ -586,12 +874,113 @@ function setUrlId(id, { replace = false } = {}) {
   history[replace ? "replaceState" : "pushState"]({}, "", url);
 }
 
+// A row that opens one comparison, plus its delete button.
+function historyRow(item, { title, subtitle }) {
+  const plainLabel = `${escapeHtml(item.device_a_name)} vs ${escapeHtml(item.device_b_name)}`;
+  const isCurrent = item.id === currentHistoryId;
+  return `
+    <li class="flex items-center gap-1">
+      <button type="button" data-history-id="${item.id}"${isCurrent ? ' aria-current="true"' : ""}
+              class="flex-1 min-w-0 text-left py-3 px-2 -mx-2 rounded-control hover:bg-plate transition-colors ${isCurrent ? "bg-plate" : ""}">
+        ${title}
+        ${subtitle}
+      </button>
+      <button type="button" data-delete-id="${item.id}" aria-label="Delete comparison: ${plainLabel}, ${escapeHtml(formatTimestamp(item.created_at))}"
+              class="shrink-0 w-9 h-9 inline-flex items-center justify-center rounded-control text-ink-muted hover:text-danger-text hover:bg-plate">
+        &times;
+      </button>
+    </li>`;
+}
+
+function historyLabel(item) {
+  const plainLabel = `${escapeHtml(item.device_a_name)} vs ${escapeHtml(item.device_b_name)}`;
+  const highlighted = `${highlightMatch(item.device_a_name, historySearch)} vs ${highlightMatch(item.device_b_name, historySearch)}`;
+  return `<span class="block font-medium truncate" title="${plainLabel}">${highlighted}</span>`;
+}
+
+// The card every history entry gets in the drawer. A stack adds the plate
+// peeking out underneath; `trailing` is its runs toggle, or a delete button.
+function historyCard(item, { timestamp, trailing, stacked = false }) {
+  const isCurrent = item.id === currentHistoryId;
+  const layer = stacked
+    ? "relative isolate mb-1 before:absolute before:inset-x-2 before:-bottom-1 before:h-2 before:-z-10 before:rounded-b-control before:border before:border-t-0 before:border-line before:bg-plate"
+    : "";
+  return `
+    <div class="${layer} flex items-center gap-1 rounded-control border ${isCurrent ? "border-action" : "border-line"} bg-plate px-2">
+      <button type="button" data-history-id="${item.id}"${isCurrent ? ' aria-current="true"' : ""}
+              class="flex-1 min-w-0 text-left py-3 rounded-control">
+        ${historyLabel(item)}
+        <span class="block text-ink-muted truncate">${escapeHtml(easierLabel(item))}</span>
+        <span class="block text-ink-muted">${escapeHtml(timestamp)}</span>
+      </button>
+      ${trailing}
+    </div>`;
+}
+
+function singleHistoryRow(item) {
+  const plainLabel = `${escapeHtml(item.device_a_name)} vs ${escapeHtml(item.device_b_name)}`;
+  const deleteBtn = `
+    <button type="button" data-delete-id="${item.id}" aria-label="Delete comparison: ${plainLabel}, ${escapeHtml(formatTimestamp(item.created_at))}"
+            class="shrink-0 w-9 h-9 inline-flex items-center justify-center rounded-control text-ink-muted hover:text-danger-text hover:bg-plate-hover">
+      &times;
+    </button>`;
+  return `<li>${historyCard(item, { timestamp: formatTimestamp(item.created_at), trailing: deleteBtn })}</li>`;
+}
+
+// Several runs of the same comparison: the newest is shown, the rest fold away.
+function stackedHistoryRows(stack, index) {
+  const members = [stack.latest, ...stack.others];
+  const redundant = new Set(stack.redundant_ids);
+  const isExpanded =
+    expandedStacks.has(stack.key) || stack.others.some((item) => item.id === currentHistoryId);
+  const panelId = `history-stack-${index}`;
+  const memberRows = members
+    .map((item) =>
+      historyRow(item, {
+        title: `<span class="block font-medium">${escapeHtml(formatTimestamp(item.created_at))}</span>`,
+        subtitle: `
+          <span class="block text-ink-muted truncate">${escapeHtml(easierLabel(item))}</span>
+          ${redundant.has(item.id) ? '<span class="block text-ink-muted">Same documents as a newer run</span>' : ""}`,
+      })
+    )
+    .join("");
+  const copies = stack.redundant_ids.length;
+  const dedupe = copies
+    ? `<li class="pt-1 pb-2">
+         <button type="button" data-dedupe-id="${stack.latest.id}" data-dedupe-count="${copies}"
+                 class="text-sm font-medium text-ink-muted hover:text-danger-text underline underline-offset-2 rounded-control">
+           Delete ${copies} older ${copies === 1 ? "copy" : "copies"}
+         </button>
+       </li>`
+    : "";
+  const toggle = `
+    <button type="button" data-stack-toggle="${escapeHtml(stack.key)}" aria-expanded="${isExpanded}" aria-controls="${panelId}"
+            class="shrink-0 inline-flex items-center gap-1 h-9 px-2 rounded-control text-sm text-ink-muted hover:text-ink hover:bg-plate-hover">
+      <span class="font-mono tabular-nums">${members.length}</span> runs
+      <svg class="w-4 h-4 transition-transform ${isExpanded ? "rotate-180" : ""}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M6 9l6 6 6-6" />
+      </svg>
+    </button>`;
+  return `
+    <li>
+      ${historyCard(stack.latest, {
+        timestamp: `Latest ${formatTimestamp(stack.latest.created_at)}`,
+        trailing: toggle,
+        stacked: true,
+      })}
+      <ul id="${panelId}" class="${isExpanded ? "" : "hidden "}mt-2 ml-2 pl-3 border-l border-line">
+        ${memberRows}
+        ${dedupe}
+      </ul>
+    </li>`;
+}
+
 function renderHistoryList() {
   const list = document.getElementById("history-list");
   const empty = document.getElementById("history-empty");
   const clearAllBtn = document.getElementById("clear-history-btn");
-  clearAllBtn.classList.toggle("hidden", historyItems.length === 0);
-  if (historyItems.length === 0) {
+  clearAllBtn.classList.toggle("hidden", historyStacks.length === 0);
+  if (historyStacks.length === 0) {
     list.innerHTML = "";
     empty.textContent = historySearch
       ? "No comparisons match that search."
@@ -600,25 +989,8 @@ function renderHistoryList() {
     return;
   }
   empty.classList.add("hidden");
-  list.innerHTML = historyItems
-    .map((item) => {
-      const plainLabel = `${escapeHtml(item.device_a_name)} vs ${escapeHtml(item.device_b_name)}`;
-      const highlightedLabel = `${highlightMatch(item.device_a_name, historySearch)} vs ${highlightMatch(item.device_b_name, historySearch)}`;
-      const isCurrent = item.id === currentHistoryId;
-      return `
-        <li class="flex items-center gap-1">
-          <button type="button" data-history-id="${item.id}"${isCurrent ? ' aria-current="true"' : ""}
-                  class="flex-1 min-w-0 text-left py-3 px-2 -mx-2 rounded-control hover:bg-plate transition-colors ${isCurrent ? "bg-plate" : ""}">
-            <span class="block font-medium truncate" title="${plainLabel}">${highlightedLabel}</span>
-            <span class="block text-ink-muted truncate">${escapeHtml(easierLabel(item))}</span>
-            <span class="block text-ink-muted">${escapeHtml(formatTimestamp(item.created_at))}</span>
-          </button>
-          <button type="button" data-delete-id="${item.id}" aria-label="Delete comparison: ${plainLabel}"
-                  class="shrink-0 w-9 h-9 inline-flex items-center justify-center rounded-control text-ink-muted hover:text-danger-text hover:bg-plate">
-            &times;
-          </button>
-        </li>`;
-    })
+  list.innerHTML = historyStacks
+    .map((stack, i) => (stack.others.length ? stackedHistoryRows(stack, i) : singleHistoryRow(stack.latest)))
     .join("");
 }
 
@@ -628,18 +1000,18 @@ async function loadHistory({ append = false } = {}) {
   const offset = append ? historyOffset : 0;
   const q = historySearch ? `&q=${encodeURIComponent(historySearch)}` : "";
   try {
-    const res = await fetch(`/api/v1/history?limit=${HISTORY_PAGE_SIZE}&offset=${offset}${q}`);
+    const res = await fetch(`/api/v1/history/stacks?limit=${HISTORY_PAGE_SIZE}&offset=${offset}${q}`);
     if (!res.ok) throw new Error();
     const page = await res.json();
-    historyItems = append ? historyItems.concat(page.items) : page.items;
+    historyStacks = append ? historyStacks.concat(page.items) : page.items;
     historyOffset = offset + page.items.length;
     if (!historySearch) {
-      historyTotalAll = page.total;
+      historyTotalAll = page.record_total;
       updateHistoryCount();
     }
     renderHistoryList();
     loadMoreBtn.classList.toggle("hidden", historyOffset >= page.total);
-    return historyItems;
+    return historyStacks;
   } catch {
     document.getElementById("history-list").innerHTML = "";
     document.getElementById("clear-history-btn").classList.add("hidden");
@@ -657,6 +1029,11 @@ async function loadHistoryItem(id) {
     const record = await readJson(res);
     if (!res.ok) throw new Error(describeFailure(res, record, "Could not load that comparison."));
     setExportTarget(id);
+    showResultBar(record.battlecard, {
+      fromForm: false,
+      createdAt: record.created_at,
+      canRerun: (record.sources || []).length === 2,
+    });
     renderResults(record.battlecard);
     return true;
   } catch (err) {
@@ -694,7 +1071,54 @@ async function deleteHistoryItem(id) {
   }
 }
 
+// Deletes the older runs made from the same documents as a newer run in the
+// stack; runs from different documents are kept.
+async function deleteOlderCopies(id, count) {
+  const noun = count === 1 ? "copy" : "copies";
+  const ok = await confirmDialog(
+    `This deletes ${count} older ${noun} made from the same documents and keeps the newest. It can\u2019t be undone.`,
+    { title: `Delete ${count} older ${noun}?`, confirmLabel: `Delete ${noun}` }
+  );
+  if (!ok) return;
+  const stack = historyStacks.find((s) => s.latest.id === id);
+  const removed = new Set(stack ? stack.redundant_ids : []);
+  try {
+    const res = await fetch(`/api/v1/history/${id}/copies`, { method: "DELETE" });
+    if (!res.ok && res.status !== 404) {
+      throw new Error(describeFailure(res, await readJson(res), "Could not delete the older copies."));
+    }
+    if (removed.has(currentHistoryId)) {
+      setExportTarget(null);
+      hideResults();
+      setUrlId(null, { replace: true });
+    }
+    await loadHistory();
+  } catch (err) {
+    showError(describeException(err, "Could not delete the older copies."));
+  }
+}
+
+function toggleStack(button) {
+  const key = button.dataset.stackToggle;
+  const expand = button.getAttribute("aria-expanded") !== "true";
+  if (expand) expandedStacks.add(key);
+  else expandedStacks.delete(key);
+  button.setAttribute("aria-expanded", String(expand));
+  button.querySelector("svg").classList.toggle("rotate-180", expand);
+  document.getElementById(button.getAttribute("aria-controls")).classList.toggle("hidden", !expand);
+}
+
 document.getElementById("history-list").addEventListener("click", (e) => {
+  const toggleBtn = e.target.closest("[data-stack-toggle]");
+  if (toggleBtn) {
+    toggleStack(toggleBtn);
+    return;
+  }
+  const dedupeBtn = e.target.closest("[data-dedupe-id]");
+  if (dedupeBtn) {
+    deleteOlderCopies(dedupeBtn.dataset.dedupeId, Number(dedupeBtn.dataset.dedupeCount));
+    return;
+  }
   const deleteBtn = e.target.closest("[data-delete-id]");
   if (deleteBtn) {
     deleteHistoryItem(deleteBtn.dataset.deleteId);

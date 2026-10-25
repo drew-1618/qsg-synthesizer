@@ -43,15 +43,11 @@
           History
           <span id="history-count" class="hidden font-mono tabular-nums text-bezel-ink/75"></span>
         </button>
-        <!-- The icon shows the mode a click switches to: moon in light, sun in dark. -->
-        <button id="theme-toggle" type="button" aria-label="Switch to dark theme" title="Switch to dark theme"
+        <button id="settings-toggle" type="button" aria-haspopup="dialog" aria-label="Settings" title="Settings"
                 class="shrink-0 inline-flex h-10 w-10 items-center justify-center rounded-control border border-bezel-ink/30 hover:bg-bezel-ink/10 transition-colors focus-visible:outline-bezel-ink">
-          <svg class="w-5 h-5 dark:hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-          </svg>
-          <svg class="w-5 h-5 hidden dark:block" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <circle cx="12" cy="12" r="4" />
-            <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="3" />
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
           </svg>
         </button>
       </div>
@@ -73,7 +69,7 @@
     </div>
 
     <!-- Compare: choose two guides -->
-    <section aria-labelledby="compare-heading" class="space-y-5">
+    <section id="compare-section" aria-labelledby="compare-heading" class="space-y-5">
       <h2 id="compare-heading" class="font-heading font-semibold text-xl">Add the two documents to compare</h2>
 
       <fieldset id="mode-control" class="space-y-2">
@@ -110,12 +106,41 @@
       <div id="compare-status" role="status" class="min-h-6 text-sm text-ink-muted"></div>
     </section>
 
+    <!-- Stands in for the form while a result is on screen (showResultBar() in app.js) -->
+    <section id="result-bar" aria-label="Current comparison" class="hidden">
+      <div class="flex flex-col sm:flex-row sm:items-center gap-3 rounded-control border border-line bg-plate px-4 py-3">
+        <div class="min-w-0 flex-1">
+          <p id="result-bar-title" class="font-heading font-semibold truncate"></p>
+          <p id="result-bar-meta" class="text-sm text-ink-muted"></p>
+          <p id="result-bar-note" class="hidden text-sm text-ink-muted">This comparison&rsquo;s documents weren&rsquo;t kept, so it can&rsquo;t be rerun.</p>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <!-- Toggled as a wrapper: the button's inline-flex would override `hidden` -->
+          <div id="rerun-control">
+            <button id="rerun-btn" type="button" title="Read the same documents again with the AI chosen in Settings"
+                    class="inline-flex items-center gap-2 text-sm font-medium bg-plate border border-line hover:bg-plate-hover px-3.5 py-2 rounded-control transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+              <span id="rerun-spinner" class="spinner hidden"></span>
+              <span id="rerun-label">Rerun</span>
+            </button>
+          </div>
+          <button id="change-documents-btn" type="button"
+                  class="text-sm font-medium bg-plate border border-line hover:bg-plate-hover px-3.5 py-2 rounded-control transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+            Change documents
+          </button>
+          <button id="new-comparison-btn" type="button"
+                  class="text-sm font-medium bg-plate border border-line hover:bg-plate-hover px-3.5 py-2 rounded-control transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+            New comparison
+          </button>
+        </div>
+      </div>
+    </section>
+
     <!-- Results: one comparative surface, rendered by renderResults() in app.js -->
     <section id="results" aria-labelledby="results-heading" class="hidden space-y-10">
 
       <div class="flex flex-wrap items-center justify-between gap-3">
         <h2 id="results-heading" tabindex="-1" class="font-heading font-semibold text-xl focus:outline-none">Results</h2>
-        <div class="flex items-center gap-2">
+        <div class="flex flex-wrap items-center gap-2">
           <button id="export-md-btn" type="button" disabled
                   class="text-sm font-medium bg-plate border border-line hover:bg-plate-hover px-3.5 py-2 rounded-control transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
             Export Markdown
@@ -199,7 +224,7 @@
                class="w-full text-sm bg-plate border border-line rounded-control px-3 py-2 placeholder:text-ink-muted" />
       </div>
       <div class="flex-1 overflow-y-auto overscroll-contain px-5 py-2">
-        <ul id="history-list" class="divide-y divide-line text-sm"></ul>
+        <ul id="history-list" class="space-y-3 py-2 text-sm"></ul>
         <p id="history-empty" class="hidden text-sm text-ink-muted py-4"></p>
         <button id="load-more-history-btn" type="button"
                 class="hidden my-3 text-sm font-medium text-action underline underline-offset-2 rounded-control">
@@ -239,6 +264,101 @@
         </button>
       </div>
     </form>
+  </dialog>
+
+  <!-- Settings: theme and the AI used to read documents. Keys never leave this browser except with a compare request. -->
+  <dialog id="settings-dialog" aria-labelledby="settings-title"
+          class="confirm-pop m-auto w-full max-w-md p-6 bg-plate text-ink rounded-control border border-line backdrop:bg-scrim">
+    <h2 id="settings-title" class="font-heading font-semibold text-lg">Settings</h2>
+    <div class="mt-4 space-y-6">
+      <fieldset class="space-y-2">
+        <legend class="text-sm font-medium mb-2">Theme</legend>
+        <div class="inline-flex rounded-control border border-line bg-panel p-1">
+            <label class="cursor-pointer">
+              <input type="radio" name="theme" value="light" class="peer sr-only" />
+              <span class="block px-3.5 py-2 rounded-control text-sm font-medium transition-colors hover:bg-plate-hover peer-checked:bg-action peer-checked:text-on-action peer-checked:hover:bg-action-hover peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-action">Light</span>
+            </label>
+            <label class="cursor-pointer">
+              <input type="radio" name="theme" value="dark" class="peer sr-only" />
+              <span class="block px-3.5 py-2 rounded-control text-sm font-medium transition-colors hover:bg-plate-hover peer-checked:bg-action peer-checked:text-on-action peer-checked:hover:bg-action-hover peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-action">Dark</span>
+            </label>
+            <label class="cursor-pointer">
+              <input type="radio" name="theme" value="system" class="peer sr-only" checked />
+              <span class="block px-3.5 py-2 rounded-control text-sm font-medium transition-colors hover:bg-plate-hover peer-checked:bg-action peer-checked:text-on-action peer-checked:hover:bg-action-hover peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-action">System</span>
+            </label>
+        </div>
+      </fieldset>
+
+      <fieldset class="space-y-2">
+        <legend class="text-sm font-medium mb-2">AI for reading documents</legend>
+        <div class="space-y-2 text-sm">
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="radio" name="llm-provider" value="server" class="accent-action" checked />
+              <span>Server default <span id="settings-server-hint" class="text-ink-muted"></span></span>
+            </label>
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="radio" name="llm-provider" value="anthropic" class="accent-action" />
+              <span>Anthropic (Claude)</span>
+            </label>
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="radio" name="llm-provider" value="gemini" class="accent-action" />
+              <span>Google Gemini</span>
+            </label>
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="radio" name="llm-provider" value="heuristic" class="accent-action" />
+              <span>Built-in parser, no AI</span>
+            </label>
+        </div>
+      </fieldset>
+
+      <div id="settings-key-section" class="hidden space-y-2">
+        <label id="settings-key-label" for="settings-key" class="block text-sm font-medium">API key</label>
+        <div class="flex items-center gap-2">
+          <input id="settings-key" type="password" autocomplete="off" spellcheck="false" maxlength="300"
+                 class="min-w-0 flex-1 font-mono text-sm bg-panel border border-line rounded-control px-3 py-2" />
+          <button id="settings-key-reveal" type="button" aria-pressed="false" aria-controls="settings-key"
+                  class="shrink-0 text-sm font-medium px-3 py-2 rounded-control border border-line bg-plate hover:bg-plate-hover transition-colors">
+            Show
+          </button>
+        </div>
+        <p id="settings-key-hint" class="text-sm text-ink-muted"></p>
+        <label class="flex items-center gap-2 text-sm cursor-pointer">
+          <input id="settings-remember" type="checkbox" class="accent-action" />
+          Remember keys on this device
+        </label>
+        <p class="text-sm text-ink-muted">
+          Keys stay in this browser and are sent only with your compare requests. The server passes them to the
+          provider and never saves them. Without "remember", they clear when you close the tab.
+        </p>
+        <button id="settings-forget" type="button"
+                class="text-sm font-medium text-ink-muted hover:text-danger-text underline underline-offset-2 rounded-control">
+          Forget saved keys
+        </button>
+      </div>
+
+      <fieldset class="space-y-2">
+        <legend class="text-sm font-medium mb-2">History</legend>
+        <label class="flex items-center gap-2 text-sm cursor-pointer">
+          <input id="settings-keep-documents" type="checkbox" class="accent-action" checked />
+          Keep documents so comparisons can be rerun
+        </label>
+        <p class="text-sm text-ink-muted">
+          The text read from each document is saved on the server with its comparison and deleted with it.
+          Turn this off to keep only the battlecard. This applies to new comparisons.
+        </p>
+        <button id="settings-forget-documents" type="button"
+                class="text-sm font-medium text-ink-muted hover:text-danger-text underline underline-offset-2 rounded-control">
+          Remove documents already saved
+        </button>
+        <p id="settings-documents-status" role="status" class="text-sm text-ink-muted"></p>
+      </fieldset>
+    </div>
+    <div class="flex items-center justify-end mt-6">
+      <button id="settings-done" type="button"
+              class="font-semibold text-on-action bg-action hover:bg-action-hover px-4 py-2.5 rounded-control transition-colors">
+        Done
+      </button>
+    </div>
   </dialog>
 
   <!-- Confirmation dialog (replaces window.confirm across the app) -->

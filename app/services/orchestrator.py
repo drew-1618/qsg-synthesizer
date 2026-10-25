@@ -10,6 +10,8 @@ Two stages, matching the two isolated subagents in `.claude/agents/`:
    primary orchestrator" rule. Otherwise (no usable key/package, or a flaky
    API call) we fall back to a deterministic regex/heuristic parser, so
    local staging and the test suite never fail hard on missing credentials.
+   A request can also bring its own provider and key (`LLMOverride`, sent by
+   the dashboard's settings); that key is used for the request only.
 2. Synthesis: two normalized `DeviceSpec` objects in, one `BattlecardResponse`
    out. This stage is fully deterministic/rule-based: an LLM's free-form
    prose doesn't map cleanly onto typed response fields like integer friction
@@ -27,8 +29,10 @@ import logging
 import os
 import re
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
-from typing import Callable, Hashable, Iterable, Optional, TypeVar
+from typing import Callable, Hashable, Iterable, Literal, Optional, TypeVar
 
 from pydantic import ValidationError
 
@@ -95,6 +99,24 @@ EXTRACTION_SOURCE_HEURISTIC = "heuristic"
 _PROVIDER_ANTHROPIC = "anthropic"
 _PROVIDER_GEMINI = "gemini"
 _VALID_LLM_PROVIDERS = {_PROVIDER_ANTHROPIC, _PROVIDER_GEMINI}
+_PROVIDER_HEURISTIC = "heuristic"
+_PROVIDER_NAMES = {_PROVIDER_ANTHROPIC: "Anthropic", _PROVIDER_GEMINI: "Gemini"}
+
+
+@dataclass(frozen=True)
+class LLMOverride:
+    """A request's own choice of extractor, from the dashboard's settings.
+
+    `heuristic` skips the LLM. A provider with `api_key` uses that key for
+    this request only; without one it uses the server's key for that
+    provider. The key is never stored or logged."""
+
+    provider: Literal["anthropic", "gemini", "heuristic"]
+    api_key: Optional[str] = None
+
+    def __repr__(self) -> str:  # keep the key out of tracebacks and logs
+        return f"LLMOverride(provider={self.provider!r})"
+
 
 # ---------------------------------------------------------------------------
 # Stage 1: extraction
@@ -425,6 +447,71 @@ def _provider_ready(provider: str) -> bool:
     return False
 
 
+def _package_available(provider: str) -> bool:
+    if provider == _PROVIDER_ANTHROPIC:
+        return anthropic is not None
+    if provider == _PROVIDER_GEMINI:
+        return genai is not None
+    return False
+
+
+def server_llm_provider() -> Optional[str]:
+    """The provider the server's own configuration would use, if any."""
+    provider = _select_llm_provider()
+    return provider if provider and _provider_ready(provider) else None
+
+
+def _resolve_llm(llm: Optional[LLMOverride]) -> tuple[Optional[str], Optional[str]]:
+    """Return (provider, user API key) for one request. A None provider means
+    the heuristic parser; a None key means the server's key from the env."""
+    if llm is None:
+        provider = _select_llm_provider()
+        if provider and not _provider_ready(provider):
+            logger.debug(
+                "LLM_PROVIDER=%r selected but its package or API key isn't "
+                "available; using heuristic parser",
+                provider,
+            )
+            return None, None
+        return provider, None
+    if llm.provider == _PROVIDER_HEURISTIC:
+        return None, None
+    if llm.api_key and _package_available(llm.provider):
+        return llm.provider, llm.api_key
+    if _provider_ready(llm.provider):
+        return llm.provider, None
+    return None, None
+
+
+def _extractor_for(
+    provider: str, api_key: Optional[str]
+) -> Callable[[str, str], QSGExtraction]:
+    extractor = _PROVIDER_EXTRACTORS[provider]
+    return partial(extractor, api_key=api_key) if api_key else extractor
+
+
+def _is_auth_error(exc: Exception) -> bool:
+    """Whether an SDK error means the key was rejected (both SDKs expose the
+    HTTP status; Gemini reports a bad key as a 400)."""
+    status = getattr(exc, "status_code", None) or getattr(exc, "code", None)
+    if status in (401, 403):
+        return True
+    return status == 400 and "api key" in str(exc).lower()
+
+
+def _user_key_warning(provider: str, exc: Exception) -> str:
+    name = _PROVIDER_NAMES[provider]
+    if _is_auth_error(exc):
+        return (
+            f"The {name} key in your settings was rejected, so this document was "
+            "read with the built-in parser. Check the key in Settings."
+        )
+    return (
+        f"The {name} request using your key failed, so this document was read "
+        "with the built-in parser. Try again, or check the key in Settings."
+    )
+
+
 def _llm_user_content(document_text: str, source_document: str) -> str:
     if len(document_text) > MAX_LLM_INPUT_CHARS:
         logger.warning(
@@ -468,8 +555,13 @@ def _validate_extraction(payload: object) -> QSGExtraction:
         )
 
 
-def _extract_via_anthropic(document_text: str, source_document: str) -> QSGExtraction:
-    client = anthropic.Anthropic(timeout=_LLM_TIMEOUT_SECONDS, max_retries=1)
+def _extract_via_anthropic(
+    document_text: str, source_document: str, api_key: Optional[str] = None
+) -> QSGExtraction:
+    # With no key the SDK reads ANTHROPIC_API_KEY from the environment.
+    client = anthropic.Anthropic(
+        api_key=api_key, timeout=_LLM_TIMEOUT_SECONDS, max_retries=1
+    )
     system_prompt = _load_agent_system_prompt("qsg_extractor.md")
     # Forcing a tool call makes the API return schema-shaped JSON instead of
     # free text we'd have to parse.
@@ -500,9 +592,11 @@ def _extract_via_anthropic(document_text: str, source_document: str) -> QSGExtra
     raise ValueError("LLM response contained no tool_use block")
 
 
-def _extract_via_gemini(document_text: str, source_document: str) -> QSGExtraction:
+def _extract_via_gemini(
+    document_text: str, source_document: str, api_key: Optional[str] = None
+) -> QSGExtraction:
     client = genai.Client(
-        api_key=os.environ["GEMINI_API_KEY"],
+        api_key=api_key or os.environ["GEMINI_API_KEY"],
         http_options=gemini_types.HttpOptions(timeout=int(_LLM_TIMEOUT_SECONDS * 1000)),
     )
     system_prompt = _load_agent_system_prompt("qsg_extractor.md")
@@ -520,7 +614,7 @@ def _extract_via_gemini(document_text: str, source_document: str) -> QSGExtracti
     return _validate_extraction(_parse_json_payload(response.text))
 
 
-_PROVIDER_EXTRACTORS = {
+_PROVIDER_EXTRACTORS: dict[str, Callable[..., QSGExtraction]] = {
     _PROVIDER_ANTHROPIC: _extract_via_anthropic,
     _PROVIDER_GEMINI: _extract_via_gemini,
 }
@@ -531,19 +625,27 @@ def extract_qsg_fields(document_text: str, source_document: str) -> QSGExtractio
 
 
 def _extract_with_source(
-    document_text: str, source_document: str
+    document_text: str, source_document: str, llm: Optional[LLMOverride] = None
 ) -> tuple[QSGExtraction, str]:
-    """Extract raw QSG fields via a configured LLM provider (Anthropic or
-    Gemini — see `_select_llm_provider`) when available, otherwise via a
-    deterministic heuristic parser."""
-    provider = _select_llm_provider()
-    if provider and _provider_ready(provider):
+    return _extract_single(document_text, source_document, llm)[:2]
+
+
+def _extract_single(
+    document_text: str, source_document: str, llm: Optional[LLMOverride] = None
+) -> tuple[QSGExtraction, str, list[str]]:
+    """Extract raw QSG fields via the request's or the server's LLM provider
+    (Anthropic or Gemini — see `_resolve_llm`) when available, otherwise via a
+    deterministic heuristic parser. Also returns warnings for the user."""
+    provider, api_key = _resolve_llm(llm)
+    warnings: list[str] = []
+    if provider:
         try:
             return (
-                _PROVIDER_EXTRACTORS[provider](document_text, source_document),
+                _extractor_for(provider, api_key)(document_text, source_document),
                 EXTRACTION_SOURCE_LLM,
+                warnings,
             )
-        except Exception:
+        except Exception as exc:
             # never fail hard on a flaky/unreachable API - fall back, but
             # log it so a persistently failing key doesn't go unnoticed
             logger.warning(
@@ -552,13 +654,8 @@ def _extract_with_source(
                 source_document,
                 exc_info=True,
             )
-    elif provider:
-        logger.debug(
-            "LLM_PROVIDER=%r selected but its package or API key isn't "
-            "available; using heuristic parser for %r",
-            provider,
-            source_document,
-        )
+            if api_key:
+                warnings.append(_user_key_warning(provider, exc))
     else:
         logger.debug(
             "No LLM provider configured; using heuristic parser for %r",
@@ -567,6 +664,7 @@ def _extract_with_source(
     return (
         _heuristic_extract_qsg(document_text, source_document),
         EXTRACTION_SOURCE_HEURISTIC,
+        warnings,
     )
 
 
@@ -675,7 +773,9 @@ def _merge_extractions(
 
 
 def _extract_in_parts(
-    provider: str, document_text: str, source_document: str
+    extractor: Callable[[str, str], QSGExtraction],
+    document_text: str,
+    source_document: str,
 ) -> tuple[QSGExtraction, list[str]]:
     """Run the bounded extractor once per section of a long document and merge.
 
@@ -691,7 +791,6 @@ def _extract_in_parts(
         chunks = chunks[:_MAX_CHUNKS]
     total = len(chunks)
     logger.info("Reading %r in %d parts", source_document, total)
-    extractor = _PROVIDER_EXTRACTORS[provider]
     first = extractor(chunks[0], f"{source_document} (part 1 of {total})")
 
     def run(index: int) -> QSGExtraction:
@@ -722,23 +821,19 @@ def _extract_in_parts(
 
 
 def _extract_document(
-    document_text: str, source_document: str
+    document_text: str, source_document: str, llm: Optional[LLMOverride] = None
 ) -> tuple[QSGExtraction, str, list[str]]:
-    """Like `_extract_with_source`, but documents too long for one LLM call
-    are read in parts instead of being truncated. Also returns warnings about
-    how the document was read."""
-    provider = _select_llm_provider()
-    if (
-        provider
-        and _provider_ready(provider)
-        and len(document_text) > MAX_LLM_INPUT_CHARS
-    ):
+    """Like `_extract_single`, but documents too long for one LLM call are
+    read in parts instead of being truncated. Also returns warnings about how
+    the document was read."""
+    provider, api_key = _resolve_llm(llm)
+    if provider and len(document_text) > MAX_LLM_INPUT_CHARS:
         try:
             extraction, warnings = _extract_in_parts(
-                provider, document_text, source_document
+                _extractor_for(provider, api_key), document_text, source_document
             )
             return extraction, EXTRACTION_SOURCE_LLM, warnings
-        except Exception:
+        except Exception as exc:
             logger.warning(
                 "%s sectioned extraction failed for %r; falling back to heuristic "
                 "parser",
@@ -749,10 +844,9 @@ def _extract_document(
             return (
                 _heuristic_extract_qsg(document_text, source_document),
                 EXTRACTION_SOURCE_HEURISTIC,
-                [],
+                [_user_key_warning(provider, exc)] if api_key else [],
             )
-    extraction, source = _extract_with_source(document_text, source_document)
-    return extraction, source, []
+    return _extract_single(document_text, source_document, llm)
 
 
 def _select_primary_provisioning_method(
@@ -846,10 +940,14 @@ def _normalize_specs(specs: list[SpecItem]) -> list[SpecValue]:
     ]
 
 
-def extract_device_spec(document_text: str, source_document: str) -> DeviceSpec:
+def extract_device_spec(
+    document_text: str, source_document: str, llm: Optional[LLMOverride] = None
+) -> DeviceSpec:
     """Full pipeline for one document: raw extraction, then deterministic
     IP/LED normalization into a clean `DeviceSpec`."""
-    extraction, source, warnings = _extract_document(document_text, source_document)
+    extraction, source, warnings = _extract_document(
+        document_text, source_document, llm
+    )
     spec = _normalize_to_device_spec(extraction)
     spec.extraction_source = source
     spec.extraction_warnings = warnings
@@ -857,12 +955,16 @@ def extract_device_spec(document_text: str, source_document: str) -> DeviceSpec:
 
 
 def extract_device_specs(
-    text_a: str, name_a: str, text_b: str, name_b: str
+    text_a: str,
+    name_a: str,
+    text_b: str,
+    name_b: str,
+    llm: Optional[LLMOverride] = None,
 ) -> tuple[DeviceSpec, DeviceSpec]:
     """Run both extractions concurrently; the LLM calls are I/O-bound."""
     with ThreadPoolExecutor(max_workers=2) as pool:
-        future_a = pool.submit(extract_device_spec, text_a, name_a)
-        future_b = pool.submit(extract_device_spec, text_b, name_b)
+        future_a = pool.submit(extract_device_spec, text_a, name_a, llm)
+        future_b = pool.submit(extract_device_spec, text_b, name_b, llm)
         return future_a.result(), future_b.result()
 
 
