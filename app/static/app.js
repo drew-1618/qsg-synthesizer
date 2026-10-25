@@ -1352,6 +1352,26 @@ function renderSpecTable(cm, nameA, nameB, perspective) {
       type ? DOCUMENT_TYPE_LABELS[type] || "Other document" : `<span class="text-ink-muted">Not specified</span>`;
     rows.unshift(["Document type", typeCell(types.device_a), typeCell(types.device_b)]);
   }
+  // Only an AI read fills these, so show each row only when either side has it.
+  const has = (value) => value != null && value !== "" && !(Array.isArray(value) && value.length === 0);
+  const present = (values) => values && (has(values.device_a) || has(values.device_b));
+  const steps = cm.step_count;
+  if (present(steps)) {
+    const stepCell = (n) => (n != null ? `${n}` : `<span class="text-ink-muted">Not specified</span>`);
+    rows.push(["Setup steps", stepCell(steps.device_a), stepCell(steps.device_b)]);
+  }
+  const difficulty = cm.setup_difficulty;
+  if (present(difficulty)) {
+    const difficultyCell = (value) =>
+      value ? escapeHtml(value.charAt(0).toUpperCase() + value.slice(1)) : `<span class="text-ink-muted">Not specified</span>`;
+    rows.push(["Setup difficulty", difficultyCell(difficulty.device_a), difficultyCell(difficulty.device_b)]);
+  }
+  [
+    ["Setup strengths", cm.setup_strengths],
+    ["Setup gaps", cm.setup_gaps],
+  ].forEach(([label, values]) => {
+    if (present(values)) rows.push([label, listOrDash(values.device_a), listOrDash(values.device_b)]);
+  });
   // Open-ended specs (power, certifications...) come from the documents
   // themselves, so the names are escaped like any other extracted text.
   const specCell = (value) =>

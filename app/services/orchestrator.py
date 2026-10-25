@@ -1112,6 +1112,20 @@ def _build_comparison_matrix(device_a: DeviceSpec, device_b: DeviceSpec) -> dict
             "device_a": device_a.document_type,
             "device_b": device_b.document_type,
         },
+        # The LLM's read of the setup; None/[] for heuristic extraction.
+        "step_count": {
+            "device_a": device_a.step_count,
+            "device_b": device_b.step_count,
+        },
+        "setup_difficulty": {
+            "device_a": device_a.setup_difficulty,
+            "device_b": device_b.setup_difficulty,
+        },
+        "setup_strengths": {
+            "device_a": device_a.strengths,
+            "device_b": device_b.strengths,
+        },
+        "setup_gaps": {"device_a": device_a.gaps, "device_b": device_b.gaps},
         "extra_specs": _merge_spec_rows(device_a, device_b),
     }
 

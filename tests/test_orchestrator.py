@@ -735,3 +735,24 @@ def test_reworded_shared_capability_is_not_unique_to_either_device():
     battlecard = orchestrator.synthesize_battlecard(a, b)
     assert battlecard.key_advantages_device_a == [orchestrator.NO_ADVANTAGES_MESSAGE]
     assert battlecard.key_advantages_device_b == ["Unique capability: VoIP"]
+
+
+def test_setup_assessment_reaches_the_comparison_matrix():
+    base = dict(provisioning_method=ProvisioningMethod.WEB_GUI)
+    a = DeviceSpec(
+        model_name="A",
+        step_count=5,
+        setup_difficulty="easy",
+        strengths=["QR onboarding"],
+        gaps=["No default password listed"],
+        **base,
+    )
+    b = DeviceSpec(model_name="B", **base)
+    cm = orchestrator.synthesize_battlecard(a, b).comparison_matrix
+    assert cm["step_count"] == {"device_a": 5, "device_b": None}
+    assert cm["setup_difficulty"] == {"device_a": "easy", "device_b": None}
+    assert cm["setup_strengths"]["device_a"] == ["QR onboarding"]
+    assert cm["setup_gaps"] == {
+        "device_a": ["No default password listed"],
+        "device_b": [],
+    }

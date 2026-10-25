@@ -172,3 +172,25 @@ def test_undocumented_provisioning_is_not_shown_as_the_console_fallback():
     }
     md = battlecard_to_markdown(card)
     assert "| Provisioning Method | Not specified | Console |" in md
+
+
+class TestSetupRows:
+    def test_hidden_when_no_side_has_them(self):
+        card = _card()
+        card.comparison_matrix["step_count"] = {"device_a": None, "device_b": None}
+        card.comparison_matrix["setup_gaps"] = {"device_a": [], "device_b": []}
+        md = battlecard_to_markdown(card)
+        assert "Setup Steps" not in md
+        assert "Setup Gaps" not in md
+
+    def test_shown_when_either_side_has_them(self):
+        card = _card()
+        card.comparison_matrix["step_count"] = {"device_a": 6, "device_b": None}
+        card.comparison_matrix["setup_difficulty"] = {
+            "device_a": None,
+            "device_b": "hard",
+        }
+        md = battlecard_to_markdown(card)
+        assert "| Setup Steps | 6 | Unknown |" in md
+        assert "| Setup Difficulty | Unknown | Hard |" in md
+        assert battlecard_to_pdf_bytes(card).startswith(b"%PDF")
