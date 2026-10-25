@@ -86,7 +86,10 @@ cp .env.example .env   # required - docker-compose.yml expects this file to exis
 docker compose up --build
 ```
 
-Serves the same app at `http://localhost:8000/`. Comparison history is kept in the
+Serves the same app at `http://localhost:8000/`. The port is bound to
+localhost only, since auth is off by default; to reach it from other machines,
+set `APP_USERNAME`/`APP_PASSWORD` and change the mapping in
+`docker-compose.yml` to `"8000:8000"`. Comparison history is kept in the
 `qsg-history` named volume, so it survives `docker compose down` and rebuilds
 (`docker compose down -v` deletes it).
 

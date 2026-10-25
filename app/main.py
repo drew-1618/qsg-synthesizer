@@ -50,7 +50,12 @@ from app.schemas import (
 )
 from app.services import export as export_service
 from app.services import history
-from app.services.auth import require_auth, security, verify_credentials
+from app.services.auth import (
+    auth_enabled,
+    require_auth,
+    security,
+    verify_credentials,
+)
 from app.services.orchestrator import (
     LLMOverride,
     extract_device_specs,
@@ -67,6 +72,12 @@ from app.tools.document_parser import (
 
 configure_logging()
 logger = logging.getLogger(__name__)
+if not auth_enabled():
+    logger.warning(
+        "APP_USERNAME/APP_PASSWORD are not set: the dashboard and API are open "
+        "to anyone who can reach this server. Set both before exposing it "
+        "beyond localhost."
+    )
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 STATIC_DIR = BASE_DIR / "app" / "static"

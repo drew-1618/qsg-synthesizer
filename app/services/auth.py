@@ -31,6 +31,10 @@ def _configured_credentials() -> Optional[Tuple[str, str]]:
     return username, password
 
 
+def auth_enabled() -> bool:
+    return _configured_credentials() is not None
+
+
 def verify_credentials(
     credentials: Optional[HTTPBasicCredentials], client_host: str = "unknown"
 ) -> None:
