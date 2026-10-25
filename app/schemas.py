@@ -85,6 +85,9 @@ class DeviceSpec(BaseModel):
     gaps: List[str] = Field(default_factory=list)
     # "llm" or "heuristic"; set by the orchestrator, not the document
     extraction_source: Optional[str] = None
+    # Who read it, for display: e.g. "Gemini (gemini-2.5-flash-lite)" or
+    # "Built-in parser".
+    extracted_with: Optional[str] = None
     # "quick_start_guide", "datasheet" or "other"; None when not determined
     # (treated as a quick start guide, as before document types existed).
     document_type: Optional[str] = None

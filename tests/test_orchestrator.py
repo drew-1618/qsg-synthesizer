@@ -807,3 +807,38 @@ class TestStepCountFriction:
         )
         assert card.installation_friction_score_device_a == 1
         assert card.installation_friction_score_device_b == 1
+
+
+class TestExtractedWith:
+    def test_heuristic_read_is_labelled_built_in_parser(self):
+        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "", "GEMINI_API_KEY": ""}):
+            spec = orchestrator.extract_device_spec("# Foo\n\nSome text.", "foo.md")
+        assert spec.extracted_with == "Built-in parser"
+
+    def test_gemini_read_names_the_model(self):
+        with (
+            patch.dict(
+                "os.environ",
+                {"ANTHROPIC_API_KEY": "", "GEMINI_API_KEY": "k", "LLM_PROVIDER": ""},
+            ),
+            patch("app.services.orchestrator.genai") as mock_genai,
+        ):
+            client = mock_genai.Client.return_value
+            client.models.generate_content.return_value = _fake_gemini_response(
+                _FAKE_EXTRACTION
+            )
+            spec = orchestrator.extract_device_spec("some text", "doc.md")
+        assert spec.extracted_with == "Gemini (gemini-2.5-flash-lite)"
+
+    def test_failed_llm_read_is_labelled_built_in_parser(self):
+        with (
+            patch.dict(
+                "os.environ",
+                {"ANTHROPIC_API_KEY": "", "GEMINI_API_KEY": "k", "LLM_PROVIDER": ""},
+            ),
+            patch("app.services.orchestrator.genai") as mock_genai,
+        ):
+            client = mock_genai.Client.return_value
+            client.models.generate_content.side_effect = RuntimeError("down")
+            spec = orchestrator.extract_device_spec("# Foo\n\nSome text.", "doc.md")
+        assert spec.extracted_with == "Built-in parser"

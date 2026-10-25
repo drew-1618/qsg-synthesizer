@@ -1012,6 +1012,20 @@ def _normalize_specs(specs: list[SpecItem]) -> list[SpecValue]:
     ]
 
 
+BUILT_IN_PARSER_LABEL = "Built-in parser"
+
+
+def _extracted_with(source: str, llm: Optional[LLMOverride]) -> str:
+    if source != EXTRACTION_SOURCE_LLM:
+        return BUILT_IN_PARSER_LABEL
+    provider, _ = _resolve_llm(llm)
+    if provider == _PROVIDER_GEMINI:
+        return f"Gemini ({_gemini_model()})"
+    if provider == _PROVIDER_ANTHROPIC:
+        return f"Anthropic ({_ANTHROPIC_EXTRACTOR_MODEL})"
+    return "AI model"
+
+
 def extract_device_spec(
     document_text: str, source_document: str, llm: Optional[LLMOverride] = None
 ) -> DeviceSpec:
@@ -1022,6 +1036,7 @@ def extract_device_spec(
     )
     spec = _normalize_to_device_spec(extraction)
     spec.extraction_source = source
+    spec.extracted_with = _extracted_with(source, llm)
     spec.extraction_warnings = warnings
     return spec
 
@@ -1084,6 +1099,10 @@ def _build_comparison_matrix(device_a: DeviceSpec, device_b: DeviceSpec) -> dict
         "model_name": {
             "device_a": device_a.model_name,
             "device_b": device_b.model_name,
+        },
+        "extracted_with": {
+            "device_a": device_a.extracted_with,
+            "device_b": device_b.extracted_with,
         },
         "default_ip": {
             "device_a": device_a.default_ip,

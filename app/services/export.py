@@ -84,7 +84,9 @@ def _comparison_rows(cm: dict) -> list[tuple[str, str]]:
             values.get(d) not in (None, "", []) for d in ("device_a", "device_b")
         )
 
-    return _COMPARISON_ROWS + [row for row in _SETUP_ROWS if present(row[1])]
+    # Records saved before extractors were named have no "Read With" row.
+    read_with = [("Read With", "extracted_with")] if present("extracted_with") else []
+    return read_with + _COMPARISON_ROWS + [r for r in _SETUP_ROWS if present(r[1])]
 
 
 def _names(battlecard: BattlecardResponse) -> tuple[str, str]:
