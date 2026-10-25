@@ -118,9 +118,10 @@ Things that span multiple files:
   It applies through the `router` dependency in `main.py`, plus a separate middleware for
   `/static/*` and the docs routes `/docs`, `/redoc`, `/openapi.json` (registered on `app`, outside the router). `/healthz` is
   deliberately left open for the Docker/CI health check.
-- `main.py` calls `load_dotenv()` before importing `qsg_synthesizer.*` because `HISTORY_DIR` is read at
-  import time. It skips this under pytest (`PYTEST_VERSION`) so tests never pick up real API
-  keys from `.env`.
+- `main.py` loads `./.env` (current folder only, never a parent's) before importing `qsg_synthesizer.*`
+  because `HISTORY_DIR` is read at import time. It skips this under pytest (`PYTEST_VERSION`) so
+  tests never pick up real API keys from `.env`, and when the `qsg-synthesizer` command already
+  loaded one (`QSG_ENV_LOADED`; `--env-file`/`--no-env-file` in `cli.py`).
 - `qsg_synthesizer/static/tailwind.css` is compiled and committed. No Node is needed to run the app, but
   new Tailwind classes have no styles until `npm run build:css` is rerun.
 

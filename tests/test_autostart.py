@@ -61,7 +61,10 @@ def test_launch_command_runs_this_python_as_a_module():
     assert command[command.index("--port") + 1] == "8000"
     assert command[command.index("--log-file") + 1] == str(LOG)
     assert command[command.index("--env-file") + 1] == "/home/u/.env"
-    assert "--env-file" not in autostart.launch_command(8000, LOG, None)
+    without = autostart.launch_command(8000, LOG, None)
+    assert "--env-file" not in without
+    # The login copy runs in the home folder, which may hold an unrelated .env.
+    assert "--no-env-file" in without
 
 
 class TestLinux:
@@ -203,6 +206,7 @@ class TestOptions:
     @pytest.fixture(autouse=True)
     def isolate(self, monkeypatch):
         monkeypatch.setenv("QSG_BIND_HOST", "")
+        monkeypatch.setenv("QSG_ENV_LOADED", "")
         monkeypatch.setattr(cli, "_port_is_free", lambda host, port: True)
 
     def test_env_file_is_loaded_instead_of_searching(self, tmp_path):
@@ -237,3 +241,27 @@ class TestOptions:
         cli._redirect_output(log)
         sys.stdout.close()
         assert (tmp_path / "app.log.1").stat().st_size > cli._MAX_LOG_BYTES
+
+
+class TestEnvFileSearch:
+    """Only an explicit --env-file or ./.env, never a parent folder's."""
+
+    def _args(self, *argv):
+        return cli._parse_args(list(argv))
+
+    def test_current_folder_env_is_used(self, tmp_path, monkeypatch):
+        (tmp_path / ".env").write_text("X=1\n")
+        monkeypatch.chdir(tmp_path)
+        assert cli._env_file(self._args()) == (tmp_path / ".env").resolve()
+
+    def test_parent_folder_env_is_ignored(self, tmp_path, monkeypatch):
+        (tmp_path / ".env").write_text("APP_PASSWORD=someone-elses\n")
+        child = tmp_path / "work"
+        child.mkdir()
+        monkeypatch.chdir(child)
+        assert cli._env_file(self._args()) is None
+
+    def test_no_env_file_wins(self, tmp_path, monkeypatch):
+        (tmp_path / ".env").write_text("X=1\n")
+        monkeypatch.chdir(tmp_path)
+        assert cli._env_file(self._args("--no-env-file")) is None

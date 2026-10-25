@@ -14,8 +14,12 @@ from dotenv import load_dotenv
 # .env and starts making live LLM calls - see README's "Tests" section, which
 # promises fully offline/deterministic runs. (Ruff's E402 is disabled for this
 # file in pyproject.toml since these imports intentionally follow this guard.)
-if "PYTEST_VERSION" not in os.environ:
-    load_dotenv()
+# Only ./.env: with no path, python-dotenv walks up from this file's folder,
+# which for an installed app reaches the user's home and any unrelated ~/.env.
+# The qsg-synthesizer command loads its own (see cli.py) and sets
+# QSG_ENV_LOADED so this doesn't search again.
+if "PYTEST_VERSION" not in os.environ and "QSG_ENV_LOADED" not in os.environ:
+    load_dotenv(os.path.join(os.getcwd(), ".env"))
 
 import base64
 import hashlib

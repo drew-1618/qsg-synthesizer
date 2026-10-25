@@ -46,8 +46,12 @@ def launch_command(port: int, log_file: Path, env_file: Optional[Path]) -> list[
         python = python.with_name("pythonw.exe")  # no console window
     command = [str(python), "-m", "qsg_synthesizer", "--no-browser"]
     command += ["--port", str(port), "--log-file", str(log_file)]
+    # Pinned either way: the login copy's working folder (home) may hold an
+    # unrelated .env.
     if env_file is not None:
         command += ["--env-file", str(env_file)]
+    else:
+        command.append("--no-env-file")
     return command
 
 
