@@ -3,6 +3,8 @@ and the `qsg-synthesizer` command."""
 
 import os
 import socket
+import subprocess
+import sys
 import threading
 import tomllib
 from contextlib import contextmanager
@@ -211,3 +213,28 @@ def _http_server(body: bytes):
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_onnxruntime_telemetry_is_off_by_default():
+    # pymupdf4llm's layout analysis loads ONNX Runtime, which otherwise phones
+    # home to Microsoft on every PDF. A fresh interpreter importing the app.
+    env = {k: v for k, v in os.environ.items() if k != "ORT_DISABLE_TELEMETRY"}
+    out = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import qsg_synthesizer, os; " "print(os.environ['ORT_DISABLE_TELEMETRY'])",
+        ],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert out.stdout.strip() == "1"
+
+
+def test_docker_image_disables_telemetry_and_keeps_code_read_only():
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    assert "ORT_DISABLE_TELEMETRY=1" in dockerfile
+    assert "chown -R appuser:appuser /app" not in dockerfile
