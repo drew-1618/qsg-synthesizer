@@ -76,9 +76,11 @@ own settings, saved keys and installed app.
 **Reading documents with AI (optional)**
 
 Out of the box, documents are read by a built-in parser and nothing leaves your
-computer. It works best on guides laid out like the samples. For anything else,
-open **Settings** in the dashboard, pick Anthropic or Google Gemini, paste your
-API key and choose a model. The key stays in your browser and is sent only to
+computer. It reads the common layouts of quick start guides and datasheets, and
+says so when it recognized too little of a document to compare it with
+confidence. For a fuller reading of any document, open **Settings** in the
+dashboard, pick Anthropic or Google Gemini, paste your API key and choose a
+model. The key stays in your browser and is sent only to
 that provider, along with the text of the documents you compare.
 
 To set keys once for every browser instead, put them in a `.env` file (see

@@ -78,7 +78,8 @@ class DeviceSpec(BaseModel):
     form_factor: Optional[str] = None
     capabilities: List[str] = Field(default_factory=list)
     # LLM assessment of the setup experience; unset for heuristic extraction
-    # and for records saved before these were tracked.
+    # (apart from a count of numbered steps) and for records saved before
+    # these were tracked.
     step_count: Optional[int] = None
     setup_difficulty: Optional[str] = None
     strengths: List[str] = Field(default_factory=list)
@@ -99,7 +100,8 @@ class DeviceSpec(BaseModel):
 
 class BattlecardResponse(BaseModel):
     comparison_matrix: dict
-    # None when install effort isn't comparable (not both quick start guides).
+    # None when install effort isn't comparable (not both quick start guides,
+    # or see `unscored_reason`).
     installation_friction_score_device_a: Optional[int] = Field(
         default=None, ge=1, le=10
     )
@@ -115,6 +117,10 @@ class BattlecardResponse(BaseModel):
     extraction_source_device_a: Optional[str] = None
     extraction_source_device_b: Optional[str] = None
     perspective: Optional[Perspective] = None
+    # Why install effort wasn't scored although both documents are quick start
+    # guides (one doesn't say how its device is provisioned). None when scored,
+    # when the documents aren't both guides, and on older records.
+    unscored_reason: Optional[str] = None
     warnings: List[str] = Field(default_factory=list)
 
 

@@ -149,17 +149,87 @@ class LLMOverride:
 # Stage 1: extraction
 # ---------------------------------------------------------------------------
 
-_KNOWN_HEADINGS = {
-    "overview",
-    "what's in the box",
-    "required tools",
-    "provisioning",
-    "cabling & ports",
-    "led indicators",
-    "installation steps",
-    "key features",
-    "specifications",
-}
+# Section names the heuristic parser understands, each with the heading
+# wordings real QSGs and datasheets use for it. A heading is normalized first
+# (`_normalize_heading`: lowercase, numbering and markup stripped, "&" read as
+# "and") and must match one of these in full.
+_SECTION_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
+    (section, re.compile(pattern))
+    for section, pattern in (
+        ("overview", r"overview|introduction|about (?:this|the) \w+|product overview"),
+        (
+            "box",
+            r"what'?s in the (?:box|package)|in the box|package contents?"
+            r"|(?:box|package|kit) contents|contents of the (?:box|package)"
+            r"|packing list",
+        ),
+        (
+            "tools",
+            r"(?:required )?tools(?: and (?:equipment|materials|supplies))?"
+            r"(?: (?:required|needed))?|required (?:items|equipment|materials)"
+            r"|what you(?:'ll| will)? need|you will need|things you(?:'ll)? need"
+            r"|before you (?:begin|start)|prerequisites",
+        ),
+        ("provisioning", r"provisioning(?: methods?| options?)?"),
+        (
+            "ports",
+            r"(?:cabling and )?ports(?: and (?:connectors|cabling|buttons))?"
+            r"|cabling|interfaces?(?: and (?:ports|buttons))?|connectors?"
+            r"|connections|(?:rear|back|side) panel(?: ports)?"
+            r"|physical interfaces",
+        ),
+        (
+            "leds",
+            r"leds?(?: (?:indicators?|status|behaviou?r|states|descriptions?))?"
+            r"|(?:status )?(?:indicators?|lights)(?: and buttons)?"
+            r"|indicator lights|status leds|front panel(?: leds| indicators)?",
+        ),
+        (
+            "hardware",
+            r"hardware(?: overview| description| layout)?"
+            r"|(?:device|panel|product) (?:overview|description|layout)"
+            r"|front and (?:rear|back) panels?|know your \w+",
+        ),
+        (
+            "specs",
+            r"(?:technical |hardware |product |detailed )?specifications?"
+            r"|tech(?:nical)? specs|specs|technical data"
+            r"|physical(?: and environmental)?(?: specifications)?"
+            r"|environmental(?: specifications)?|electrical|mechanical"
+            r"|power(?: requirements| specifications)?|performance"
+            r"|wireless|radios?|regulatory|certifications?|compliance"
+            r"|dimensions(?: and weight)?",
+        ),
+        (
+            "features",
+            r"(?:key |main |software |hardware )?features|(?:product )?highlights"
+            r"|feature highlights|benefits|capabilities",
+        ),
+        (
+            "steps",
+            r"(?:installation|setup|set up|install)(?: steps| procedure| instructions)?"
+            r"|getting started|quick (?:setup|start)|mounting|steps"
+            r"|initial (?:setup|configuration|installation)|step[- ]by[- ]step",
+        ),
+        ("ordering", r"ordering(?: information| info)?|part numbers|models? and skus?"),
+    )
+]
+# Open-ended wordings like "Setting up your router", trusted only as marked-up
+# headings: as a plain line of text they could be a step themselves.
+_MARKED_UP_SECTION_PATTERNS = [
+    (
+        "steps",
+        re.compile(
+            r"(?:install(?:ing)?|setting up|set up|mounting|connect(?:ing)?) "
+            r"(?:the|your) .+|step[- ]by[- ]step .+"
+        ),
+    )
+]
+# Plain-text lines (no "#" or bold markup) count as headings only when they
+# are this short, so a sentence that happens to start "Power" isn't one.
+_PLAIN_HEADING_MAX_CHARS = 40
+_HEADING_NUMBER_RE = re.compile(r"^(?:step\s+)?(?:\d+(?:\.\d+)*[.):]?|[a-z][.)])\s+")
+_BOLD_LINE_RE = re.compile(r"^\*\*([^*]+)\*\*:?$")
 
 _SPEC_LABEL_TO_FIELD = {
     "wi-fi standard": "wifi_standard",
@@ -167,13 +237,113 @@ _SPEC_LABEL_TO_FIELD = {
     "wan speed": "wan_speed",
     "form factor": "form_factor",
 }
+# Other labels datasheets use for the fixed fields. Unlike the labels above,
+# these are trusted only when the value reads as that field.
+_SPEC_SYNONYM_TO_FIELD = {
+    **dict.fromkeys(
+        (
+            "wi-fi standards",
+            "wifi standards",
+            "wireless standard",
+            "wireless standards",
+            "network standard",
+            "network standards",
+            "wlan standard",
+            "wlan standards",
+            "802.11 standards",
+            "wi-fi",
+            "wifi",
+            "wireless",
+            "standards",
+        ),
+        "wifi_standard",
+    ),
+    **dict.fromkeys(
+        (
+            "wan",
+            "wan port",
+            "wan interface",
+            "wan throughput",
+            "max wan speed",
+            "maximum wan speed",
+            "internet speed",
+        ),
+        "wan_speed",
+    ),
+    **dict.fromkeys(("mounting", "mounting options"), "form_factor"),
+}
+_FIXED_FIELD_CHECKS: dict[str, Callable[[str], bool]] = {
+    "wifi_standard": lambda value: rank_wifi_standard(value) is not None,
+    "wan_speed": lambda value: parse_speed_mbps(value) is not None,
+    "form_factor": lambda value: True,
+}
 
-_HEADING_PREFIX_RE = re.compile(r"^#+\s*")
-_BULLET_PREFIX_RE = re.compile(r"^[-*]\s+")
-_TITLE_SUFFIX_RE = re.compile(
-    r"\s*[—-]\s*(?:quick start guide|data\s*sheet|spec(?:ification)?s? sheet)\s*$",
+_TABLE_SEPARATOR_CELL_RE = re.compile(r":?-+:?")
+# Header rows the sample docs' tables use, recognized even without a separator.
+_KNOWN_HEADER_ROWS = (["port", "type", "notes"], ["led", "meaning"])
+_NUMBER_COLUMN_HEADERS = {"", "no", "item", "number", "callout", "ref"}
+_ITEM_NUMBER_RE = re.compile(r"\d{1,2}[.)]?|[A-Za-z]")
+_LED_NAME_RE = re.compile(r"\b(?:leds?|indicators?|lights?)\b", re.IGNORECASE)
+_LED_SUFFIX_RE = re.compile(r"\s*\b(?:leds?|indicators?|lights?)\s*$", re.IGNORECASE)
+_PORT_NAME_RE = re.compile(
+    r"\b(?:ports?|interfaces?|connectors?|jacks?|wan|lan\s*\d*|usb|sfp\+?|pon|dsl"
+    r"|eth\d*|ge\d*|poe|console|coax|fxs|pots|dc[- ]?in)\b",
     re.IGNORECASE,
 )
+_PORT_SUFFIX_RE = re.compile(r"\s+(?:ports?|connectors?|jacks?)\s*$", re.IGNORECASE)
+_PORT_TYPE_HEADER_RE = re.compile(r"type|connector|media|cable|speed", re.IGNORECASE)
+_PORT_NOTES_HEADER_RE = re.compile(
+    r"notes?|description|function|purpose|use|meaning|remarks|details", re.IGNORECASE
+)
+_CONNECTOR_RE = re.compile(
+    r"\b(?:RJ-?45|RJ-?11|SC/APC|SC/UPC|LC/APC|LC/UPC|QSFP28|QSFP\+|SFP28|SFP\+|SFP"
+    r"|USB(?:[ -]?(?:Type[ -]?)?C|[ -]?\d\.\d)?|F-type|coaxial|coax|DC[- ]?IN"
+    r"|barrel|RS-?232)(?![\w+])",
+    re.IGNORECASE,
+)
+# Where one LED cell describes several states: "Off: No power. On: Ready".
+_LED_STATE_SPLIT_RE = re.compile(r"(?<=[.;])\s+(?=[A-Z][^.:;]{0,30}:)")
+_LABEL_VALUE_RE = re.compile(r"^\*{0,2}([^:*|]{1,40}?)\*{0,2}\s*:\s*\*{0,2}\s*(\S.*)$")
+_MAX_LABEL_WORDS = 6
+_NON_SPEC_LABELS = {"note", "notes", "caution", "warning", "important", "tip"}
+_NON_HARDWARE_SECTIONS = {"specs", "ordering"}
+# First header cell of a spec table with one column per model.
+_MODEL_HEADER_RE = re.compile(
+    r"(?:models?|skus?|products?|features?|specs?|specifications?|parameters?|items?)?",
+    re.IGNORECASE,
+)
+_GENERIC_COLUMN_RE = re.compile(
+    r"values?|notes?|descriptions?|details|units?|comments?|remarks|typical"
+    r"|max(?:imum)?|min(?:imum)?",
+    re.IGNORECASE,
+)
+
+_HEADING_PREFIX_RE = re.compile(r"^#+\s*")
+_HEADING_LEVEL_RE = re.compile(r"^(#+)\s")
+_BULLET_PREFIX_RE = re.compile(r"^[-*]\s+")
+# Words a title uses for the kind of document rather than the device.
+_GENERIC_TITLE_RE = re.compile(
+    r"\b(?:(?:hardware |quick )?(?:installation|install|setup|start|user'?s?)"
+    r" (?:guide|manual)|quick[\s-]*start|getting started(?: with)?"
+    r"|data\s*sheet|spec(?:ification)?s? sheet|product specifications?)\b",
+    re.IGNORECASE,
+)
+# Punctuation and joining words left at either end once those are removed:
+# "Getting Started with the X1" -> "the X1" -> "X1".
+_TITLE_LEAD_RE = re.compile(r"^[\s—–:|,-]*(?:(?:for|with|to)\s+)?(?:the|your)?\s*")
+_TITLE_TRAIL_RE = re.compile(r"[\s—–:|,(-]*(?:\b(?:for|with|to))?[\s—–:|,(-]*$")
+_TITLE_CANDIDATE_LINES = 3
+_STEP_LINE_RE = re.compile(r"^(?:[-*]\s+)?(?:step\s+)?\d{1,2}(?:[.):]\s*|\s+)\S", re.I)
+_NEGATED_SENTENCE_RE = re.compile(r"^\W*no\b", re.IGNORECASE)
+_TOOLS_SENTENCE_RE = re.compile(
+    r"\byou(?:'ll| will)? need (?!to\b)(?P<items>.+?)"
+    r"(?:\s+(?:to|for|in order to|before|when)\b.*)?[.!]?$"
+    r"|\b(?:tools?|equipment|items?) (?:required|needed)\s*:\s*(?P<listed>.+?)[.]?$",
+    re.IGNORECASE,
+)
+_ITEM_SPLIT_RE = re.compile(r",\s*(?:and\s+)?|\s+and\s+")
+_LEADING_ARTICLE_RE = re.compile(r"^(?:a|an|the|your)\s+", re.IGNORECASE)
+_NEGATIVE_WORDS_RE = re.compile(r"\b(?:not|don't|do not|never|without)\b", re.I)
 _DATASHEET_TITLE_RE = re.compile(
     r"\b(?:data\s*sheet|spec(?:ification)?s?\s+sheet|product\s+specifications?)\b",
     re.IGNORECASE,
@@ -182,7 +352,25 @@ _INSTALL_TITLE_RE = re.compile(
     r"\b(?:quick\s*start|installation|install|setup|getting\s+started)\b",
     re.IGNORECASE,
 )
-_INSTALL_SECTIONS = {"installation steps", "required tools", "provisioning"}
+# A document with this many label/value rows and no install procedure is a
+# datasheet even without a "Specifications" heading.
+_DATASHEET_MIN_SPEC_ROWS = 5
+# Where a datasheet without a specifications heading keeps its specs.
+_LOOSE_SPEC_SECTIONS = ("_preamble", "_other", "overview", "hardware")
+# Below these, the built-in parser warns that it read little of the document.
+_MIN_INSTALL_FACTS = 2
+_MIN_DATASHEET_SPECS = 3
+THIN_INSTALL_WARNING = (
+    "The built-in parser recognized little install information in this "
+    "document (how it's provisioned, tools, ports, LEDs or numbered steps), so "
+    "this comparison may be incomplete. For a fuller reading, choose Anthropic "
+    "or Gemini under AI in Settings."
+)
+THIN_SPECS_WARNING = (
+    "The built-in parser recognized few specifications in this document, so "
+    "this comparison may be incomplete. For a fuller reading, choose Anthropic "
+    "or Gemini under AI in Settings."
+)
 _SPEC_TABLE_HEADERS = {"spec", "specification", "parameter", "feature", "value"}
 _IPV4_RE = re.compile(
     r"\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b"
@@ -201,12 +389,37 @@ _DHCP_SERVER_RE = re.compile(
 )
 
 _PROVISIONING_KEYWORD_PATTERNS = [
-    (re.compile(r"tr-?069", re.IGNORECASE), RawProvisioningMethod.TR069),
-    (re.compile(r"\bdhcp\b", re.IGNORECASE), RawProvisioningMethod.DHCP),
-    (re.compile(r"web gui", re.IGNORECASE), RawProvisioningMethod.WEB_GUI),
-    (re.compile(r"\bconsole\b", re.IGNORECASE), RawProvisioningMethod.CONSOLE),
     (
-        re.compile(r"qr\s*/?\s*mobile app|qr code", re.IGNORECASE),
+        re.compile(r"tr-?069|tr-?369|\bcwmp\b|\bacs\b", re.IGNORECASE),
+        RawProvisioningMethod.TR069,
+    ),
+    (re.compile(r"\bdhcp\b", re.IGNORECASE), RawProvisioningMethod.DHCP),
+    (
+        # A local address in a browser; a bare https:// link is usually a
+        # support page, so only an IP URL counts.
+        re.compile(
+            r"web[- ]?(?:gui|ui|interface|browser|page|based (?:setup|configuration))"
+            r"|\bbrowse to\b|\bopen a browser\b|setup wizard"
+            r"|https?://(?:\d{1,3}\.){3}\d{1,3}",
+            re.IGNORECASE,
+        ),
+        RawProvisioningMethod.WEB_GUI,
+    ),
+    (
+        re.compile(
+            r"\bconsole\b|\bserial (?:port|cable|connection)|rs-?232"
+            r"|terminal emulator|\blocal cli\b",
+            re.IGNORECASE,
+        ),
+        RawProvisioningMethod.CONSOLE,
+    ),
+    (
+        re.compile(
+            r"qr\s*/?\s*mobile app|qr code|(?:mobile|smartphone|companion) app"
+            r"|\bapp store\b|google play"
+            r"|(?:download|install|open) the [\w -]{1,30}? app\b",
+            re.IGNORECASE,
+        ),
         RawProvisioningMethod.QR_MOBILE_APP,
     ),
     (re.compile(r"dip switch|jumper", re.IGNORECASE), RawProvisioningMethod.OTHER),
@@ -244,18 +457,74 @@ def _clean_markdown_emphasis(text: str) -> str:
     return text.strip("*").strip()
 
 
+def _normalize_heading(text: str) -> str:
+    text = _clean_markdown_emphasis(_HEADING_PREFIX_RE.sub("", text.strip()))
+    text = text.lower().replace("&", " and ").replace("’", "'").rstrip(":").strip()
+    text = _HEADING_NUMBER_RE.sub("", text)
+    return " ".join(text.split())
+
+
+def _section_for(heading: str, plain: bool = False) -> Optional[str]:
+    normalized = _normalize_heading(heading)
+    patterns = _SECTION_PATTERNS + ([] if plain else _MARKED_UP_SECTION_PATTERNS)
+    for section, pattern in patterns:
+        if pattern.fullmatch(normalized):
+            return section
+    return None
+
+
+def _heading_level(line: str) -> Optional[int]:
+    """1-6 for a Markdown heading, 7 for a bold-only line (how PDFs and
+    pasted documents often mark headings), else None."""
+    match = _HEADING_LEVEL_RE.match(line)
+    if match:
+        return min(len(match.group(1)), 6)
+    if _BOLD_LINE_RE.match(line):
+        return 7
+    return None
+
+
+def _is_plain_heading(line: str) -> bool:
+    """A short unmarked line that is a heading on its own: ALL CAPS, or one
+    of the known section names (as plain text pasted from a PDF has them)."""
+    if len(line) > _PLAIN_HEADING_MAX_CHARS or line[0] in "-*|>" or line[0].isdigit():
+        return False
+    if line.endswith((".", ",", ";")):
+        return False
+    letters = [c for c in line if c.isalpha()]
+    return (len(letters) >= 3 and all(c.isupper() for c in letters)) or bool(
+        _section_for(line, plain=True)
+    )
+
+
 def _split_sections(text: str) -> dict[str, list[str]]:
+    """Group lines under the known section each heading names. An unknown
+    heading nested below a known one (e.g. "### Step 1" under "## Setup")
+    stays part of it, heading line included, as does any heading nested in a
+    specifications section (a datasheet's "### Interfaces" lists specs, not a
+    port table). Any other unknown heading starts an "_other" section, so its
+    content isn't read as the previous section's."""
     sections: dict[str, list[str]] = {"_preamble": []}
-    current = "_preamble"
+    current, current_level = "_preamble", 0
     for line in text.splitlines():
-        heading_candidate = _clean_markdown_emphasis(
-            _HEADING_PREFIX_RE.sub("", line.strip())
-        )
-        if heading_candidate.lower() in _KNOWN_HEADINGS:
-            current = heading_candidate.lower()
-            sections.setdefault(current, [])
-        else:
+        stripped = line.strip()
+        level = _heading_level(stripped) if stripped else None
+        if level is None and stripped and _is_plain_heading(stripped):
+            level = 7
+        if level is None:
             sections[current].append(line)
+            continue
+        marked_up = level < 7 or bool(_BOLD_LINE_RE.match(stripped))
+        section = _section_for(stripped, plain=not marked_up)
+        nested = current != "_preamble" and level > current_level
+        if section and not (nested and current == "specs"):
+            current, current_level = section, level
+            sections.setdefault(current, [])
+        elif nested:
+            sections[current].append(line)
+        else:
+            current, current_level = "_other", level
+            sections.setdefault(current, [])
     return sections
 
 
@@ -277,77 +546,395 @@ def _parse_bullets(lines: list[str]) -> list[str]:
     return bullets
 
 
-def _parse_table_rows(lines: list[str]) -> list[list[str]]:
-    rows: list[list[str]] = []
-    for line in lines:
-        if "|" not in line:
+@dataclass(frozen=True)
+class _Table:
+    """A Markdown table: `header` is the row above its "---" separator (empty
+    when there is none) and `rows` the data rows."""
+
+    header: list[str]
+    rows: list[list[str]]
+
+
+def _table_cells(line: str) -> list[str]:
+    # Only the outer pipe on each side: "||Off|" has a blank first cell.
+    line = line.strip().removeprefix("|").removesuffix("|")
+    return [_clean_markdown_emphasis(cell.strip()) for cell in line.split("|")]
+
+
+def _is_separator_row(cells: list[str]) -> bool:
+    return all(_TABLE_SEPARATOR_CELL_RE.fullmatch(cell) for cell in cells)
+
+
+def _parse_tables(lines: list[str]) -> list[_Table]:
+    """Each run of "|" lines as one table. A leading column of item numbers
+    ("No." / 1, 2, 3, as hardware callout tables have) is dropped."""
+    tables = []
+    block: list[list[str]] = []
+    for line in [*lines, ""]:
+        if "|" in line:
+            block.append(_table_cells(line))
             continue
-        cells = [
-            _clean_markdown_emphasis(cell.strip())
-            for cell in line.strip().strip("|").split("|")
+        if not block:
+            continue
+        header: list[str] = []
+        if len(block) > 1 and _is_separator_row(block[1]):
+            header, block = block[0], block[2:]
+        rows = [row for row in block if any(row) and not _is_separator_row(row)]
+        if not header and rows and [c.lower() for c in rows[0]] in _KNOWN_HEADER_ROWS:
+            header, rows = rows[0], rows[1:]
+        tables.append(_without_number_column(_Table(header, rows)))
+        block = []
+    return tables
+
+
+def _without_number_column(table: _Table) -> _Table:
+    first = table.header[0].lower().strip(".#: ") if table.header else ""
+    numbers = [row[0] for row in table.rows if row and row[0]]
+    if (
+        first in _NUMBER_COLUMN_HEADERS
+        and numbers
+        and all(_ITEM_NUMBER_RE.fullmatch(cell) for cell in numbers)
+    ):
+        return _Table(table.header[1:], [row[1:] for row in table.rows])
+    return table
+
+
+def _column(header: list[str], pattern: re.Pattern[str]) -> Optional[int]:
+    return next((i for i, cell in enumerate(header) if pattern.search(cell)), None)
+
+
+def _cell(row: list[str], index: Optional[int]) -> Optional[str]:
+    if index is None or index >= len(row):
+        return None
+    return row[index] or None
+
+
+def _led_indicators(name: str, description: str) -> list[LEDIndicator]:
+    """One indicator per state. A cell describing several states in turn
+    ("Off: No power. On: Ready") is split into one per state."""
+    parts = _LED_STATE_SPLIT_RE.split(description)
+    if len(parts) > 1 and all(":" in part for part in parts):
+        return [
+            LEDIndicator(led_name=name, raw_description=part.strip().rstrip(".;"))
+            for part in parts
         ]
-        if not cells or all(re.fullmatch(r"-+", c) for c in cells):
+    return [LEDIndicator(led_name=name, raw_description=description)]
+
+
+def _leds_from_table(table: _Table) -> list[LEDIndicator]:
+    """First column names the LED; the rest (state, meaning) is its
+    description. A blank name continues the LED above, as merged cells come
+    out of a PDF."""
+    leds: list[LEDIndicator] = []
+    name = ""
+    for row in table.rows:
+        if len(row) < 2:
             continue
-        if [c.lower() for c in cells] in (
-            ["port", "type", "notes"],
-            ["led", "meaning"],
-        ):
+        name = row[0] or name
+        description = ": ".join(cell for cell in row[1:] if cell)
+        if name and description:
+            leds.extend(_led_indicators(name, description))
+    return leds
+
+
+def _ports_from_table(table: _Table) -> list[CablingPort]:
+    """First column names the port; the type and notes columns are found by
+    header ("Type"/"Connector", "Notes"/"Description"), else taken as the
+    second and third. With no type column the connector is read from the
+    row's text."""
+    type_col: Optional[int] = 1
+    notes_col: Optional[int] = 2
+    if table.header:
+        type_col = _column(table.header[1:], _PORT_TYPE_HEADER_RE)
+        notes_col = _column(table.header[1:], _PORT_NOTES_HEADER_RE)
+        type_col = None if type_col is None else type_col + 1
+        notes_col = None if notes_col is None else notes_col + 1
+        if type_col is None and notes_col is None:
+            type_col = 1
+    ports = []
+    for row in table.rows:
+        if len(row) < 2 or not row[0]:
             continue
-        rows.append(cells)
-    return rows
+        notes = _cell(row, notes_col)
+        port_type = _cell(row, type_col) or _connector_type(" ".join(row))
+        ports.append(
+            CablingPort(port_name=row[0], port_type=port_type or "Port", notes=notes)
+        )
+    return ports
 
 
-def _parse_specifications(lines: list[str]) -> dict[str, str]:
-    """Map the Specifications section's labels (bullets or table rows) onto
-    the QSGExtraction field names they correspond to. Unrecognized labels are
-    ignored here; they become open-ended spec rows instead."""
-    specs: dict[str, str] = {}
-    for item in _parse_spec_items(lines):
-        field = _SPEC_LABEL_TO_FIELD.get(_spec_key(item.name))
-        if field and field not in specs:
-            specs[field] = item.value
-    return specs
+def _connector_type(text: str) -> Optional[str]:
+    match = _CONNECTOR_RE.search(text)
+    return match.group(0) if match else None
 
 
-def _parse_spec_items(lines: list[str]) -> list[SpecItem]:
-    """Every "Label: value" bullet and two-column table row in a
-    Specifications section, verbatim, for the open-ended spec rows."""
+def _from_hardware_table(table: _Table) -> tuple[list[CablingPort], list[LEDIndicator]]:
+    """A table describing the whole device, one row per callout: rows naming
+    an LED become indicators, rows naming a port become ports, and the rest
+    (buttons, labels) is skipped."""
+    ports: list[CablingPort] = []
+    leds: list[LEDIndicator] = []
+    for row in table.rows:
+        if len(row) < 2 or not row[0]:
+            continue
+        name = row[0]
+        description = ": ".join(cell for cell in row[1:] if cell)
+        if _LED_NAME_RE.search(name):
+            leds.extend(
+                _led_indicators(_LED_SUFFIX_RE.sub("", name) or name, description)
+            )
+        elif _PORT_NAME_RE.search(name):
+            ports.append(
+                CablingPort(
+                    port_name=_PORT_SUFFIX_RE.sub("", name) or name,
+                    port_type=_connector_type(name) or "Port",
+                    notes=description or None,
+                )
+            )
+    return ports, leds
+
+
+def _label_value(text: str) -> Optional[tuple[str, str]]:
+    """Split a short "Label: value" (or "**Label:** value") line."""
+    match = _LABEL_VALUE_RE.match(text)
+    if not match:
+        return None
+    label = _clean_markdown_emphasis(match.group(1)).strip()
+    value = _clean_markdown_emphasis(match.group(2)).strip()
+    if (
+        not label
+        or not value
+        or len(label.split()) > _MAX_LABEL_WORDS
+        or label.lower() in _NON_SPEC_LABELS
+        or value.startswith("//")
+    ):
+        return None
+    return label, value
+
+
+def _parse_ports_and_leds(
+    sections: dict[str, list[str]],
+) -> tuple[list[CablingPort], list[LEDIndicator]]:
+    """Ports and LEDs from every table outside the specs: by the table's own
+    header when it names one ("LED", "Port", "Interface"), else by the
+    section it sits in. "Label: value" bullets under a ports or LEDs heading
+    count too."""
+    ports: list[CablingPort] = []
+    leds: list[LEDIndicator] = []
+    for section, lines in sections.items():
+        if section in _NON_HARDWARE_SECTIONS:
+            continue
+        for table in _parse_tables(lines):
+            first = table.header[0] if table.header else ""
+            if _LED_NAME_RE.search(first):
+                kind: Optional[str] = "leds"
+            elif _PORT_NAME_RE.search(first):
+                kind = "ports"
+            else:
+                kind = section
+            if kind == "leds":
+                leds.extend(_leds_from_table(table))
+            elif kind == "ports":
+                ports.extend(_ports_from_table(table))
+            elif kind == "hardware":
+                hardware_ports, hardware_leds = _from_hardware_table(table)
+                ports.extend(hardware_ports)
+                leds.extend(hardware_leds)
+        if section not in ("ports", "leds"):
+            continue
+        for bullet in _parse_bullets(lines):
+            pair = _label_value(bullet)
+            if not pair:
+                continue
+            if section == "ports":
+                ports.append(CablingPort(port_name=pair[0], port_type=pair[1]))
+            else:
+                leds.extend(_led_indicators(*pair))
+    return ports, leds
+
+
+def _spec_items_from_table(
+    table: _Table, device_name: str
+) -> tuple[list[SpecItem], Optional[str]]:
+    """Label/value rows. A table with one column per model ("Model | X1 |
+    X2") is read from the model the title names, else from the first model,
+    with a note saying so."""
+    value_col = 1
+    note = None
+    models = table.header[1:]
+    if (
+        len(models) >= 2
+        and _MODEL_HEADER_RE.fullmatch(table.header[0])
+        and not any(_GENERIC_COLUMN_RE.fullmatch(model) for model in models)
+    ):
+        title_key = _alnum_key(device_name)
+        named = [i for i, model in enumerate(models) if _alnum_key(model) in title_key]
+        if named and _alnum_key(models[named[0]]):
+            value_col = 1 + named[0]
+        else:
+            note = (
+                f"The specifications table covers {len(models)} models "
+                f"({', '.join(models)}); the built-in parser read the first, "
+                f"{models[0]}."
+            )
     items = []
-    for bullet in _parse_bullets(lines):
-        label, sep, value = bullet.partition(":")
-        if sep and label.strip() and value.strip():
-            items.append(SpecItem(name=label.strip(), value=value.strip()))
-    for row in _parse_table_rows(lines):
-        if len(row) < 2 or not row[0] or not row[1]:
+    for row in table.rows:
+        if len(row) <= value_col or not row[0] or not row[value_col]:
             continue
         if {row[0].lower(), row[1].lower()} <= _SPEC_TABLE_HEADERS:
             continue
-        items.append(SpecItem(name=row[0], value=row[1]))
-    return items
+        items.append(SpecItem(name=row[0], value=row[value_col]))
+    return items, note
 
 
-def _detect_document_type(text: str, sections: dict[str, list[str]]) -> DocumentType:
-    """Call a document a datasheet only on clear evidence: a datasheet title, or
-    a Specifications section with no install title or install sections.
-    Everything else stays a quick start guide, as before document types."""
+def _alnum_key(text: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", text.lower())
+
+
+def _parse_spec_items(
+    lines: list[str], device_name: str = ""
+) -> tuple[list[SpecItem], list[str]]:
+    """Every "Label: value" bullet or line and every label/value table row in
+    a specifications section, verbatim, plus notes on how tables were read."""
+    items = []
+    notes = []
+    for bullet in _parse_bullets(lines):
+        pair = _label_value(bullet)
+        if pair:
+            items.append(SpecItem(name=pair[0], value=pair[1]))
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or _BULLET_PREFIX_RE.match(stripped) or "|" in stripped:
+            continue
+        pair = _label_value(stripped)
+        if pair:
+            items.append(SpecItem(name=pair[0], value=pair[1]))
+    for table in _parse_tables(lines):
+        table_items, note = _spec_items_from_table(table, device_name)
+        items.extend(table_items)
+        if note:
+            notes.append(note)
+    return items, notes
+
+
+def _take_fixed_specs(
+    items: list[SpecItem],
+) -> tuple[dict[str, str], list[SpecItem]]:
+    """Move the spec rows naming the fixed fields (Wi-Fi standard, WAN speed,
+    form factor) into those fields. A synonym only counts when its value reads
+    as that field (an 802.11 standard, a speed), so "WAN: 1 x SFP+" stays an
+    open-ended row."""
+    fixed: dict[str, str] = {}
+    rest = []
+    for item in items:
+        key = _spec_key(item.name)
+        field = _SPEC_LABEL_TO_FIELD.get(key) or _SPEC_SYNONYM_TO_FIELD.get(key)
+        if (
+            field
+            and field not in fixed
+            and (key in _SPEC_LABEL_TO_FIELD or _FIXED_FIELD_CHECKS[field](item.value))
+        ):
+            fixed[field] = item.value
+        else:
+            rest.append(item)
+    return fixed, rest
+
+
+def _detect_document_type(
+    text: str,
+    sections: dict[str, list[str]],
+    step_count: Optional[int],
+    spec_rows: int,
+) -> DocumentType:
+    """Call a document a datasheet only on clear evidence: a datasheet title,
+    or specifications (a section of them, ordering information, or at least
+    `_DATASHEET_MIN_SPEC_ROWS` label/value rows) with no sign of an install
+    procedure (an install title, numbered setup steps, a tools list or a
+    provisioning section). Everything else stays a quick start guide."""
     title = next((line.strip() for line in text.splitlines() if line.strip()), "")
     if _DATASHEET_TITLE_RE.search(title):
         return DocumentType.DATASHEET
     looks_like_install = bool(
-        _INSTALL_TITLE_RE.search(title) or _INSTALL_SECTIONS & sections.keys()
+        _INSTALL_TITLE_RE.search(title)
+        or step_count
+        or _parse_bullets(sections.get("tools", []))
+        or "provisioning" in sections
     )
-    if "specifications" in sections and not looks_like_install:
+    has_specs = (
+        "specs" in sections
+        or "ordering" in sections
+        or spec_rows >= _DATASHEET_MIN_SPEC_ROWS
+    )
+    if has_specs and not looks_like_install:
         return DocumentType.DATASHEET
     return DocumentType.QUICK_START_GUIDE
 
 
 def _detect_device_name(text: str) -> str:
+    """The title without the words for the document type. When the first
+    line is only that ("Quick Start Guide"), the next lines are tried."""
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    for line in lines[:_TITLE_CANDIDATE_LINES]:
+        title = _clean_markdown_emphasis(_HEADING_PREFIX_RE.sub("", line))
+        name = _GENERIC_TITLE_RE.sub(" ", title)
+        name = _TITLE_TRAIL_RE.sub("", _TITLE_LEAD_RE.sub("", name))
+        name = " ".join(name.split())
+        if any(c.isalpha() for c in name):
+            return name
+    if lines:
+        return _clean_markdown_emphasis(_HEADING_PREFIX_RE.sub("", lines[0]))
+    return "Unknown Device"
+
+
+def _count_steps(lines: list[str]) -> Optional[int]:
+    """Numbered steps ("1.", "1)", "Step 1", or "- 1" as PDFs render them)
+    in the setup sections, or None when there's no numbered procedure."""
+    count = sum(
+        1
+        for line in lines
+        if _STEP_LINE_RE.match(_HEADING_PREFIX_RE.sub("", line.strip()))
+    )
+    return min(count, 200) if count >= 2 else None
+
+
+def _sentences(text: str) -> list[str]:
+    """Sentences, with hard-wrapped lines joined back up first: a new
+    paragraph, bullet, numbered item, heading or table row starts a new
+    block, so a sentence never runs across one."""
+    blocks: list[list[str]] = []
     for line in text.splitlines():
         stripped = line.strip()
+        starts_block = not stripped or bool(
+            re.match(r"[-*#|>]|\d{1,2}[.)\s]", stripped)
+        )
+        if starts_block or not blocks:
+            blocks.append([])
         if stripped:
-            title = _clean_markdown_emphasis(_HEADING_PREFIX_RE.sub("", stripped))
-            return _TITLE_SUFFIX_RE.sub("", title).strip()
-    return "Unknown Device"
+            blocks[-1].append(stripped)
+    return [
+        sentence
+        for block in blocks
+        if block
+        for sentence in re.split(r"(?<=[.!?])\s+", " ".join(block))
+    ]
+
+
+def _tools_from_sentences(text: str) -> list[str]:
+    """Tools a guide names in prose ("You will need a laptop and a
+    screwdriver to ..."), for guides without a tools list."""
+    tools: list[str] = []
+    for sentence in _sentences(text):
+        if _NEGATED_SENTENCE_RE.match(sentence) or _NEGATIVE_WORDS_RE.search(sentence):
+            continue
+        match = _TOOLS_SENTENCE_RE.search(sentence)
+        if not match:
+            continue
+        listed = match.group("items") or match.group("listed")
+        for item in _ITEM_SPLIT_RE.split(listed):
+            item = _LEADING_ARTICLE_RE.sub("", item.strip(" .;:"))
+            if item and item.lower() not in (t.lower() for t in tools):
+                tools.append(item[0].upper() + item[1:])
+    return tools
 
 
 def _is_netmask(candidate: str) -> bool:
@@ -375,58 +962,92 @@ def _detect_provisioning_methods(text: str) -> list[RawProvisioningMethod]:
     """Return methods in first-occurrence document order (a stand-in for
     "primary method first" when we don't have an LLM to judge intent)."""
     ordered: list[RawProvisioningMethod] = []
-    seen = set()
-    for sentence in re.split(r"(?<=[.!?])\s+|\n", text):
+    for sentence in _sentences(text):
         lowered = sentence.lower()
-        if any(trigger in lowered for trigger in _NEGATION_TRIGGERS):
+        if _NEGATED_SENTENCE_RE.match(sentence) or any(
+            trigger in lowered for trigger in _NEGATION_TRIGGERS
+        ):
             continue
+        found = []
         for pattern, method in _PROVISIONING_KEYWORD_PATTERNS:
-            if method in seen or not pattern.search(sentence):
+            match = pattern.search(sentence)
+            if method in ordered or not match:
                 continue
             if method == RawProvisioningMethod.DHCP and _DHCP_SERVER_RE.search(
                 sentence
             ):
                 continue
-            seen.add(method)
-            ordered.append(method)
+            found.append((match.start(), method))
+        ordered.extend(method for _, method in sorted(found, key=lambda f: f[0]))
     return ordered
 
 
-def _heuristic_extract_qsg(text: str, source_document: str) -> QSGExtraction:
+def _heuristic_extract(
+    text: str, source_document: str
+) -> tuple[QSGExtraction, list[str]]:
+    """The regex parser. Also returns notes for the user on what it read only
+    partly: one model's column of a multi-model table, or too little of the
+    document to compare it with confidence."""
     sections = _split_sections(text)
+    device_name = _detect_device_name(text)
+    cabling_ports, led_indicators = _parse_ports_and_leds(sections)
+    spec_items, notes = _parse_spec_items(sections.get("specs", []), device_name)
+    loose_items: list[SpecItem] = []
+    if "specs" not in sections:
+        for section in _LOOSE_SPEC_SECTIONS:
+            items, _ = _parse_spec_items(sections.get(section, []), device_name)
+            loose_items.extend(items)
+    step_count = _count_steps(sections.get("steps", []))
+    document_type = _detect_document_type(
+        text, sections, step_count, len(spec_items) + len(loose_items)
+    )
+    if document_type == DocumentType.DATASHEET:
+        spec_items += loose_items
+    fixed, specs = _take_fixed_specs(spec_items)
 
-    cabling_ports = [
-        CablingPort(
-            port_name=row[0],
-            port_type=row[1],
-            notes=row[2] if len(row) > 2 and row[2] else None,
-        )
-        for row in _parse_table_rows(sections.get("cabling & ports", []))
-        if len(row) >= 2
-    ]
-    led_indicators = [
-        LEDIndicator(led_name=row[0], raw_description=row[1])
-        for row in _parse_table_rows(sections.get("led indicators", []))
-        if len(row) >= 2
-    ]
-
-    specs = _parse_specifications(sections.get("specifications", []))
-
-    return QSGExtraction(
-        device_name=_detect_device_name(text),
+    extraction = QSGExtraction(
+        device_name=device_name,
         source_document=source_document,
         default_ip=_detect_default_ip(text),
         provisioning_methods=_detect_provisioning_methods(text),
-        required_tools=_parse_bullets(sections.get("required tools", [])),
+        required_tools=(
+            _parse_bullets(sections.get("tools", [])) or _tools_from_sentences(text)
+        ),
         cabling_ports=cabling_ports,
         led_indicators=led_indicators,
-        wifi_standard=specs.get("wifi_standard"),
-        wan_speed=specs.get("wan_speed"),
-        form_factor=specs.get("form_factor"),
-        capabilities=_parse_bullets(sections.get("key features", [])),
-        document_type=_detect_document_type(text, sections),
-        specs=_parse_spec_items(sections.get("specifications", [])),
+        wifi_standard=fixed.get("wifi_standard"),
+        wan_speed=fixed.get("wan_speed"),
+        form_factor=fixed.get("form_factor"),
+        capabilities=_parse_bullets(sections.get("features", [])),
+        step_count=step_count,
+        document_type=document_type,
+        specs=specs,
     )
+    thin = _thin_extraction_warning(extraction)
+    return extraction, notes + ([thin] if thin else [])
+
+
+def _thin_extraction_warning(extraction: QSGExtraction) -> Optional[str]:
+    """A warning when the parser found too little to compare the document
+    with confidence, rather than presenting a near-empty read as the full
+    picture."""
+    if extraction.document_type == DocumentType.DATASHEET:
+        fixed = (extraction.wifi_standard, extraction.wan_speed, extraction.form_factor)
+        found = len(extraction.specs) + sum(1 for value in fixed if value)
+        return THIN_SPECS_WARNING if found < _MIN_DATASHEET_SPECS else None
+    facts = (
+        extraction.provisioning_methods,
+        extraction.required_tools,
+        extraction.cabling_ports,
+        extraction.led_indicators,
+        extraction.step_count,
+    )
+    found = sum(1 for fact in facts if fact)
+    return THIN_INSTALL_WARNING if found < _MIN_INSTALL_FACTS else None
+
+
+def _heuristic_extract_qsg(text: str, source_document: str) -> QSGExtraction:
+    return _heuristic_extract(text, source_document)[0]
 
 
 def _load_agent_system_prompt(agent_file: str) -> str:
@@ -763,11 +1384,8 @@ def _extract_single(
             "No LLM provider configured; using heuristic parser for %r",
             source_document,
         )
-    return (
-        _heuristic_extract_qsg(document_text, source_document),
-        EXTRACTION_SOURCE_HEURISTIC,
-        warnings,
-    )
+    extraction, notes = _heuristic_extract(document_text, source_document)
+    return extraction, EXTRACTION_SOURCE_HEURISTIC, warnings + notes
 
 
 def _split_into_chunks(text: str, max_chars: int = _CHUNK_CHARS) -> list[str]:
@@ -951,11 +1569,9 @@ def _extract_document(
                 source_document,
                 exc_info=True,
             )
-            return (
-                _heuristic_extract_qsg(document_text, source_document),
-                EXTRACTION_SOURCE_HEURISTIC,
-                [_fallback_warning(provider, exc, user_key=bool(api_key))],
-            )
+            extraction, notes = _heuristic_extract(document_text, source_document)
+            warning = _fallback_warning(provider, exc, user_key=bool(api_key))
+            return extraction, EXTRACTION_SOURCE_HEURISTIC, [warning, *notes]
     return _extract_single(document_text, source_document, llm)
 
 
@@ -1115,8 +1731,8 @@ _VERY_LONG_SETUP_STEPS = 15
 
 def _compute_friction_score(spec: DeviceSpec, count_steps: bool = False) -> int:
     """`count_steps` adds the procedure length; the caller sets it only when
-    both devices have a step count, so one side's missing count (the
-    heuristic parser never sets one) can't make the other look worse."""
+    both devices have a step count, so one side's missing count (a guide
+    without numbered steps) can't make the other look worse."""
     score = 1
     score += min(len(spec.required_tools), 4)
     if spec.provisioning_method not in _REMOTE_PROVISIONING_METHODS:
@@ -1225,11 +1841,33 @@ def _is_install_document(spec: DeviceSpec) -> bool:
     return spec.document_type in (None, DocumentType.QUICK_START_GUIDE.value)
 
 
+def _unscored_reason(device_a: DeviceSpec, device_b: DeviceSpec) -> Optional[str]:
+    """Why two quick start guides can't have their install effort scored, or
+    None when they can. A guide that never says how the device is provisioned
+    would otherwise be scored as the worst case (console setup)."""
+    unknown = [
+        spec.model_name
+        for spec in (device_a, device_b)
+        if not spec.provisioning_methods
+    ]
+    if not unknown:
+        return None
+    if len(unknown) == 1:
+        return (
+            f"Install effort isn't compared because the document for {unknown[0]} "
+            "doesn't say how the device is set up or provisioned."
+        )
+    return (
+        f"Install effort isn't compared because the documents for {unknown[0]} "
+        f"and {unknown[1]} don't say how the devices are set up or provisioned."
+    )
+
+
 def _build_key_risks(spec: DeviceSpec) -> list[str]:
     risks = []
     # With no documented provisioning, the primary method is only the
-    # conservative Console fallback; for a datasheet that would invent a risk.
-    provisioning_known = _is_install_document(spec) or bool(spec.provisioning_methods)
+    # conservative Console fallback; reporting its risks would invent them.
+    provisioning_known = bool(spec.provisioning_methods)
     if provisioning_known and spec.provisioning_method == ProvisioningMethod.CONSOLE:
         risks.append(
             "Requires a technician with a laptop and terminal emulator on-site "
@@ -1321,11 +1959,13 @@ def _build_spec_talk_track(
     perspective: Optional[Perspective],
     advantages_a: list[str],
     advantages_b: list[str],
+    reason: Optional[str] = None,
 ) -> str:
-    """Talk track when install effort can't be compared because the documents
-    aren't both quick start guides; built only from the spec advantages."""
+    """Talk track when install effort can't be compared (the documents aren't
+    both quick start guides, or `reason`); built only from the spec
+    advantages."""
     a, b = device_a.model_name, device_b.model_name
-    intro = (
+    intro = reason or (
         "Install effort isn't compared because these documents don't both "
         "describe an installation procedure."
     )
@@ -1435,11 +2075,14 @@ def synthesize_battlecard(
     prose doesn't map onto these typed fields.
 
     Install friction is scored only when both documents are quick start
-    guides; otherwise both scores are None and the talk track is spec-based."""
+    guides that say how their device is provisioned; otherwise both scores
+    are None and the talk track is spec-based."""
     advantages_a, advantages_b = _build_key_advantages(device_a, device_b)
     score_a: Optional[int] = None
     score_b: Optional[int] = None
-    if _is_install_document(device_a) and _is_install_document(device_b):
+    both_guides = _is_install_document(device_a) and _is_install_document(device_b)
+    unscored_reason = _unscored_reason(device_a, device_b) if both_guides else None
+    if both_guides and unscored_reason is None:
         count_steps = (
             device_a.step_count is not None and device_b.step_count is not None
         )
@@ -1450,7 +2093,12 @@ def synthesize_battlecard(
         )
     else:
         talk_track = _build_spec_talk_track(
-            device_a, device_b, perspective, advantages_a, advantages_b
+            device_a,
+            device_b,
+            perspective,
+            advantages_a,
+            advantages_b,
+            unscored_reason,
         )
     return BattlecardResponse(
         comparison_matrix=_build_comparison_matrix(device_a, device_b),
@@ -1464,6 +2112,7 @@ def synthesize_battlecard(
         extraction_source_device_a=device_a.extraction_source,
         extraction_source_device_b=device_b.extraction_source,
         perspective=perspective,
+        unscored_reason=unscored_reason,
         warnings=[
             f"{spec.model_name}: {warning}"
             for spec in (device_a, device_b)

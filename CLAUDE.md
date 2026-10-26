@@ -42,7 +42,10 @@ uv tool install . && qsg-synthesizer             # installed-package path (qsg_s
      (Anthropic or Gemini, chosen by `_select_llm_provider` / `LLM_PROVIDER`), using
      `.claude/agents/qsg_extractor.md` (frontmatter stripped) as the system prompt. With no
      usable key, or on *any* API/parse error, it falls back to `_heuristic_extract_qsg`,
-     a regex parser keyed on the heading names used in `sample_docs/*.md`.
+     a regex parser: heading wordings map to sections via `_SECTION_PATTERNS`, tables are read
+     by their header row (`_parse_tables`), and `_heuristic_extract` also returns warnings when
+     it read only the first model of a multi-model spec table or recognized too little
+     (`THIN_INSTALL_WARNING` / `THIN_SPECS_WARNING`).
    - The dashboard's Settings can override the provider per request: `POST /api/v1/compare`
      reads `X-LLM-Provider` (`anthropic`/`gemini`/`heuristic`), `X-LLM-API-Key` and
      `X-LLM-Model` into an `LLMOverride`, which `_resolve_llm` turns into (provider, key) and
@@ -63,8 +66,12 @@ uv tool install . && qsg-synthesizer             # installed-package path (qsg_s
      heuristic only says datasheet on clear evidence) and open-ended `specs` rows.
 3. `synthesize_battlecard()` is fully rule-based (friction score, risks, advantages, talk track).
    Friction is scored only when both documents are quick start guides (`_is_install_document`,
-   which treats a missing type as a guide); otherwise both scores are `None` and the talk track
-   is spec-based. The UI, history and exports all handle `None` scores.
+   which treats a missing type as a guide) and both list a provisioning method; otherwise both
+   scores are `None` and the talk track is spec-based. For two guides `_unscored_reason` says
+   which one doesn't document provisioning, as `BattlecardResponse.unscored_reason`, which the
+   UI verdict, talk track and exports show. Console/static-IP risks likewise need a documented
+   method, since the `Console` primary method is otherwise only a fallback. The UI, history
+   and exports all handle `None` scores.
 4. `qsg_synthesizer/services/history.py` saves the result as `data/history/<uuid hex>.json` (capped at 50);
    the export endpoints (`qsg_synthesizer/services/export.py`) render from those saved records. Each record
    stores `input_fingerprint` (a sha256 of both input texts). The drawer loads
@@ -132,6 +139,9 @@ Things that span multiple files:
   `qsg_synthesizer.services.orchestrator.genai` and setting the key env vars with `patch.dict`.
 - Most API tests run end-to-end through the heuristic parser on `sample_docs/`, so changing
   those sample docs or the heuristic parser can shift the expected friction scores.
+  `tests/test_realistic_docs.py` pins what the parser extracts from each sample doc (text and
+  PDF) and tests it against `tests/fixtures/realistic/`, vendor-style guides and datasheets
+  for fictional devices laid out unlike the samples; add a fixture there for a new layout.
 - `sample_docs/device_c_datasheet.md` (bullet specs) and `device_d_datasheet.md` (table specs)
   are the datasheet fixtures; `tests/test_datasheets.py` covers document types, spec rows,
   unscored comparisons and long-document chunking with a fake LLM.

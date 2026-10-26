@@ -1,0 +1,16 @@
+Quick Start Guide
+Zentra ZX-110 DOCSIS 3.1 Cable Modem
+
+WHAT YOU NEED
+- Coaxial cable connected to an active cable outlet
+- Computer with an Ethernet port
+
+INSTALLATION
+1. Connect the coaxial cable to the Cable port on the modem.
+2. Connect the Ethernet cable from the modem to your computer.
+3. Plug in the power adapter and press the power button.
+4. Wait for the Online light to turn solid white. This can take up to 10 minutes.
+5. Call your provider to activate the modem with the MAC address on the label.
+
+TROUBLESHOOTING
+Open a web browser and go to 192.168.100.1 to view the modem status page.

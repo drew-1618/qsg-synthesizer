@@ -83,6 +83,9 @@ class TestExpandPortRange:
     def test_expands_shorthand_range_notation(self):
         assert expand_port_range("LAN1-4") == ("LAN", 4)
 
+    def test_expands_tilde_range_notation(self):
+        assert expand_port_range("LAN 1~4") == ("LAN", 4)
+
     def test_leaves_unrelated_numbers_alone(self):
         assert expand_port_range("RS-232") == ("RS-232", 1)
 
