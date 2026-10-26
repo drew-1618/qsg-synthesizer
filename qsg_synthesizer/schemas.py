@@ -78,7 +78,8 @@ class DeviceSpec(BaseModel):
     form_factor: Optional[str] = None
     capabilities: List[str] = Field(default_factory=list)
     # LLM assessment of the setup experience; unset for heuristic extraction
-    # and for records saved before these were tracked.
+    # (apart from a count of numbered steps) and for records saved before
+    # these were tracked.
     step_count: Optional[int] = None
     setup_difficulty: Optional[str] = None
     strengths: List[str] = Field(default_factory=list)

@@ -1494,7 +1494,8 @@ function renderSpecTable(data, nameA, nameB) {
     return `<span class="text-ink-muted">Not recorded</span>`;
   };
   rows.unshift(["Read with", readWith("device_a"), readWith("device_b")]);
-  // Only an AI read fills these, so show each row only when either side has it.
+  // Mostly only an AI read fills these (the built-in parser counts numbered
+  // steps), so show each row only when either side has it.
   const has = (value) => value != null && value !== "" && !(Array.isArray(value) && value.length === 0);
   const present = (values) => values && (has(values.device_a) || has(values.device_b));
   const steps = cm.step_count;

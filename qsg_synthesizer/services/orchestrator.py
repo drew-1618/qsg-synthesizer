@@ -321,10 +321,29 @@ _GENERIC_COLUMN_RE = re.compile(
 _HEADING_PREFIX_RE = re.compile(r"^#+\s*")
 _HEADING_LEVEL_RE = re.compile(r"^(#+)\s")
 _BULLET_PREFIX_RE = re.compile(r"^[-*]\s+")
-_TITLE_SUFFIX_RE = re.compile(
-    r"\s*[—-]\s*(?:quick start guide|data\s*sheet|spec(?:ification)?s? sheet)\s*$",
+# Words a title uses for the kind of document rather than the device.
+_GENERIC_TITLE_RE = re.compile(
+    r"\b(?:(?:hardware |quick )?(?:installation|install|setup|start|user'?s?)"
+    r" (?:guide|manual)|quick[\s-]*start|getting started(?: with)?"
+    r"|data\s*sheet|spec(?:ification)?s? sheet|product specifications?)\b",
     re.IGNORECASE,
 )
+# Punctuation and joining words left at either end once those are removed:
+# "Getting Started with the X1" -> "the X1" -> "X1".
+_TITLE_LEAD_RE = re.compile(r"^[\s—–:|,-]*(?:(?:for|with|to)\s+)?(?:the|your)?\s*")
+_TITLE_TRAIL_RE = re.compile(r"[\s—–:|,(-]*(?:\b(?:for|with|to))?[\s—–:|,(-]*$")
+_TITLE_CANDIDATE_LINES = 3
+_STEP_LINE_RE = re.compile(r"^(?:[-*]\s+)?(?:step\s+)?\d{1,2}(?:[.):]\s*|\s+)\S", re.I)
+_NEGATED_SENTENCE_RE = re.compile(r"^\W*no\b", re.IGNORECASE)
+_TOOLS_SENTENCE_RE = re.compile(
+    r"\byou(?:'ll| will)? need (?!to\b)(?P<items>.+?)"
+    r"(?:\s+(?:to|for|in order to|before|when)\b.*)?[.!]?$"
+    r"|\b(?:tools?|equipment|items?) (?:required|needed)\s*:\s*(?P<listed>.+?)[.]?$",
+    re.IGNORECASE,
+)
+_ITEM_SPLIT_RE = re.compile(r",\s*(?:and\s+)?|\s+and\s+")
+_LEADING_ARTICLE_RE = re.compile(r"^(?:a|an|the|your)\s+", re.IGNORECASE)
+_NEGATIVE_WORDS_RE = re.compile(r"\b(?:not|don't|do not|never|without)\b", re.I)
 _DATASHEET_TITLE_RE = re.compile(
     r"\b(?:data\s*sheet|spec(?:ification)?s?\s+sheet|product\s+specifications?)\b",
     re.IGNORECASE,
@@ -352,12 +371,37 @@ _DHCP_SERVER_RE = re.compile(
 )
 
 _PROVISIONING_KEYWORD_PATTERNS = [
-    (re.compile(r"tr-?069", re.IGNORECASE), RawProvisioningMethod.TR069),
-    (re.compile(r"\bdhcp\b", re.IGNORECASE), RawProvisioningMethod.DHCP),
-    (re.compile(r"web gui", re.IGNORECASE), RawProvisioningMethod.WEB_GUI),
-    (re.compile(r"\bconsole\b", re.IGNORECASE), RawProvisioningMethod.CONSOLE),
     (
-        re.compile(r"qr\s*/?\s*mobile app|qr code", re.IGNORECASE),
+        re.compile(r"tr-?069|tr-?369|\bcwmp\b|\bacs\b", re.IGNORECASE),
+        RawProvisioningMethod.TR069,
+    ),
+    (re.compile(r"\bdhcp\b", re.IGNORECASE), RawProvisioningMethod.DHCP),
+    (
+        # A local address in a browser; a bare https:// link is usually a
+        # support page, so only an IP URL counts.
+        re.compile(
+            r"web[- ]?(?:gui|ui|interface|browser|page|based (?:setup|configuration))"
+            r"|\bbrowse to\b|\bopen a browser\b|setup wizard"
+            r"|https?://(?:\d{1,3}\.){3}\d{1,3}",
+            re.IGNORECASE,
+        ),
+        RawProvisioningMethod.WEB_GUI,
+    ),
+    (
+        re.compile(
+            r"\bconsole\b|\bserial (?:port|cable|connection)|rs-?232"
+            r"|terminal emulator|\blocal cli\b",
+            re.IGNORECASE,
+        ),
+        RawProvisioningMethod.CONSOLE,
+    ),
+    (
+        re.compile(
+            r"qr\s*/?\s*mobile app|qr code|(?:mobile|smartphone|companion) app"
+            r"|\bapp store\b|google play"
+            r"|(?:download|install|open) the [\w -]{1,30}? app\b",
+            re.IGNORECASE,
+        ),
         RawProvisioningMethod.QR_MOBILE_APP,
     ),
     (re.compile(r"dip switch|jumper", re.IGNORECASE), RawProvisioningMethod.OTHER),
@@ -794,12 +838,70 @@ def _detect_document_type(text: str, sections: dict[str, list[str]]) -> Document
 
 
 def _detect_device_name(text: str) -> str:
+    """The title without the words for the document type. When the first
+    line is only that ("Quick Start Guide"), the next lines are tried."""
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    for line in lines[:_TITLE_CANDIDATE_LINES]:
+        title = _clean_markdown_emphasis(_HEADING_PREFIX_RE.sub("", line))
+        name = _GENERIC_TITLE_RE.sub(" ", title)
+        name = _TITLE_TRAIL_RE.sub("", _TITLE_LEAD_RE.sub("", name))
+        name = " ".join(name.split())
+        if any(c.isalpha() for c in name):
+            return name
+    if lines:
+        return _clean_markdown_emphasis(_HEADING_PREFIX_RE.sub("", lines[0]))
+    return "Unknown Device"
+
+
+def _count_steps(lines: list[str]) -> Optional[int]:
+    """Numbered steps ("1.", "1)", "Step 1", or "- 1" as PDFs render them)
+    in the setup sections, or None when there's no numbered procedure."""
+    count = sum(
+        1
+        for line in lines
+        if _STEP_LINE_RE.match(_HEADING_PREFIX_RE.sub("", line.strip()))
+    )
+    return min(count, 200) if count >= 2 else None
+
+
+def _sentences(text: str) -> list[str]:
+    """Sentences, with hard-wrapped lines joined back up first: a new
+    paragraph, bullet, numbered item, heading or table row starts a new
+    block, so a sentence never runs across one."""
+    blocks: list[list[str]] = []
     for line in text.splitlines():
         stripped = line.strip()
+        starts_block = not stripped or bool(
+            re.match(r"[-*#|>]|\d{1,2}[.)\s]", stripped)
+        )
+        if starts_block or not blocks:
+            blocks.append([])
         if stripped:
-            title = _clean_markdown_emphasis(_HEADING_PREFIX_RE.sub("", stripped))
-            return _TITLE_SUFFIX_RE.sub("", title).strip()
-    return "Unknown Device"
+            blocks[-1].append(stripped)
+    return [
+        sentence
+        for block in blocks
+        if block
+        for sentence in re.split(r"(?<=[.!?])\s+", " ".join(block))
+    ]
+
+
+def _tools_from_sentences(text: str) -> list[str]:
+    """Tools a guide names in prose ("You will need a laptop and a
+    screwdriver to ..."), for guides without a tools list."""
+    tools: list[str] = []
+    for sentence in _sentences(text):
+        if _NEGATED_SENTENCE_RE.match(sentence) or _NEGATIVE_WORDS_RE.search(sentence):
+            continue
+        match = _TOOLS_SENTENCE_RE.search(sentence)
+        if not match:
+            continue
+        listed = match.group("items") or match.group("listed")
+        for item in _ITEM_SPLIT_RE.split(listed):
+            item = _LEADING_ARTICLE_RE.sub("", item.strip(" .;:"))
+            if item and item.lower() not in (t.lower() for t in tools):
+                tools.append(item[0].upper() + item[1:])
+    return tools
 
 
 def _is_netmask(candidate: str) -> bool:
@@ -827,20 +929,23 @@ def _detect_provisioning_methods(text: str) -> list[RawProvisioningMethod]:
     """Return methods in first-occurrence document order (a stand-in for
     "primary method first" when we don't have an LLM to judge intent)."""
     ordered: list[RawProvisioningMethod] = []
-    seen = set()
-    for sentence in re.split(r"(?<=[.!?])\s+|\n", text):
+    for sentence in _sentences(text):
         lowered = sentence.lower()
-        if any(trigger in lowered for trigger in _NEGATION_TRIGGERS):
+        if _NEGATED_SENTENCE_RE.match(sentence) or any(
+            trigger in lowered for trigger in _NEGATION_TRIGGERS
+        ):
             continue
+        found = []
         for pattern, method in _PROVISIONING_KEYWORD_PATTERNS:
-            if method in seen or not pattern.search(sentence):
+            match = pattern.search(sentence)
+            if method in ordered or not match:
                 continue
             if method == RawProvisioningMethod.DHCP and _DHCP_SERVER_RE.search(
                 sentence
             ):
                 continue
-            seen.add(method)
-            ordered.append(method)
+            found.append((match.start(), method))
+        ordered.extend(method for _, method in sorted(found, key=lambda f: f[0]))
     return ordered
 
 
@@ -860,13 +965,16 @@ def _heuristic_extract(
         source_document=source_document,
         default_ip=_detect_default_ip(text),
         provisioning_methods=_detect_provisioning_methods(text),
-        required_tools=_parse_bullets(sections.get("tools", [])),
+        required_tools=(
+            _parse_bullets(sections.get("tools", [])) or _tools_from_sentences(text)
+        ),
         cabling_ports=cabling_ports,
         led_indicators=led_indicators,
         wifi_standard=fixed.get("wifi_standard"),
         wan_speed=fixed.get("wan_speed"),
         form_factor=fixed.get("form_factor"),
         capabilities=_parse_bullets(sections.get("features", [])),
+        step_count=_count_steps(sections.get("steps", [])),
         document_type=_detect_document_type(text, sections),
         specs=specs,
     )
@@ -1558,8 +1666,8 @@ _VERY_LONG_SETUP_STEPS = 15
 
 def _compute_friction_score(spec: DeviceSpec, count_steps: bool = False) -> int:
     """`count_steps` adds the procedure length; the caller sets it only when
-    both devices have a step count, so one side's missing count (the
-    heuristic parser never sets one) can't make the other look worse."""
+    both devices have a step count, so one side's missing count (a guide
+    without numbered steps) can't make the other look worse."""
     score = 1
     score += min(len(spec.required_tools), 4)
     if spec.provisioning_method not in _REMOTE_PROVISIONING_METHODS:

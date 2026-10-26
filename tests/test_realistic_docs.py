@@ -47,7 +47,7 @@ SAMPLE_SNAPSHOT = {
     "device_a_qsg.md": (
         "NovaFiber GX400",
         "192.168.10.1",
-        ["QR/Mobile App", "TR-069", "DHCP", "Web GUI", "Console"],
+        ["QR/Mobile App", "TR-069", "Web GUI"],
         0,
         4,
         5,
@@ -57,7 +57,7 @@ SAMPLE_SNAPSHOT = {
     "device_a_qsg.pdf": (
         "NovaFiber GX400",
         "192.168.10.1",
-        ["QR/Mobile App", "TR-069", "Web GUI", "Console"],
+        ["QR/Mobile App", "TR-069", "Web GUI"],
         0,
         4,
         5,
@@ -282,3 +282,94 @@ class TestTables:
         extraction = _heuristic_extract_qsg(text, "z")
         assert extraction.wifi_standard is None
         assert extraction.specs[0].name == "Wireless"
+
+
+class TestKeywordsStepsAndNames:
+    @pytest.mark.parametrize(
+        "name, device",
+        [
+            ("router_qsg.md", "AX3000 Dual-Band Wi-Fi 6 Router Arcwave RT-AX58"),
+            ("modem_qsg.txt", "Zentra ZX-110 DOCSIS 3.1 Cable Modem"),
+            ("ont_qsg_pdf.md", "Brightline ONT-2410"),
+            ("ap_qsg.md", "Skyreach AP-630"),
+            ("switch_datasheet.md", "EdgeLink 5400 Series"),
+        ],
+    )
+    def test_device_name_skips_generic_title_words(self, name, device):
+        assert _fixture(name).device_name == device
+
+    @pytest.mark.parametrize(
+        "name, methods",
+        [
+            ("router_qsg.md", ["Web GUI", "QR/Mobile App"]),
+            ("modem_qsg.txt", ["Web GUI"]),
+            ("ont_qsg_pdf.md", ["TR-069", "Web GUI"]),
+            ("ap_qsg.md", ["DHCP", "Web GUI", "Console"]),
+            ("switch_datasheet.md", ["Web GUI", "DHCP"]),
+        ],
+    )
+    def test_provisioning_wordings(self, name, methods):
+        assert [m.value for m in _fixture(name).provisioning_methods] == methods
+
+    def test_methods_in_one_sentence_keep_their_order(self):
+        text = "# Z1\n\nManage it with the web UI, a serial console or DHCP.\n"
+        assert [
+            m.value for m in _heuristic_extract_qsg(text, "z").provisioning_methods
+        ] == [
+            "Web GUI",
+            "Console",
+            "DHCP",
+        ]
+
+    def test_a_sentence_starting_with_no_is_negated(self):
+        text = "# Z1\n\nNo screwdriver, console cable, or laptop is required.\n"
+        assert _heuristic_extract_qsg(text, "z").provisioning_methods == []
+
+    def test_wrapped_lines_are_one_sentence(self):
+        text = (
+            "# Z1\n\n- **DHCP**: LAN-side clients receive addresses from the\n"
+            "  gateway's built-in DHCP server.\n"
+        )
+        assert _heuristic_extract_qsg(text, "z").provisioning_methods == []
+
+    def test_a_support_link_is_not_a_web_gui(self):
+        text = "# Z1\n\nSee https://support.example.com for help.\n"
+        assert _heuristic_extract_qsg(text, "z").provisioning_methods == []
+
+    @pytest.mark.parametrize(
+        "name, steps",
+        [
+            ("router_qsg.md", 6),
+            ("modem_qsg.txt", 5),
+            ("ont_qsg_pdf.md", 5),
+            ("ap_qsg.md", 9),
+            ("switch_datasheet.md", None),
+        ],
+    )
+    def test_numbered_setup_steps_are_counted(self, name, steps):
+        assert _fixture(name).step_count == steps
+
+    @pytest.mark.parametrize(
+        "name, steps",
+        [
+            ("device_a_qsg.md", 4),
+            ("device_a_qsg.pdf", 4),
+            ("device_b_qsg.md", 7),
+            ("device_b_qsg.pdf", 7),
+        ],
+    )
+    def test_sample_steps_match_between_text_and_pdf(self, name, steps):
+        assert _heuristic_extract_qsg(_sample_text(name), name).step_count == steps
+
+    def test_tools_named_in_prose(self):
+        assert _fixture("router_qsg.md").required_tools == ["Computer or smartphone"]
+        text = "# Z1\n\nYou'll need a laptop, a ladder and a drill for mounting.\n"
+        assert _heuristic_extract_qsg(text, "z").required_tools == [
+            "Laptop",
+            "Ladder",
+            "Drill",
+        ]
+
+    def test_prose_saying_tools_are_not_needed_adds_none(self):
+        text = "# Z1\n\nYou will not need a screwdriver.\nYou need to log in.\n"
+        assert _heuristic_extract_qsg(text, "z").required_tools == []
