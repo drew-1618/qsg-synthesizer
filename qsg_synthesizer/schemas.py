@@ -138,6 +138,9 @@ class HistorySummary(BaseModel):
     installation_friction_score_device_a: Optional[int] = None
     installation_friction_score_device_b: Optional[int] = None
     perspective: Optional[Perspective] = None
+    # Both were guides, but one didn't document provisioning (see
+    # BattlecardResponse.unscored_reason), so the scores above are None.
+    provisioning_undocumented: bool = False
     # Hash of both input documents; None on records saved before it was tracked.
     input_fingerprint: Optional[str] = None
 

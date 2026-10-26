@@ -194,6 +194,9 @@ def _load_all_summaries() -> List[HistorySummary]:
                         "installation_friction_score_device_b"
                     ),
                     perspective=data["battlecard"].get("perspective"),
+                    provisioning_undocumented=bool(
+                        data["battlecard"].get("unscored_reason")
+                    ),
                     input_fingerprint=data.get("input_fingerprint"),
                 )
             )

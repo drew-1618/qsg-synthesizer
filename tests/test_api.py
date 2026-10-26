@@ -869,4 +869,6 @@ class TestUnscoredReason:
             "Install effort isn't compared because the document for Acme Z1 "
             "doesn't say how the device is set up or provisioned."
         )
-        assert data["sales_talk_track"].startswith(data["unscored_reason"])
+        assert "isn't compared" not in data["sales_talk_track"]
+        listed = client.get("/api/v1/history").json()["items"][0]
+        assert listed["provisioning_undocumented"] is True

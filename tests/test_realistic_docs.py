@@ -470,7 +470,8 @@ class TestConfidence:
             "Install effort isn't compared because the document for B doesn't say "
             "how the device is set up or provisioned."
         )
-        assert card.sales_talk_track.startswith(card.unscored_reason)
+        # The verdict already says why; the talk track doesn't repeat it.
+        assert "isn't compared" not in card.sales_talk_track
         assert not any("console" in risk for risk in card.key_risks_device_b)
 
     def test_both_guides_undocumented_names_both(self):

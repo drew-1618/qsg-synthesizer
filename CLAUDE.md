@@ -69,7 +69,8 @@ uv tool install . && qsg-synthesizer             # installed-package path (qsg_s
    which treats a missing type as a guide) and both list a provisioning method; otherwise both
    scores are `None` and the talk track is spec-based. For two guides `_unscored_reason` says
    which one doesn't document provisioning, as `BattlecardResponse.unscored_reason`, which the
-   UI verdict, talk track and exports show. Console/static-IP risks likewise need a documented
+   UI verdict and exports show (the talk track doesn't repeat it; the history drawer labels
+   those records via `HistorySummary.provisioning_undocumented`). Console/static-IP risks likewise need a documented
    method, since the `Console` primary method is otherwise only a fallback. The UI, history
    and exports all handle `None` scores.
 4. `qsg_synthesizer/services/history.py` saves the result as `data/history/<uuid hex>.json` (capped at 50);

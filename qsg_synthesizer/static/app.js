@@ -978,6 +978,7 @@ function formatTimestamp(iso) {
 function easierLabel(item) {
   const a = item.installation_friction_score_device_a;
   const b = item.installation_friction_score_device_b;
+  if (item.provisioning_undocumented) return "No install scores, setup not documented";
   if (a == null || b == null) return "Spec comparison, no install scores";
   if (a === b) return "Same installation friction";
   if (item.perspective === "sales") return `${a < b ? "Ours" : "Competitor"}: easier to install`;

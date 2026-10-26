@@ -1959,16 +1959,11 @@ def _build_spec_talk_track(
     perspective: Optional[Perspective],
     advantages_a: list[str],
     advantages_b: list[str],
-    reason: Optional[str] = None,
 ) -> str:
-    """Talk track when install effort can't be compared (the documents aren't
-    both quick start guides, or `reason`); built only from the spec
-    advantages."""
+    """Talk track when install effort can't be compared, built only from the
+    spec advantages. Why it isn't compared is shown beside it (the verdict,
+    the exports' friction section), so it isn't repeated here."""
     a, b = device_a.model_name, device_b.model_name
-    intro = reason or (
-        "Install effort isn't compared because these documents don't both "
-        "describe an installation procedure."
-    )
     strengths_a = _strengths_phrase(advantages_a)
     strengths_b = _strengths_phrase(advantages_b)
     if perspective == "sales":
@@ -1981,8 +1976,8 @@ def _build_spec_talk_track(
             )
         if strengths_b:
             text += f" Be ready for {b} to point to: {strengths_b}."
-        return f"{intro} {text}"
-    parts = [intro]
+        return text
+    parts = []
     if strengths_a:
         parts.append(f"{a} stands out for: {strengths_a}.")
     if strengths_b:
@@ -2098,7 +2093,6 @@ def synthesize_battlecard(
             perspective,
             advantages_a,
             advantages_b,
-            unscored_reason,
         )
     return BattlecardResponse(
         comparison_matrix=_build_comparison_matrix(device_a, device_b),

@@ -138,8 +138,7 @@ class TestFrictionApplicability:
         card = synthesize_battlecard(c, d, "neutral")
         assert card.installation_friction_score_device_a is None
         assert card.installation_friction_score_device_b is None
-        assert card.sales_talk_track.startswith("Install effort isn't compared")
-        assert "Corvane AX9000 stands out for" in card.sales_talk_track
+        assert card.sales_talk_track.startswith("Corvane AX9000 stands out for")
 
     def test_a_guide_against_a_datasheet_is_not_scored(self):
         a = extract_device_spec(_sample("device_a_qsg.md"), "a.md")

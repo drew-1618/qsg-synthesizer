@@ -41,6 +41,23 @@ def test_save_and_get_roundtrip():
     assert fetched.battlecard == battlecard
 
 
+def test_summary_flags_undocumented_provisioning():
+    history.save_comparison(_make_battlecard(name_a="Scored"))
+    unscored = _make_battlecard(name_a="Unscored").model_copy(
+        update={
+            "installation_friction_score_device_a": None,
+            "installation_friction_score_device_b": None,
+            "unscored_reason": "Install effort isn't compared because ...",
+        }
+    )
+    history.save_comparison(unscored)
+
+    flags = {
+        s.device_a_name: s.provisioning_undocumented for s in history.list_comparisons()
+    }
+    assert flags == {"Scored": False, "Unscored": True}
+
+
 def test_prunes_oldest_entries_beyond_max():
     total = history.MAX_HISTORY_ENTRIES + 5
     for i in range(total):
