@@ -842,3 +842,31 @@ class TestCrossOrigin:
         )
         assert response.status_code == 200
         assert "access-control-allow-origin" not in response.headers
+
+
+class TestUnscoredReason:
+    def test_a_guide_without_provisioning_is_not_scored_and_says_why(self):
+        device_a_text = (SAMPLE_DOCS_DIR / "device_a_qsg.md").read_text(
+            encoding="utf-8"
+        )
+        response = client.post(
+            "/api/v1/compare-text",
+            json={
+                "device_a_text": device_a_text,
+                "device_a_name": "device_a_qsg.md",
+                "device_b_text": (
+                    "# Acme Z1 Quick Start Guide\n\n## Installation Steps\n\n"
+                    "1. Mount the unit.\n2. Connect power.\n"
+                ),
+                "device_b_name": "z1.md",
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["installation_friction_score_device_a"] is None
+        assert data["installation_friction_score_device_b"] is None
+        assert data["unscored_reason"] == (
+            "Install effort isn't compared because the document for Acme Z1 "
+            "doesn't say how the device is set up or provisioned."
+        )
+        assert data["sales_talk_track"].startswith(data["unscored_reason"])

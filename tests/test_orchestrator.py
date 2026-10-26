@@ -790,6 +790,7 @@ class TestStepCountFriction:
         return DeviceSpec(
             model_name=name,
             provisioning_method=ProvisioningMethod.TR069,
+            provisioning_methods=["TR-069"],
             step_count=steps,
         )
 

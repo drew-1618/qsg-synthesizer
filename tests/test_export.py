@@ -153,6 +153,17 @@ class TestDatasheetExports:
         assert "## Notes" in md
         assert "- A: Only the first 8 of 9 sections were read." in md
 
+    def test_an_unscored_reason_replaces_the_document_type_note(self):
+        reason = (
+            "Install effort isn't compared because the document for A doesn't "
+            "say how the device is set up or provisioned."
+        )
+        card = self._unscored(unscored_reason=reason)
+        md = battlecard_to_markdown(card)
+        assert reason in md
+        assert "only scored when both documents" not in md
+        assert battlecard_to_pdf_bytes(card).startswith(b"%PDF")
+
     def test_scored_cards_have_no_notes_section(self):
         assert "## Notes" not in battlecard_to_markdown(_card())
 

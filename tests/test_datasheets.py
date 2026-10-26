@@ -157,7 +157,9 @@ class TestFrictionApplicability:
 
     def test_unknown_document_type_is_treated_as_a_guide(self):
         spec = DeviceSpec(
-            model_name="X", provisioning_method=ProvisioningMethod.WEB_GUI
+            model_name="X",
+            provisioning_method=ProvisioningMethod.WEB_GUI,
+            provisioning_methods=["Web GUI"],
         )
         card = synthesize_battlecard(spec, spec.model_copy(update={"model_name": "Y"}))
         assert card.installation_friction_score_device_a is not None
@@ -172,7 +174,7 @@ class TestFrictionApplicability:
         track = synthesize_battlecard(spec, other, "sales").sales_talk_track
         assert "No spec advantages for X were identified" in track
 
-    def test_datasheets_without_provisioning_get_no_console_risks(self):
+    def test_documents_without_provisioning_get_no_console_risks(self):
         spec = DeviceSpec(
             model_name="X",
             provisioning_method=ProvisioningMethod.CONSOLE,
@@ -181,9 +183,12 @@ class TestFrictionApplicability:
             document_type="datasheet",
         )
         assert _build_key_risks(spec) == [NO_RISKS_MESSAGE]
-        # A guide with the same (fallback) Console method keeps the risks.
+        # A guide is no different: Console here is only the fallback.
         guide = spec.model_copy(update={"document_type": "quick_start_guide"})
-        assert len(_build_key_risks(guide)) == 2
+        assert _build_key_risks(guide) == [NO_RISKS_MESSAGE]
+        # Documented console setup does carry the risks.
+        documented = guide.model_copy(update={"provisioning_methods": ["Console"]})
+        assert len(_build_key_risks(documented)) == 2
 
     def test_extraction_warnings_reach_the_battlecard(self):
         a = DeviceSpec(

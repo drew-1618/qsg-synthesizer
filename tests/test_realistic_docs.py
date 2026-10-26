@@ -11,11 +11,16 @@ from pathlib import Path
 
 import pytest
 
+from qsg_synthesizer.schemas import DeviceSpec, ProvisioningMethod
 from qsg_synthesizer.services import orchestrator
 from qsg_synthesizer.services.orchestrator import (
+    THIN_INSTALL_WARNING,
+    THIN_SPECS_WARNING,
     _heuristic_extract,
     _heuristic_extract_qsg,
     _normalize_to_device_spec,
+    extract_device_spec,
+    synthesize_battlecard,
 )
 from qsg_synthesizer.tools.pdf_parser import extract_text_from_pdf
 
@@ -257,7 +262,7 @@ class TestTables:
         )
         extraction, notes = _heuristic_extract(text, "x")
         assert extraction.specs[0].value == "20 W"
-        assert notes == []
+        assert not [note for note in notes if "models" in note]
 
     def test_value_and_notes_columns_are_not_models(self):
         text = (
@@ -266,7 +271,7 @@ class TestTables:
         )
         extraction, notes = _heuristic_extract(text, "x")
         assert extraction.specs[0].value == "10 W"
-        assert notes == []
+        assert not [note for note in notes if "models" in note]
 
     def test_label_value_lines_and_bold_labels_are_specs(self):
         extraction = _fixture("gateway_datasheet.md")
@@ -373,3 +378,105 @@ class TestKeywordsStepsAndNames:
     def test_prose_saying_tools_are_not_needed_adds_none(self):
         text = "# Z1\n\nYou will not need a screwdriver.\nYou need to log in.\n"
         assert _heuristic_extract_qsg(text, "z").required_tools == []
+
+
+def _spec(name: str) -> DeviceSpec:
+    return extract_device_spec((FIXTURES_DIR / name).read_text(), name)
+
+
+class TestConfidence:
+    @pytest.mark.parametrize(
+        "name, document_type",
+        [
+            ("router_qsg.md", "quick_start_guide"),
+            ("modem_qsg.txt", "quick_start_guide"),
+            ("ont_qsg_pdf.md", "quick_start_guide"),
+            ("ap_qsg.md", "quick_start_guide"),
+            ("switch_datasheet.md", "datasheet"),
+            ("gateway_datasheet.md", "datasheet"),
+        ],
+    )
+    def test_document_types(self, name, document_type):
+        assert _fixture(name).document_type.value == document_type
+
+    def test_label_value_rows_make_a_datasheet_without_a_specs_heading(self):
+        text = (
+            "# Acme Z1 Router\n\n## Hardware\n\n- Ports: 4 x 1G\n- Power: 12 W\n"
+            "- Weight: 1 kg\n- Dimensions: 20 x 10 cm\n- Wi-Fi: 802.11ax\n"
+        )
+        extraction = _heuristic_extract_qsg(text, "z")
+        assert extraction.document_type.value == "datasheet"
+        assert extraction.wifi_standard == "802.11ax"
+        assert {s.name for s in extraction.specs} >= {"Ports", "Weight"}
+
+    def test_numbered_setup_steps_keep_a_spec_heavy_guide_a_guide(self):
+        text = (
+            "# Acme Z1\n\n## Specifications\n\n- Power: 12 W\n\n"
+            "## Installation\n\n1. Mount it.\n2. Power it on.\n"
+        )
+        assert _heuristic_extract_qsg(text, "z").document_type.value == (
+            "quick_start_guide"
+        )
+
+    def test_a_mounting_section_alone_does_not_make_a_datasheet_a_guide(self):
+        text = (
+            "# Acme Z1\n\n## Mounting\n\nWall or ceiling.\n\n"
+            "## Specifications\n\n- Power: 12 W\n"
+        )
+        assert _heuristic_extract_qsg(text, "z").document_type.value == "datasheet"
+
+    def test_rich_documents_get_no_thin_read_warning(self):
+        for name in FIXTURES:
+            assert THIN_INSTALL_WARNING not in _spec(name).extraction_warnings
+            assert THIN_SPECS_WARNING not in _spec(name).extraction_warnings
+        for name in ("device_a_qsg.md", "device_b_qsg.md", "device_c_datasheet.md"):
+            assert (
+                extract_device_spec(_sample_text(name), name).extraction_warnings == []
+            )
+
+    def test_a_guide_with_little_install_detail_is_flagged(self):
+        spec = extract_device_spec("# Acme Z1\n\nPlug it in and enjoy.\n", "z")
+        assert spec.extraction_warnings == [THIN_INSTALL_WARNING]
+
+    def test_a_datasheet_with_few_specs_is_flagged(self):
+        spec = extract_device_spec("# Acme Z1 Datasheet\n\n- Power: 12 W\n", "z")
+        assert spec.extraction_warnings == [THIN_SPECS_WARNING]
+
+    def test_guide_against_datasheet_is_not_scored(self):
+        card = synthesize_battlecard(
+            _spec("router_qsg.md"), _spec("switch_datasheet.md")
+        )
+        assert card.installation_friction_score_device_a is None
+        assert card.unscored_reason is None  # the document types explain it
+
+    def test_two_documented_guides_are_scored(self):
+        card = synthesize_battlecard(_spec("ont_qsg_pdf.md"), _spec("router_qsg.md"))
+        assert card.installation_friction_score_device_a is not None
+        assert card.unscored_reason is None
+
+    def test_an_undocumented_guide_is_not_scored_as_console_setup(self):
+        known = DeviceSpec(
+            model_name="A",
+            provisioning_method=ProvisioningMethod.TR069,
+            provisioning_methods=["TR-069"],
+        )
+        unknown = DeviceSpec(
+            model_name="B", provisioning_method=ProvisioningMethod.CONSOLE
+        )
+        card = synthesize_battlecard(known, unknown, "sales")
+        assert card.installation_friction_score_device_a is None
+        assert card.installation_friction_score_device_b is None
+        assert card.unscored_reason == (
+            "Install effort isn't compared because the document for B doesn't say "
+            "how the device is set up or provisioned."
+        )
+        assert card.sales_talk_track.startswith(card.unscored_reason)
+        assert not any("console" in risk for risk in card.key_risks_device_b)
+
+    def test_both_guides_undocumented_names_both(self):
+        a = DeviceSpec(model_name="A", provisioning_method=ProvisioningMethod.CONSOLE)
+        b = a.model_copy(update={"model_name": "B"})
+        assert synthesize_battlecard(a, b).unscored_reason == (
+            "Install effort isn't compared because the documents for A and B don't "
+            "say how the devices are set up or provisioned."
+        )

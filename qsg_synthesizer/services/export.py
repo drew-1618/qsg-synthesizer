@@ -155,6 +155,10 @@ FRICTION_NOT_COMPARED = (
 )
 
 
+def _friction_not_compared(battlecard: BattlecardResponse) -> str:
+    return battlecard.unscored_reason or FRICTION_NOT_COMPARED
+
+
 def _friction_scored(battlecard: BattlecardResponse) -> bool:
     return (
         battlecard.installation_friction_score_device_a is not None
@@ -216,7 +220,7 @@ def battlecard_to_markdown(battlecard: BattlecardResponse) -> str:
                 f"{battlecard.installation_friction_score_device_b} / 10",
             ]
             if _friction_scored(battlecard)
-            else [FRICTION_NOT_COMPARED]
+            else [_friction_not_compared(battlecard)]
         ),
         "",
         "## Competitive Sales Talk Track",
@@ -294,7 +298,7 @@ def battlecard_to_pdf_bytes(battlecard: BattlecardResponse) -> bytes:
                 )
                 if _friction_scored(battlecard)
                 else "Installation Friction Index &mdash; "
-                + _esc(FRICTION_NOT_COMPARED)
+                + _esc(_friction_not_compared(battlecard))
             ),
             _BODY,
         ),

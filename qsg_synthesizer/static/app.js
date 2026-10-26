@@ -1389,9 +1389,15 @@ function renderVerdict(data, nameA, nameB) {
   const scoreA = data.installation_friction_score_device_a;
   const scoreB = data.installation_friction_score_device_b;
   const subtitle = document.getElementById("friction-subtitle");
-  // Friction is only scored when both documents are quick start guides.
+  // Friction is only scored when both documents are quick start guides that
+  // say how their device is provisioned; unscored_reason covers the latter.
   if (scoreA == null || scoreB == null) {
     subtitle.classList.add("hidden");
+    if (data.unscored_reason) {
+      document.getElementById("results-verdict").innerHTML = `
+        <p class="md:col-span-2 max-w-[65ch] text-ink-muted">${escapeHtml(data.unscored_reason)}</p>`;
+      return;
+    }
     const types = data.comparison_matrix.document_type || {};
     const describe = (name, type) =>
       `${escapeHtml(name)} is ${DOCUMENT_TYPE_PHRASES[type] || "not a quick start guide"}`;

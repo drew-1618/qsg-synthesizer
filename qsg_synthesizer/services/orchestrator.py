@@ -352,7 +352,25 @@ _INSTALL_TITLE_RE = re.compile(
     r"\b(?:quick\s*start|installation|install|setup|getting\s+started)\b",
     re.IGNORECASE,
 )
-_INSTALL_SECTIONS = {"steps", "tools", "provisioning"}
+# A document with this many label/value rows and no install procedure is a
+# datasheet even without a "Specifications" heading.
+_DATASHEET_MIN_SPEC_ROWS = 5
+# Where a datasheet without a specifications heading keeps its specs.
+_LOOSE_SPEC_SECTIONS = ("_preamble", "_other", "overview", "hardware")
+# Below these, the built-in parser warns that it read little of the document.
+_MIN_INSTALL_FACTS = 2
+_MIN_DATASHEET_SPECS = 3
+THIN_INSTALL_WARNING = (
+    "The built-in parser recognized little install information in this "
+    "document (how it's provisioned, tools, ports, LEDs or numbered steps), so "
+    "this comparison may be incomplete. For a fuller reading, choose Anthropic "
+    "or Gemini under AI in Settings."
+)
+THIN_SPECS_WARNING = (
+    "The built-in parser recognized few specifications in this document, so "
+    "this comparison may be incomplete. For a fuller reading, choose Anthropic "
+    "or Gemini under AI in Settings."
+)
 _SPEC_TABLE_HEADERS = {"spec", "specification", "parameter", "feature", "value"}
 _IPV4_RE = re.compile(
     r"\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b"
@@ -822,17 +840,32 @@ def _take_fixed_specs(
     return fixed, rest
 
 
-def _detect_document_type(text: str, sections: dict[str, list[str]]) -> DocumentType:
-    """Call a document a datasheet only on clear evidence: a datasheet title, or
-    a Specifications section with no install title or install sections.
-    Everything else stays a quick start guide, as before document types."""
+def _detect_document_type(
+    text: str,
+    sections: dict[str, list[str]],
+    step_count: Optional[int],
+    spec_rows: int,
+) -> DocumentType:
+    """Call a document a datasheet only on clear evidence: a datasheet title,
+    or specifications (a section of them, ordering information, or at least
+    `_DATASHEET_MIN_SPEC_ROWS` label/value rows) with no sign of an install
+    procedure (an install title, numbered setup steps, a tools list or a
+    provisioning section). Everything else stays a quick start guide."""
     title = next((line.strip() for line in text.splitlines() if line.strip()), "")
     if _DATASHEET_TITLE_RE.search(title):
         return DocumentType.DATASHEET
     looks_like_install = bool(
-        _INSTALL_TITLE_RE.search(title) or _INSTALL_SECTIONS & sections.keys()
+        _INSTALL_TITLE_RE.search(title)
+        or step_count
+        or _parse_bullets(sections.get("tools", []))
+        or "provisioning" in sections
     )
-    if "specs" in sections and not looks_like_install:
+    has_specs = (
+        "specs" in sections
+        or "ordering" in sections
+        or spec_rows >= _DATASHEET_MIN_SPEC_ROWS
+    )
+    if has_specs and not looks_like_install:
         return DocumentType.DATASHEET
     return DocumentType.QUICK_START_GUIDE
 
@@ -953,11 +986,23 @@ def _heuristic_extract(
     text: str, source_document: str
 ) -> tuple[QSGExtraction, list[str]]:
     """The regex parser. Also returns notes for the user on what it read only
-    partly, e.g. one model's column of a multi-model table."""
+    partly: one model's column of a multi-model table, or too little of the
+    document to compare it with confidence."""
     sections = _split_sections(text)
     device_name = _detect_device_name(text)
     cabling_ports, led_indicators = _parse_ports_and_leds(sections)
     spec_items, notes = _parse_spec_items(sections.get("specs", []), device_name)
+    loose_items: list[SpecItem] = []
+    if "specs" not in sections:
+        for section in _LOOSE_SPEC_SECTIONS:
+            items, _ = _parse_spec_items(sections.get(section, []), device_name)
+            loose_items.extend(items)
+    step_count = _count_steps(sections.get("steps", []))
+    document_type = _detect_document_type(
+        text, sections, step_count, len(spec_items) + len(loose_items)
+    )
+    if document_type == DocumentType.DATASHEET:
+        spec_items += loose_items
     fixed, specs = _take_fixed_specs(spec_items)
 
     extraction = QSGExtraction(
@@ -974,11 +1019,31 @@ def _heuristic_extract(
         wan_speed=fixed.get("wan_speed"),
         form_factor=fixed.get("form_factor"),
         capabilities=_parse_bullets(sections.get("features", [])),
-        step_count=_count_steps(sections.get("steps", [])),
-        document_type=_detect_document_type(text, sections),
+        step_count=step_count,
+        document_type=document_type,
         specs=specs,
     )
-    return extraction, notes
+    thin = _thin_extraction_warning(extraction)
+    return extraction, notes + ([thin] if thin else [])
+
+
+def _thin_extraction_warning(extraction: QSGExtraction) -> Optional[str]:
+    """A warning when the parser found too little to compare the document
+    with confidence, rather than presenting a near-empty read as the full
+    picture."""
+    if extraction.document_type == DocumentType.DATASHEET:
+        fixed = (extraction.wifi_standard, extraction.wan_speed, extraction.form_factor)
+        found = len(extraction.specs) + sum(1 for value in fixed if value)
+        return THIN_SPECS_WARNING if found < _MIN_DATASHEET_SPECS else None
+    facts = (
+        extraction.provisioning_methods,
+        extraction.required_tools,
+        extraction.cabling_ports,
+        extraction.led_indicators,
+        extraction.step_count,
+    )
+    found = sum(1 for fact in facts if fact)
+    return THIN_INSTALL_WARNING if found < _MIN_INSTALL_FACTS else None
 
 
 def _heuristic_extract_qsg(text: str, source_document: str) -> QSGExtraction:
@@ -1776,11 +1841,33 @@ def _is_install_document(spec: DeviceSpec) -> bool:
     return spec.document_type in (None, DocumentType.QUICK_START_GUIDE.value)
 
 
+def _unscored_reason(device_a: DeviceSpec, device_b: DeviceSpec) -> Optional[str]:
+    """Why two quick start guides can't have their install effort scored, or
+    None when they can. A guide that never says how the device is provisioned
+    would otherwise be scored as the worst case (console setup)."""
+    unknown = [
+        spec.model_name
+        for spec in (device_a, device_b)
+        if not spec.provisioning_methods
+    ]
+    if not unknown:
+        return None
+    if len(unknown) == 1:
+        return (
+            f"Install effort isn't compared because the document for {unknown[0]} "
+            "doesn't say how the device is set up or provisioned."
+        )
+    return (
+        f"Install effort isn't compared because the documents for {unknown[0]} "
+        f"and {unknown[1]} don't say how the devices are set up or provisioned."
+    )
+
+
 def _build_key_risks(spec: DeviceSpec) -> list[str]:
     risks = []
     # With no documented provisioning, the primary method is only the
-    # conservative Console fallback; for a datasheet that would invent a risk.
-    provisioning_known = _is_install_document(spec) or bool(spec.provisioning_methods)
+    # conservative Console fallback; reporting its risks would invent them.
+    provisioning_known = bool(spec.provisioning_methods)
     if provisioning_known and spec.provisioning_method == ProvisioningMethod.CONSOLE:
         risks.append(
             "Requires a technician with a laptop and terminal emulator on-site "
@@ -1872,11 +1959,13 @@ def _build_spec_talk_track(
     perspective: Optional[Perspective],
     advantages_a: list[str],
     advantages_b: list[str],
+    reason: Optional[str] = None,
 ) -> str:
-    """Talk track when install effort can't be compared because the documents
-    aren't both quick start guides; built only from the spec advantages."""
+    """Talk track when install effort can't be compared (the documents aren't
+    both quick start guides, or `reason`); built only from the spec
+    advantages."""
     a, b = device_a.model_name, device_b.model_name
-    intro = (
+    intro = reason or (
         "Install effort isn't compared because these documents don't both "
         "describe an installation procedure."
     )
@@ -1986,11 +2075,14 @@ def synthesize_battlecard(
     prose doesn't map onto these typed fields.
 
     Install friction is scored only when both documents are quick start
-    guides; otherwise both scores are None and the talk track is spec-based."""
+    guides that say how their device is provisioned; otherwise both scores
+    are None and the talk track is spec-based."""
     advantages_a, advantages_b = _build_key_advantages(device_a, device_b)
     score_a: Optional[int] = None
     score_b: Optional[int] = None
-    if _is_install_document(device_a) and _is_install_document(device_b):
+    both_guides = _is_install_document(device_a) and _is_install_document(device_b)
+    unscored_reason = _unscored_reason(device_a, device_b) if both_guides else None
+    if both_guides and unscored_reason is None:
         count_steps = (
             device_a.step_count is not None and device_b.step_count is not None
         )
@@ -2001,7 +2093,12 @@ def synthesize_battlecard(
         )
     else:
         talk_track = _build_spec_talk_track(
-            device_a, device_b, perspective, advantages_a, advantages_b
+            device_a,
+            device_b,
+            perspective,
+            advantages_a,
+            advantages_b,
+            unscored_reason,
         )
     return BattlecardResponse(
         comparison_matrix=_build_comparison_matrix(device_a, device_b),
@@ -2015,6 +2112,7 @@ def synthesize_battlecard(
         extraction_source_device_a=device_a.extraction_source,
         extraction_source_device_b=device_b.extraction_source,
         perspective=perspective,
+        unscored_reason=unscored_reason,
         warnings=[
             f"{spec.model_name}: {warning}"
             for spec in (device_a, device_b)
