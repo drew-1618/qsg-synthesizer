@@ -149,17 +149,87 @@ class LLMOverride:
 # Stage 1: extraction
 # ---------------------------------------------------------------------------
 
-_KNOWN_HEADINGS = {
-    "overview",
-    "what's in the box",
-    "required tools",
-    "provisioning",
-    "cabling & ports",
-    "led indicators",
-    "installation steps",
-    "key features",
-    "specifications",
-}
+# Section names the heuristic parser understands, each with the heading
+# wordings real QSGs and datasheets use for it. A heading is normalized first
+# (`_normalize_heading`: lowercase, numbering and markup stripped, "&" read as
+# "and") and must match one of these in full.
+_SECTION_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
+    (section, re.compile(pattern))
+    for section, pattern in (
+        ("overview", r"overview|introduction|about (?:this|the) \w+|product overview"),
+        (
+            "box",
+            r"what'?s in the (?:box|package)|in the box|package contents?"
+            r"|(?:box|package|kit) contents|contents of the (?:box|package)"
+            r"|packing list",
+        ),
+        (
+            "tools",
+            r"(?:required )?tools(?: and (?:equipment|materials|supplies))?"
+            r"(?: (?:required|needed))?|required (?:items|equipment|materials)"
+            r"|what you(?:'ll| will)? need|you will need|things you(?:'ll)? need"
+            r"|before you (?:begin|start)|prerequisites",
+        ),
+        ("provisioning", r"provisioning(?: methods?| options?)?"),
+        (
+            "ports",
+            r"(?:cabling and )?ports(?: and (?:connectors|cabling|buttons))?"
+            r"|cabling|interfaces?(?: and (?:ports|buttons))?|connectors?"
+            r"|connections|(?:rear|back|side) panel(?: ports)?"
+            r"|physical interfaces",
+        ),
+        (
+            "leds",
+            r"leds?(?: (?:indicators?|status|behaviou?r|states|descriptions?))?"
+            r"|(?:status )?(?:indicators?|lights)(?: and buttons)?"
+            r"|indicator lights|status leds|front panel(?: leds| indicators)?",
+        ),
+        (
+            "hardware",
+            r"hardware(?: overview| description| layout)?"
+            r"|(?:device|panel|product) (?:overview|description|layout)"
+            r"|front and (?:rear|back) panels?|know your \w+",
+        ),
+        (
+            "specs",
+            r"(?:technical |hardware |product |detailed )?specifications?"
+            r"|tech(?:nical)? specs|specs|technical data"
+            r"|physical(?: and environmental)?(?: specifications)?"
+            r"|environmental(?: specifications)?|electrical|mechanical"
+            r"|power(?: requirements| specifications)?|performance"
+            r"|wireless|radios?|regulatory|certifications?|compliance"
+            r"|dimensions(?: and weight)?",
+        ),
+        (
+            "features",
+            r"(?:key |main |software |hardware )?features|(?:product )?highlights"
+            r"|feature highlights|benefits|capabilities",
+        ),
+        (
+            "steps",
+            r"(?:installation|setup|set up|install)(?: steps| procedure| instructions)?"
+            r"|getting started|quick (?:setup|start)|mounting|steps"
+            r"|initial (?:setup|configuration|installation)|step[- ]by[- ]step",
+        ),
+        ("ordering", r"ordering(?: information| info)?|part numbers|models? and skus?"),
+    )
+]
+# Open-ended wordings like "Setting up your router", trusted only as marked-up
+# headings: as a plain line of text they could be a step themselves.
+_MARKED_UP_SECTION_PATTERNS = [
+    (
+        "steps",
+        re.compile(
+            r"(?:install(?:ing)?|setting up|set up|mounting|connect(?:ing)?) "
+            r"(?:the|your) .+|step[- ]by[- ]step .+"
+        ),
+    )
+]
+# Plain-text lines (no "#" or bold markup) count as headings only when they
+# are this short, so a sentence that happens to start "Power" isn't one.
+_PLAIN_HEADING_MAX_CHARS = 40
+_HEADING_NUMBER_RE = re.compile(r"^(?:step\s+)?(?:\d+(?:\.\d+)*[.):]?|[a-z][.)])\s+")
+_BOLD_LINE_RE = re.compile(r"^\*\*([^*]+)\*\*:?$")
 
 _SPEC_LABEL_TO_FIELD = {
     "wi-fi standard": "wifi_standard",
@@ -169,6 +239,7 @@ _SPEC_LABEL_TO_FIELD = {
 }
 
 _HEADING_PREFIX_RE = re.compile(r"^#+\s*")
+_HEADING_LEVEL_RE = re.compile(r"^(#+)\s")
 _BULLET_PREFIX_RE = re.compile(r"^[-*]\s+")
 _TITLE_SUFFIX_RE = re.compile(
     r"\s*[—-]\s*(?:quick start guide|data\s*sheet|spec(?:ification)?s? sheet)\s*$",
@@ -182,7 +253,7 @@ _INSTALL_TITLE_RE = re.compile(
     r"\b(?:quick\s*start|installation|install|setup|getting\s+started)\b",
     re.IGNORECASE,
 )
-_INSTALL_SECTIONS = {"installation steps", "required tools", "provisioning"}
+_INSTALL_SECTIONS = {"steps", "tools", "provisioning"}
 _SPEC_TABLE_HEADERS = {"spec", "specification", "parameter", "feature", "value"}
 _IPV4_RE = re.compile(
     r"\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b"
@@ -244,18 +315,74 @@ def _clean_markdown_emphasis(text: str) -> str:
     return text.strip("*").strip()
 
 
+def _normalize_heading(text: str) -> str:
+    text = _clean_markdown_emphasis(_HEADING_PREFIX_RE.sub("", text.strip()))
+    text = text.lower().replace("&", " and ").replace("’", "'").rstrip(":").strip()
+    text = _HEADING_NUMBER_RE.sub("", text)
+    return " ".join(text.split())
+
+
+def _section_for(heading: str, plain: bool = False) -> Optional[str]:
+    normalized = _normalize_heading(heading)
+    patterns = _SECTION_PATTERNS + ([] if plain else _MARKED_UP_SECTION_PATTERNS)
+    for section, pattern in patterns:
+        if pattern.fullmatch(normalized):
+            return section
+    return None
+
+
+def _heading_level(line: str) -> Optional[int]:
+    """1-6 for a Markdown heading, 7 for a bold-only line (how PDFs and
+    pasted documents often mark headings), else None."""
+    match = _HEADING_LEVEL_RE.match(line)
+    if match:
+        return min(len(match.group(1)), 6)
+    if _BOLD_LINE_RE.match(line):
+        return 7
+    return None
+
+
+def _is_plain_heading(line: str) -> bool:
+    """A short unmarked line that is a heading on its own: ALL CAPS, or one
+    of the known section names (as plain text pasted from a PDF has them)."""
+    if len(line) > _PLAIN_HEADING_MAX_CHARS or line[0] in "-*|>" or line[0].isdigit():
+        return False
+    if line.endswith((".", ",", ";")):
+        return False
+    letters = [c for c in line if c.isalpha()]
+    return (len(letters) >= 3 and all(c.isupper() for c in letters)) or bool(
+        _section_for(line, plain=True)
+    )
+
+
 def _split_sections(text: str) -> dict[str, list[str]]:
+    """Group lines under the known section each heading names. An unknown
+    heading nested below a known one (e.g. "### Step 1" under "## Setup")
+    stays part of it, heading line included, as does any heading nested in a
+    specifications section (a datasheet's "### Interfaces" lists specs, not a
+    port table). Any other unknown heading starts an "_other" section, so its
+    content isn't read as the previous section's."""
     sections: dict[str, list[str]] = {"_preamble": []}
-    current = "_preamble"
+    current, current_level = "_preamble", 0
     for line in text.splitlines():
-        heading_candidate = _clean_markdown_emphasis(
-            _HEADING_PREFIX_RE.sub("", line.strip())
-        )
-        if heading_candidate.lower() in _KNOWN_HEADINGS:
-            current = heading_candidate.lower()
-            sections.setdefault(current, [])
-        else:
+        stripped = line.strip()
+        level = _heading_level(stripped) if stripped else None
+        if level is None and stripped and _is_plain_heading(stripped):
+            level = 7
+        if level is None:
             sections[current].append(line)
+            continue
+        marked_up = level < 7 or bool(_BOLD_LINE_RE.match(stripped))
+        section = _section_for(stripped, plain=not marked_up)
+        nested = current != "_preamble" and level > current_level
+        if section and not (nested and current == "specs"):
+            current, current_level = section, level
+            sections.setdefault(current, [])
+        elif nested:
+            sections[current].append(line)
+        else:
+            current, current_level = "_other", level
+            sections.setdefault(current, [])
     return sections
 
 
@@ -336,7 +463,7 @@ def _detect_document_type(text: str, sections: dict[str, list[str]]) -> Document
     looks_like_install = bool(
         _INSTALL_TITLE_RE.search(title) or _INSTALL_SECTIONS & sections.keys()
     )
-    if "specifications" in sections and not looks_like_install:
+    if "specs" in sections and not looks_like_install:
         return DocumentType.DATASHEET
     return DocumentType.QUICK_START_GUIDE
 
@@ -401,31 +528,31 @@ def _heuristic_extract_qsg(text: str, source_document: str) -> QSGExtraction:
             port_type=row[1],
             notes=row[2] if len(row) > 2 and row[2] else None,
         )
-        for row in _parse_table_rows(sections.get("cabling & ports", []))
+        for row in _parse_table_rows(sections.get("ports", []))
         if len(row) >= 2
     ]
     led_indicators = [
         LEDIndicator(led_name=row[0], raw_description=row[1])
-        for row in _parse_table_rows(sections.get("led indicators", []))
+        for row in _parse_table_rows(sections.get("leds", []))
         if len(row) >= 2
     ]
 
-    specs = _parse_specifications(sections.get("specifications", []))
+    specs = _parse_specifications(sections.get("specs", []))
 
     return QSGExtraction(
         device_name=_detect_device_name(text),
         source_document=source_document,
         default_ip=_detect_default_ip(text),
         provisioning_methods=_detect_provisioning_methods(text),
-        required_tools=_parse_bullets(sections.get("required tools", [])),
+        required_tools=_parse_bullets(sections.get("tools", [])),
         cabling_ports=cabling_ports,
         led_indicators=led_indicators,
         wifi_standard=specs.get("wifi_standard"),
         wan_speed=specs.get("wan_speed"),
         form_factor=specs.get("form_factor"),
-        capabilities=_parse_bullets(sections.get("key features", [])),
+        capabilities=_parse_bullets(sections.get("features", [])),
         document_type=_detect_document_type(text, sections),
-        specs=_parse_spec_items(sections.get("specifications", [])),
+        specs=_parse_spec_items(sections.get("specs", [])),
     )
 
 
