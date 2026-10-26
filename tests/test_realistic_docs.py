@@ -12,7 +12,11 @@ from pathlib import Path
 import pytest
 
 from qsg_synthesizer.services import orchestrator
-from qsg_synthesizer.services.orchestrator import _heuristic_extract_qsg
+from qsg_synthesizer.services.orchestrator import (
+    _heuristic_extract,
+    _heuristic_extract_qsg,
+    _normalize_to_device_spec,
+)
 from qsg_synthesizer.tools.pdf_parser import extract_text_from_pdf
 
 ROOT = Path(__file__).parent.parent
@@ -37,7 +41,8 @@ def _fixture(name: str):
     return _heuristic_extract_qsg(text, name)
 
 
-# name: (device, default IP, methods, tools, ports, LEDs, document type, specs)
+# name: (device, default IP, methods, tools, ports, LEDs, document type,
+#        open-ended spec rows shown)
 SAMPLE_SNAPSHOT = {
     "device_a_qsg.md": (
         "NovaFiber GX400",
@@ -47,7 +52,7 @@ SAMPLE_SNAPSHOT = {
         4,
         5,
         "quick_start_guide",
-        3,
+        0,
     ),
     "device_a_qsg.pdf": (
         "NovaFiber GX400",
@@ -57,7 +62,7 @@ SAMPLE_SNAPSHOT = {
         4,
         5,
         "quick_start_guide",
-        3,
+        0,
     ),
     "device_b_qsg.md": (
         "LegacyLink RG-210",
@@ -67,7 +72,7 @@ SAMPLE_SNAPSHOT = {
         4,
         6,
         "quick_start_guide",
-        3,
+        0,
     ),
     "device_b_qsg.pdf": (
         "LegacyLink RG-210",
@@ -77,10 +82,10 @@ SAMPLE_SNAPSHOT = {
         4,
         6,
         "quick_start_guide",
-        3,
+        0,
     ),
-    "device_c_datasheet.md": ("Corvane AX9000", None, [], 0, 0, 0, "datasheet", 9),
-    "device_d_datasheet.md": ("Halden FX-600", None, [], 0, 0, 0, "datasheet", 7),
+    "device_c_datasheet.md": ("Corvane AX9000", None, [], 0, 0, 0, "datasheet", 6),
+    "device_d_datasheet.md": ("Halden FX-600", None, [], 0, 0, 0, "datasheet", 4),
 }
 
 
@@ -95,7 +100,7 @@ def test_sample_docs_extract_as_pinned(name):
         len(e.cabling_ports),
         len(e.led_indicators),
         e.document_type.value if e.document_type else None,
-        len(e.specs),
+        len(_normalize_to_device_spec(e).specs),
     ) == SAMPLE_SNAPSHOT[name]
 
 
@@ -177,4 +182,103 @@ class TestSections:
     def test_datasheet_spec_headings_are_found(self):
         extraction = _fixture("switch_datasheet.md")
         assert extraction.document_type.value == "datasheet"
-        assert "PoE budget" in {s.name for s in extraction.specs}
+        assert {"PoE budget", "Weight"} <= {s.name for s in extraction.specs}
+
+
+class TestTables:
+    def test_combined_hardware_table_yields_ports_and_split_led_states(self):
+        extraction = _fixture("router_qsg.md")
+        assert [p.port_name for p in extraction.cabling_ports] == [
+            "WAN",
+            "LAN 1~4",
+            "Power (DC-IN)",
+        ]
+        assert extraction.cabling_ports[2].port_type == "DC-IN"
+        power = [led for led in extraction.led_indicators if led.led_name == "Power"]
+        assert [led.raw_description for led in power] == [
+            "Off: No power",
+            "On: Device is ready",
+            "Flashing slow: Rescue mode",
+        ]
+
+    def test_three_column_led_table_keeps_state_and_continues_blank_names(self):
+        extraction = _fixture("ont_qsg_pdf.md")
+        leds = [
+            (led.led_name, led.raw_description) for led in extraction.led_indicators
+        ]
+        assert leds[:2] == [
+            ("PWR", "Solid green: Power is on"),
+            ("PWR", "Off: No power"),
+        ]
+        spec = _normalize_to_device_spec(extraction)
+        assert [led.state for led in spec.led_states][:1] == ["ONLINE"]
+
+    def test_port_columns_are_found_by_header(self):
+        ports = _fixture("ont_qsg_pdf.md").cabling_ports
+        assert (ports[0].port_name, ports[0].port_type, ports[0].notes) == (
+            "PON",
+            "SC/APC",
+            "Connects to the fiber drop",
+        )
+        assert "4x GE (RJ45) - Gigabit Ethernet to customer equipment" in (
+            _normalize_to_device_spec(_fixture("ont_qsg_pdf.md")).ports
+        )
+
+    def test_port_and_led_bullets(self):
+        extraction = _fixture("ap_qsg.md")
+        assert extraction.cabling_ports[0].port_name == "ETH0/PoE"
+        assert extraction.cabling_ports[0].port_type == "2.5GBASE-T RJ45, PoE+ input"
+        text = "# Z1\n\n## LEDs\n\n- Power: solid green when ready\n"
+        assert _heuristic_extract_qsg(text, "z").led_indicators[0].led_name == "Power"
+
+    def test_a_table_is_classified_by_its_own_header(self):
+        text = (
+            "# Z1\n\n## Front and back\n\n| LED | Meaning |\n|---|---|\n"
+            "| Power | solid green |\n"
+        )
+        assert len(_heuristic_extract_qsg(text, "z").led_indicators) == 1
+
+    def test_multi_model_table_reads_the_first_model_with_a_note(self):
+        extraction, notes = _heuristic_extract(
+            (FIXTURES_DIR / "switch_datasheet.md").read_text(), "s"
+        )
+        specs = {s.name: s.value for s in extraction.specs}
+        assert specs["PoE budget"] == "370 W"
+        assert "Model" not in specs
+        assert notes == [
+            "The specifications table covers 2 models (EL-5424P, EL-5448P); "
+            "the built-in parser read the first, EL-5424P."
+        ]
+
+    def test_multi_model_table_reads_the_model_the_title_names(self):
+        text = (
+            "# Acme X2 Datasheet\n\n## Specifications\n\n| Model | X1 | X2 |\n"
+            "|---|---|---|\n| Power | 10 W | 20 W |\n"
+        )
+        extraction, notes = _heuristic_extract(text, "x")
+        assert extraction.specs[0].value == "20 W"
+        assert notes == []
+
+    def test_value_and_notes_columns_are_not_models(self):
+        text = (
+            "# Acme Datasheet\n\n## Specifications\n\n| Spec | Value | Notes |\n"
+            "|---|---|---|\n| Power | 10 W | typical |\n"
+        )
+        extraction, notes = _heuristic_extract(text, "x")
+        assert extraction.specs[0].value == "10 W"
+        assert notes == []
+
+    def test_label_value_lines_and_bold_labels_are_specs(self):
+        extraction = _fixture("gateway_datasheet.md")
+        specs = {s.name: s.value for s in extraction.specs}
+        assert specs["Weight"] == "1.1 kg"
+        assert specs["WAN"] == "1 x 10G SFP+ and 1 x 10GBASE-T"
+        assert extraction.wifi_standard == "IEEE 802.11be (Wi-Fi 7)"
+
+    def test_fixed_field_synonyms_need_a_value_that_fits(self):
+        router = _fixture("router_qsg.md")
+        assert router.wifi_standard == "IEEE 802.11a/b/g/n/ac/ax"
+        text = "# Z1 Datasheet\n\n## Specifications\n\n- Wireless: optional module\n"
+        extraction = _heuristic_extract_qsg(text, "z")
+        assert extraction.wifi_standard is None
+        assert extraction.specs[0].name == "Wireless"

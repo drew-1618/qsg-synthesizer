@@ -237,6 +237,86 @@ _SPEC_LABEL_TO_FIELD = {
     "wan speed": "wan_speed",
     "form factor": "form_factor",
 }
+# Other labels datasheets use for the fixed fields. Unlike the labels above,
+# these are trusted only when the value reads as that field.
+_SPEC_SYNONYM_TO_FIELD = {
+    **dict.fromkeys(
+        (
+            "wi-fi standards",
+            "wifi standards",
+            "wireless standard",
+            "wireless standards",
+            "network standard",
+            "network standards",
+            "wlan standard",
+            "wlan standards",
+            "802.11 standards",
+            "wi-fi",
+            "wifi",
+            "wireless",
+            "standards",
+        ),
+        "wifi_standard",
+    ),
+    **dict.fromkeys(
+        (
+            "wan",
+            "wan port",
+            "wan interface",
+            "wan throughput",
+            "max wan speed",
+            "maximum wan speed",
+            "internet speed",
+        ),
+        "wan_speed",
+    ),
+    **dict.fromkeys(("mounting", "mounting options"), "form_factor"),
+}
+_FIXED_FIELD_CHECKS: dict[str, Callable[[str], bool]] = {
+    "wifi_standard": lambda value: rank_wifi_standard(value) is not None,
+    "wan_speed": lambda value: parse_speed_mbps(value) is not None,
+    "form_factor": lambda value: True,
+}
+
+_TABLE_SEPARATOR_CELL_RE = re.compile(r":?-+:?")
+# Header rows the sample docs' tables use, recognized even without a separator.
+_KNOWN_HEADER_ROWS = (["port", "type", "notes"], ["led", "meaning"])
+_NUMBER_COLUMN_HEADERS = {"", "no", "item", "number", "callout", "ref"}
+_ITEM_NUMBER_RE = re.compile(r"\d{1,2}[.)]?|[A-Za-z]")
+_LED_NAME_RE = re.compile(r"\b(?:leds?|indicators?|lights?)\b", re.IGNORECASE)
+_LED_SUFFIX_RE = re.compile(r"\s*\b(?:leds?|indicators?|lights?)\s*$", re.IGNORECASE)
+_PORT_NAME_RE = re.compile(
+    r"\b(?:ports?|interfaces?|connectors?|jacks?|wan|lan\s*\d*|usb|sfp\+?|pon|dsl"
+    r"|eth\d*|ge\d*|poe|console|coax|fxs|pots|dc[- ]?in)\b",
+    re.IGNORECASE,
+)
+_PORT_SUFFIX_RE = re.compile(r"\s+(?:ports?|connectors?|jacks?)\s*$", re.IGNORECASE)
+_PORT_TYPE_HEADER_RE = re.compile(r"type|connector|media|cable|speed", re.IGNORECASE)
+_PORT_NOTES_HEADER_RE = re.compile(
+    r"notes?|description|function|purpose|use|meaning|remarks|details", re.IGNORECASE
+)
+_CONNECTOR_RE = re.compile(
+    r"\b(?:RJ-?45|RJ-?11|SC/APC|SC/UPC|LC/APC|LC/UPC|QSFP28|QSFP\+|SFP28|SFP\+|SFP"
+    r"|USB(?:[ -]?(?:Type[ -]?)?C|[ -]?\d\.\d)?|F-type|coaxial|coax|DC[- ]?IN"
+    r"|barrel|RS-?232)(?![\w+])",
+    re.IGNORECASE,
+)
+# Where one LED cell describes several states: "Off: No power. On: Ready".
+_LED_STATE_SPLIT_RE = re.compile(r"(?<=[.;])\s+(?=[A-Z][^.:;]{0,30}:)")
+_LABEL_VALUE_RE = re.compile(r"^\*{0,2}([^:*|]{1,40}?)\*{0,2}\s*:\s*\*{0,2}\s*(\S.*)$")
+_MAX_LABEL_WORDS = 6
+_NON_SPEC_LABELS = {"note", "notes", "caution", "warning", "important", "tip"}
+_NON_HARDWARE_SECTIONS = {"specs", "ordering"}
+# First header cell of a spec table with one column per model.
+_MODEL_HEADER_RE = re.compile(
+    r"(?:models?|skus?|products?|features?|specs?|specifications?|parameters?|items?)?",
+    re.IGNORECASE,
+)
+_GENERIC_COLUMN_RE = re.compile(
+    r"values?|notes?|descriptions?|details|units?|comments?|remarks|typical"
+    r"|max(?:imum)?|min(?:imum)?",
+    re.IGNORECASE,
+)
 
 _HEADING_PREFIX_RE = re.compile(r"^#+\s*")
 _HEADING_LEVEL_RE = re.compile(r"^(#+)\s")
@@ -404,53 +484,298 @@ def _parse_bullets(lines: list[str]) -> list[str]:
     return bullets
 
 
-def _parse_table_rows(lines: list[str]) -> list[list[str]]:
-    rows: list[list[str]] = []
-    for line in lines:
-        if "|" not in line:
+@dataclass(frozen=True)
+class _Table:
+    """A Markdown table: `header` is the row above its "---" separator (empty
+    when there is none) and `rows` the data rows."""
+
+    header: list[str]
+    rows: list[list[str]]
+
+
+def _table_cells(line: str) -> list[str]:
+    # Only the outer pipe on each side: "||Off|" has a blank first cell.
+    line = line.strip().removeprefix("|").removesuffix("|")
+    return [_clean_markdown_emphasis(cell.strip()) for cell in line.split("|")]
+
+
+def _is_separator_row(cells: list[str]) -> bool:
+    return all(_TABLE_SEPARATOR_CELL_RE.fullmatch(cell) for cell in cells)
+
+
+def _parse_tables(lines: list[str]) -> list[_Table]:
+    """Each run of "|" lines as one table. A leading column of item numbers
+    ("No." / 1, 2, 3, as hardware callout tables have) is dropped."""
+    tables = []
+    block: list[list[str]] = []
+    for line in [*lines, ""]:
+        if "|" in line:
+            block.append(_table_cells(line))
             continue
-        cells = [
-            _clean_markdown_emphasis(cell.strip())
-            for cell in line.strip().strip("|").split("|")
+        if not block:
+            continue
+        header: list[str] = []
+        if len(block) > 1 and _is_separator_row(block[1]):
+            header, block = block[0], block[2:]
+        rows = [row for row in block if any(row) and not _is_separator_row(row)]
+        if not header and rows and [c.lower() for c in rows[0]] in _KNOWN_HEADER_ROWS:
+            header, rows = rows[0], rows[1:]
+        tables.append(_without_number_column(_Table(header, rows)))
+        block = []
+    return tables
+
+
+def _without_number_column(table: _Table) -> _Table:
+    first = table.header[0].lower().strip(".#: ") if table.header else ""
+    numbers = [row[0] for row in table.rows if row and row[0]]
+    if (
+        first in _NUMBER_COLUMN_HEADERS
+        and numbers
+        and all(_ITEM_NUMBER_RE.fullmatch(cell) for cell in numbers)
+    ):
+        return _Table(table.header[1:], [row[1:] for row in table.rows])
+    return table
+
+
+def _column(header: list[str], pattern: re.Pattern[str]) -> Optional[int]:
+    return next((i for i, cell in enumerate(header) if pattern.search(cell)), None)
+
+
+def _cell(row: list[str], index: Optional[int]) -> Optional[str]:
+    if index is None or index >= len(row):
+        return None
+    return row[index] or None
+
+
+def _led_indicators(name: str, description: str) -> list[LEDIndicator]:
+    """One indicator per state. A cell describing several states in turn
+    ("Off: No power. On: Ready") is split into one per state."""
+    parts = _LED_STATE_SPLIT_RE.split(description)
+    if len(parts) > 1 and all(":" in part for part in parts):
+        return [
+            LEDIndicator(led_name=name, raw_description=part.strip().rstrip(".;"))
+            for part in parts
         ]
-        if not cells or all(re.fullmatch(r"-+", c) for c in cells):
+    return [LEDIndicator(led_name=name, raw_description=description)]
+
+
+def _leds_from_table(table: _Table) -> list[LEDIndicator]:
+    """First column names the LED; the rest (state, meaning) is its
+    description. A blank name continues the LED above, as merged cells come
+    out of a PDF."""
+    leds: list[LEDIndicator] = []
+    name = ""
+    for row in table.rows:
+        if len(row) < 2:
             continue
-        if [c.lower() for c in cells] in (
-            ["port", "type", "notes"],
-            ["led", "meaning"],
-        ):
+        name = row[0] or name
+        description = ": ".join(cell for cell in row[1:] if cell)
+        if name and description:
+            leds.extend(_led_indicators(name, description))
+    return leds
+
+
+def _ports_from_table(table: _Table) -> list[CablingPort]:
+    """First column names the port; the type and notes columns are found by
+    header ("Type"/"Connector", "Notes"/"Description"), else taken as the
+    second and third. With no type column the connector is read from the
+    row's text."""
+    type_col: Optional[int] = 1
+    notes_col: Optional[int] = 2
+    if table.header:
+        type_col = _column(table.header[1:], _PORT_TYPE_HEADER_RE)
+        notes_col = _column(table.header[1:], _PORT_NOTES_HEADER_RE)
+        type_col = None if type_col is None else type_col + 1
+        notes_col = None if notes_col is None else notes_col + 1
+        if type_col is None and notes_col is None:
+            type_col = 1
+    ports = []
+    for row in table.rows:
+        if len(row) < 2 or not row[0]:
             continue
-        rows.append(cells)
-    return rows
+        notes = _cell(row, notes_col)
+        port_type = _cell(row, type_col) or _connector_type(" ".join(row))
+        ports.append(
+            CablingPort(port_name=row[0], port_type=port_type or "Port", notes=notes)
+        )
+    return ports
 
 
-def _parse_specifications(lines: list[str]) -> dict[str, str]:
-    """Map the Specifications section's labels (bullets or table rows) onto
-    the QSGExtraction field names they correspond to. Unrecognized labels are
-    ignored here; they become open-ended spec rows instead."""
-    specs: dict[str, str] = {}
-    for item in _parse_spec_items(lines):
-        field = _SPEC_LABEL_TO_FIELD.get(_spec_key(item.name))
-        if field and field not in specs:
-            specs[field] = item.value
-    return specs
+def _connector_type(text: str) -> Optional[str]:
+    match = _CONNECTOR_RE.search(text)
+    return match.group(0) if match else None
 
 
-def _parse_spec_items(lines: list[str]) -> list[SpecItem]:
-    """Every "Label: value" bullet and two-column table row in a
-    Specifications section, verbatim, for the open-ended spec rows."""
+def _from_hardware_table(table: _Table) -> tuple[list[CablingPort], list[LEDIndicator]]:
+    """A table describing the whole device, one row per callout: rows naming
+    an LED become indicators, rows naming a port become ports, and the rest
+    (buttons, labels) is skipped."""
+    ports: list[CablingPort] = []
+    leds: list[LEDIndicator] = []
+    for row in table.rows:
+        if len(row) < 2 or not row[0]:
+            continue
+        name = row[0]
+        description = ": ".join(cell for cell in row[1:] if cell)
+        if _LED_NAME_RE.search(name):
+            leds.extend(
+                _led_indicators(_LED_SUFFIX_RE.sub("", name) or name, description)
+            )
+        elif _PORT_NAME_RE.search(name):
+            ports.append(
+                CablingPort(
+                    port_name=_PORT_SUFFIX_RE.sub("", name) or name,
+                    port_type=_connector_type(name) or "Port",
+                    notes=description or None,
+                )
+            )
+    return ports, leds
+
+
+def _label_value(text: str) -> Optional[tuple[str, str]]:
+    """Split a short "Label: value" (or "**Label:** value") line."""
+    match = _LABEL_VALUE_RE.match(text)
+    if not match:
+        return None
+    label = _clean_markdown_emphasis(match.group(1)).strip()
+    value = _clean_markdown_emphasis(match.group(2)).strip()
+    if (
+        not label
+        or not value
+        or len(label.split()) > _MAX_LABEL_WORDS
+        or label.lower() in _NON_SPEC_LABELS
+        or value.startswith("//")
+    ):
+        return None
+    return label, value
+
+
+def _parse_ports_and_leds(
+    sections: dict[str, list[str]],
+) -> tuple[list[CablingPort], list[LEDIndicator]]:
+    """Ports and LEDs from every table outside the specs: by the table's own
+    header when it names one ("LED", "Port", "Interface"), else by the
+    section it sits in. "Label: value" bullets under a ports or LEDs heading
+    count too."""
+    ports: list[CablingPort] = []
+    leds: list[LEDIndicator] = []
+    for section, lines in sections.items():
+        if section in _NON_HARDWARE_SECTIONS:
+            continue
+        for table in _parse_tables(lines):
+            first = table.header[0] if table.header else ""
+            if _LED_NAME_RE.search(first):
+                kind: Optional[str] = "leds"
+            elif _PORT_NAME_RE.search(first):
+                kind = "ports"
+            else:
+                kind = section
+            if kind == "leds":
+                leds.extend(_leds_from_table(table))
+            elif kind == "ports":
+                ports.extend(_ports_from_table(table))
+            elif kind == "hardware":
+                hardware_ports, hardware_leds = _from_hardware_table(table)
+                ports.extend(hardware_ports)
+                leds.extend(hardware_leds)
+        if section not in ("ports", "leds"):
+            continue
+        for bullet in _parse_bullets(lines):
+            pair = _label_value(bullet)
+            if not pair:
+                continue
+            if section == "ports":
+                ports.append(CablingPort(port_name=pair[0], port_type=pair[1]))
+            else:
+                leds.extend(_led_indicators(*pair))
+    return ports, leds
+
+
+def _spec_items_from_table(
+    table: _Table, device_name: str
+) -> tuple[list[SpecItem], Optional[str]]:
+    """Label/value rows. A table with one column per model ("Model | X1 |
+    X2") is read from the model the title names, else from the first model,
+    with a note saying so."""
+    value_col = 1
+    note = None
+    models = table.header[1:]
+    if (
+        len(models) >= 2
+        and _MODEL_HEADER_RE.fullmatch(table.header[0])
+        and not any(_GENERIC_COLUMN_RE.fullmatch(model) for model in models)
+    ):
+        title_key = _alnum_key(device_name)
+        named = [i for i, model in enumerate(models) if _alnum_key(model) in title_key]
+        if named and _alnum_key(models[named[0]]):
+            value_col = 1 + named[0]
+        else:
+            note = (
+                f"The specifications table covers {len(models)} models "
+                f"({', '.join(models)}); the built-in parser read the first, "
+                f"{models[0]}."
+            )
     items = []
-    for bullet in _parse_bullets(lines):
-        label, sep, value = bullet.partition(":")
-        if sep and label.strip() and value.strip():
-            items.append(SpecItem(name=label.strip(), value=value.strip()))
-    for row in _parse_table_rows(lines):
-        if len(row) < 2 or not row[0] or not row[1]:
+    for row in table.rows:
+        if len(row) <= value_col or not row[0] or not row[value_col]:
             continue
         if {row[0].lower(), row[1].lower()} <= _SPEC_TABLE_HEADERS:
             continue
-        items.append(SpecItem(name=row[0], value=row[1]))
-    return items
+        items.append(SpecItem(name=row[0], value=row[value_col]))
+    return items, note
+
+
+def _alnum_key(text: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", text.lower())
+
+
+def _parse_spec_items(
+    lines: list[str], device_name: str = ""
+) -> tuple[list[SpecItem], list[str]]:
+    """Every "Label: value" bullet or line and every label/value table row in
+    a specifications section, verbatim, plus notes on how tables were read."""
+    items = []
+    notes = []
+    for bullet in _parse_bullets(lines):
+        pair = _label_value(bullet)
+        if pair:
+            items.append(SpecItem(name=pair[0], value=pair[1]))
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or _BULLET_PREFIX_RE.match(stripped) or "|" in stripped:
+            continue
+        pair = _label_value(stripped)
+        if pair:
+            items.append(SpecItem(name=pair[0], value=pair[1]))
+    for table in _parse_tables(lines):
+        table_items, note = _spec_items_from_table(table, device_name)
+        items.extend(table_items)
+        if note:
+            notes.append(note)
+    return items, notes
+
+
+def _take_fixed_specs(
+    items: list[SpecItem],
+) -> tuple[dict[str, str], list[SpecItem]]:
+    """Move the spec rows naming the fixed fields (Wi-Fi standard, WAN speed,
+    form factor) into those fields. A synonym only counts when its value reads
+    as that field (an 802.11 standard, a speed), so "WAN: 1 x SFP+" stays an
+    open-ended row."""
+    fixed: dict[str, str] = {}
+    rest = []
+    for item in items:
+        key = _spec_key(item.name)
+        field = _SPEC_LABEL_TO_FIELD.get(key) or _SPEC_SYNONYM_TO_FIELD.get(key)
+        if (
+            field
+            and field not in fixed
+            and (key in _SPEC_LABEL_TO_FIELD or _FIXED_FIELD_CHECKS[field](item.value))
+        ):
+            fixed[field] = item.value
+        else:
+            rest.append(item)
+    return fixed, rest
 
 
 def _detect_document_type(text: str, sections: dict[str, list[str]]) -> DocumentType:
@@ -519,41 +844,37 @@ def _detect_provisioning_methods(text: str) -> list[RawProvisioningMethod]:
     return ordered
 
 
-def _heuristic_extract_qsg(text: str, source_document: str) -> QSGExtraction:
+def _heuristic_extract(
+    text: str, source_document: str
+) -> tuple[QSGExtraction, list[str]]:
+    """The regex parser. Also returns notes for the user on what it read only
+    partly, e.g. one model's column of a multi-model table."""
     sections = _split_sections(text)
+    device_name = _detect_device_name(text)
+    cabling_ports, led_indicators = _parse_ports_and_leds(sections)
+    spec_items, notes = _parse_spec_items(sections.get("specs", []), device_name)
+    fixed, specs = _take_fixed_specs(spec_items)
 
-    cabling_ports = [
-        CablingPort(
-            port_name=row[0],
-            port_type=row[1],
-            notes=row[2] if len(row) > 2 and row[2] else None,
-        )
-        for row in _parse_table_rows(sections.get("ports", []))
-        if len(row) >= 2
-    ]
-    led_indicators = [
-        LEDIndicator(led_name=row[0], raw_description=row[1])
-        for row in _parse_table_rows(sections.get("leds", []))
-        if len(row) >= 2
-    ]
-
-    specs = _parse_specifications(sections.get("specs", []))
-
-    return QSGExtraction(
-        device_name=_detect_device_name(text),
+    extraction = QSGExtraction(
+        device_name=device_name,
         source_document=source_document,
         default_ip=_detect_default_ip(text),
         provisioning_methods=_detect_provisioning_methods(text),
         required_tools=_parse_bullets(sections.get("tools", [])),
         cabling_ports=cabling_ports,
         led_indicators=led_indicators,
-        wifi_standard=specs.get("wifi_standard"),
-        wan_speed=specs.get("wan_speed"),
-        form_factor=specs.get("form_factor"),
+        wifi_standard=fixed.get("wifi_standard"),
+        wan_speed=fixed.get("wan_speed"),
+        form_factor=fixed.get("form_factor"),
         capabilities=_parse_bullets(sections.get("features", [])),
         document_type=_detect_document_type(text, sections),
-        specs=_parse_spec_items(sections.get("specs", [])),
+        specs=specs,
     )
+    return extraction, notes
+
+
+def _heuristic_extract_qsg(text: str, source_document: str) -> QSGExtraction:
+    return _heuristic_extract(text, source_document)[0]
 
 
 def _load_agent_system_prompt(agent_file: str) -> str:
@@ -890,11 +1211,8 @@ def _extract_single(
             "No LLM provider configured; using heuristic parser for %r",
             source_document,
         )
-    return (
-        _heuristic_extract_qsg(document_text, source_document),
-        EXTRACTION_SOURCE_HEURISTIC,
-        warnings,
-    )
+    extraction, notes = _heuristic_extract(document_text, source_document)
+    return extraction, EXTRACTION_SOURCE_HEURISTIC, warnings + notes
 
 
 def _split_into_chunks(text: str, max_chars: int = _CHUNK_CHARS) -> list[str]:
@@ -1078,11 +1396,9 @@ def _extract_document(
                 source_document,
                 exc_info=True,
             )
-            return (
-                _heuristic_extract_qsg(document_text, source_document),
-                EXTRACTION_SOURCE_HEURISTIC,
-                [_fallback_warning(provider, exc, user_key=bool(api_key))],
-            )
+            extraction, notes = _heuristic_extract(document_text, source_document)
+            warning = _fallback_warning(provider, exc, user_key=bool(api_key))
+            return extraction, EXTRACTION_SOURCE_HEURISTIC, [warning, *notes]
     return _extract_single(document_text, source_document, llm)
 
 
