@@ -12,8 +12,16 @@ as Markdown or PDF.
 ## Run it yourself
 
 Everything runs on your own computer: there's no account, and your documents
-and history stay on your machine. You need either Docker, or Python 3.11+ with
-[uv](https://docs.astral.sh/uv/) (or pipx).
+and history stay on your machine.
+
+**Before you start**, install one of these (either works; you don't need both):
+
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) for
+  Windows, macOS or Linux. Larger companies need a paid Docker subscription, so
+  if yours doesn't have one, use uv instead.
+- [uv](https://docs.astral.sh/uv/getting-started/installation/), a small Python
+  tool installer. It downloads a suitable Python by itself, so you don't need
+  Python installed first. (pipx works too, with Python 3.11 or newer.)
 
 **With Docker**
 
