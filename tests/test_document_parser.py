@@ -33,6 +33,17 @@ class TestTextFormats:
         text = extract_text("guide.md", b"# Title\n\n\n\nStep  one   here\n")
         assert text == "# Title\n\nStep one here"
 
+    def test_aligned_columns_are_kept_as_tabs(self):
+        text = extract_text(
+            "guide.txt",
+            b"Port    Type\nWAN     RJ-45\n        SFP\n\nOne  stray   gap\n",
+        )
+        assert text == "Port\tType\nWAN\tRJ-45\n\tSFP\n\nOne stray gap"
+
+    def test_indented_lines_alone_are_not_a_table(self):
+        text = extract_text("guide.md", b"- Item\n   - Sub one\n   - Sub two\n")
+        assert text == "- Item\n- Sub one\n- Sub two"
+
     def test_plain_text_strips_bom_and_normalizes_newlines(self):
         raw = "﻿Line one\r\nLine two\rLine three".encode("utf-8")
         assert extract_text("notes.txt", raw) == "Line one\nLine two\nLine three"

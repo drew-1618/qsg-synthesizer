@@ -72,6 +72,28 @@ class TestNormalizeLed:
         result = normalize_led("SOLID GREEN")
         assert result.state == LEDState.ONLINE
 
+    @pytest.mark.parametrize(
+        "text, state",
+        [
+            ("On: Ready", LEDState.ONLINE),
+            ("Lit: link is up", LEDState.ONLINE),
+            ("Blinking: firmware upgrade", LEDState.BOOTING),
+            ("Blinking", LEDState.BOOTING),
+            ("On", LEDState.ONLINE),
+            ("On: Connection failed", LEDState.FAULT),
+            ("Steady: not connected", LEDState.FAULT),
+            ("No fiber signal", LEDState.FAULT),
+            ("Unlit: no power", LEDState.OFF),
+            ("Green: connected", LEDState.ONLINE),
+        ],
+    )
+    def test_leds_without_a_color_are_classified_by_meaning(self, text, state):
+        assert normalize_led(text).state == state
+
+    def test_color_and_pattern_win_over_meaning(self):
+        # Solid amber is a fault by convention, whatever the text says.
+        assert normalize_led("solid amber: upgrading").state == LEDState.FAULT
+
 
 class TestExpandPortRange:
     def test_single_port_name_is_unchanged_with_count_one(self):
