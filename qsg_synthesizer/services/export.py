@@ -166,6 +166,12 @@ def _friction_scored(battlecard: BattlecardResponse) -> bool:
     )
 
 
+FACTS_EDITED_NOTE = (
+    "Some facts were corrected by hand after the documents were read; the "
+    "scores and talk track are built from the corrected facts."
+)
+
+
 def _extra_spec_rows(
     cm: dict,
 ) -> list[tuple[Optional[str], str, Optional[str], Optional[str]]]:
@@ -226,6 +232,7 @@ def battlecard_to_markdown(battlecard: BattlecardResponse) -> str:
     lines = [
         f"# Battlecard: {name_a} vs {name_b}",
         "",
+        *([FACTS_EDITED_NOTE, ""] if battlecard.facts_edited else []),
         "## Installation Friction Index",
         *(
             [
@@ -305,6 +312,11 @@ def battlecard_to_pdf_bytes(battlecard: BattlecardResponse) -> bytes:
 
     story: list[Flowable] = [
         Paragraph(f"Battlecard: {_esc(name_a)} vs {_esc(name_b)}", _H1),
+        *(
+            [Paragraph(_esc(FACTS_EDITED_NOTE), _BODY)]
+            if battlecard.facts_edited
+            else []
+        ),
         Paragraph(
             (
                 (

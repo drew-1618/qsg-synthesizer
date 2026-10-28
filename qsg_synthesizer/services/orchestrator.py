@@ -48,6 +48,7 @@ from qsg_synthesizer.paths import resource_dir
 from qsg_synthesizer.schemas import (
     BattlecardResponse,
     DeviceSpec,
+    ExtractedDevice,
     LEDStatus,
     Perspective,
     ProvisioningMethod,
@@ -1750,32 +1751,61 @@ def _extracted_with(source: str, llm: Optional[LLMOverride]) -> str:
     return f"{_PROVIDER_NAMES[provider]} ({model})"
 
 
+def extract_device(
+    document_text: str, source_document: str, llm: Optional[LLMOverride] = None
+) -> ExtractedDevice:
+    """Raw extraction for one document, with how it was read."""
+    extraction, source, warnings = _extract_document(
+        document_text, source_document, llm
+    )
+    return ExtractedDevice(
+        extraction=extraction,
+        extraction_source=source,
+        extracted_with=_extracted_with(source, llm),
+        warnings=warnings,
+    )
+
+
+# Notes about how much the built-in parser recognized, which no longer apply
+# once the user has corrected the facts.
+_THIN_READ_WARNINGS = {THIN_INSTALL_WARNING, THIN_SPECS_WARNING}
+
+
+def device_spec(
+    device: ExtractedDevice, edited: Optional[QSGExtraction] = None
+) -> DeviceSpec:
+    """Deterministic IP/LED/port normalization of an extraction into a clean
+    `DeviceSpec`; `edited` replaces the extracted facts with the user's."""
+    spec = _normalize_to_device_spec(edited or device.extraction)
+    spec.extraction_source = device.extraction_source
+    spec.extracted_with = device.extracted_with
+    spec.extraction_warnings = [
+        warning
+        for warning in device.warnings
+        if not (edited and warning in _THIN_READ_WARNINGS)
+    ]
+    return spec
+
+
 def extract_device_spec(
     document_text: str, source_document: str, llm: Optional[LLMOverride] = None
 ) -> DeviceSpec:
     """Full pipeline for one document: raw extraction, then deterministic
     IP/LED normalization into a clean `DeviceSpec`."""
-    extraction, source, warnings = _extract_document(
-        document_text, source_document, llm
-    )
-    spec = _normalize_to_device_spec(extraction)
-    spec.extraction_source = source
-    spec.extracted_with = _extracted_with(source, llm)
-    spec.extraction_warnings = warnings
-    return spec
+    return device_spec(extract_device(document_text, source_document, llm))
 
 
-def extract_device_specs(
+def extract_devices(
     text_a: str,
     name_a: str,
     text_b: str,
     name_b: str,
     llm: Optional[LLMOverride] = None,
-) -> tuple[DeviceSpec, DeviceSpec]:
+) -> tuple[ExtractedDevice, ExtractedDevice]:
     """Run both extractions concurrently; the LLM calls are I/O-bound."""
     with ThreadPoolExecutor(max_workers=2) as pool:
-        future_a = pool.submit(extract_device_spec, text_a, name_a, llm)
-        future_b = pool.submit(extract_device_spec, text_b, name_b, llm)
+        future_a = pool.submit(extract_device, text_a, name_a, llm)
+        future_b = pool.submit(extract_device, text_b, name_b, llm)
         return future_a.result(), future_b.result()
 
 

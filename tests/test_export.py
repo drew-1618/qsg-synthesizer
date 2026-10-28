@@ -4,6 +4,7 @@ from datetime import datetime
 
 from qsg_synthesizer.schemas import BattlecardResponse
 from qsg_synthesizer.services.export import (
+    FACTS_EDITED_NOTE,
     battlecard_to_markdown,
     battlecard_to_pdf_bytes,
     default_export_basename,
@@ -231,3 +232,11 @@ class TestSpecGroupExports:
             {"name": "Power", "device_a": "10 W", "device_b": None, "group": "Power"}
         ]
         assert "| **Power** |" not in battlecard_to_markdown(card)
+
+
+class TestFactsEditedNote:
+    def test_exports_say_when_facts_were_corrected(self):
+        card = _card(facts_edited=True)
+        assert FACTS_EDITED_NOTE in battlecard_to_markdown(card)
+        assert battlecard_to_pdf_bytes(card).startswith(b"%PDF")
+        assert FACTS_EDITED_NOTE not in battlecard_to_markdown(_card())

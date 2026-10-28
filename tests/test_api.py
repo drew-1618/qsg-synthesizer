@@ -872,3 +872,130 @@ class TestUnscoredReason:
         assert "isn't compared" not in data["sales_talk_track"]
         listed = client.get("/api/v1/history").json()["items"][0]
         assert listed["provisioning_undocumented"] is True
+
+
+class TestEditFacts:
+    def _compare(self):
+        files = {
+            f"device_{side}_file": (
+                name,
+                (SAMPLE_DOCS_DIR / name).read_bytes(),
+                "text/markdown",
+            )
+            for side, name in (("a", "device_a_qsg.md"), ("b", "device_b_qsg.md"))
+        }
+        return client.post("/api/v1/compare", data={"mode": "sales"}, files=files)
+
+    def _facts(self, history_id):
+        record = client.get(f"/api/v1/history/{history_id}").json()
+        return [device["extraction"] for device in record["devices"]]
+
+    def test_records_keep_both_extractions(self):
+        history_id = self._compare().json()["history_id"]
+        a, b = self._facts(history_id)
+        assert (a["device_name"], b["device_name"]) == (
+            "NovaFiber GX400",
+            "LegacyLink RG-210",
+        )
+
+    def test_corrected_facts_rebuild_the_battlecard_in_place(self):
+        original = self._compare().json()
+        history_id = original["history_id"]
+        a, b = self._facts(history_id)
+        # B is really provisioned remotely, and is called something else.
+        b.update(provisioning_methods=["TR-069"], device_name="LegacyLink RG-220")
+        response = client.put(
+            f"/api/v1/history/{history_id}/facts", json={"device_a": a, "device_b": b}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["history_id"] == history_id
+        assert data["facts_edited"] is True
+        assert data["comparison_matrix"]["provisioning_method"]["device_b"] == "TR-069"
+        assert (
+            data["installation_friction_score_device_b"]
+            < original["installation_friction_score_device_b"]
+        )
+        record = client.get(f"/api/v1/history/{history_id}").json()
+        assert record["battlecard"]["facts_edited"] is True
+        assert record["device_b_name"] == "LegacyLink RG-220"
+        assert record["edited_extractions"][1]["provisioning_methods"] == ["TR-069"]
+        assert record["devices"][1]["extraction"]["device_name"] == "LegacyLink RG-210"
+        item = client.get("/api/v1/history").json()["items"][0]
+        assert item["facts_edited"] is True
+        assert client.get("/api/v1/history").json()["total"] == 1
+
+    def test_source_document_names_stay_as_saved(self):
+        history_id = self._compare().json()["history_id"]
+        a, b = self._facts(history_id)
+        a["source_document"] = "elsewhere.md"
+        client.put(
+            f"/api/v1/history/{history_id}/facts", json={"device_a": a, "device_b": b}
+        )
+        record = client.get(f"/api/v1/history/{history_id}").json()
+        assert record["edited_extractions"][0]["source_document"] == "device_a_qsg.md"
+
+    def test_reset_restores_the_extracted_facts(self):
+        original = self._compare().json()
+        history_id = original["history_id"]
+        a, b = self._facts(history_id)
+        b["provisioning_methods"] = ["TR-069"]
+        client.put(
+            f"/api/v1/history/{history_id}/facts", json={"device_a": a, "device_b": b}
+        )
+        response = client.delete(f"/api/v1/history/{history_id}/facts")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["facts_edited"] is False
+        assert (
+            data["installation_friction_score_device_b"]
+            == original["installation_friction_score_device_b"]
+        )
+        record = client.get(f"/api/v1/history/{history_id}").json()
+        assert record["edited_extractions"] is None
+        assert record["device_b_name"] == "LegacyLink RG-210"
+
+    def test_an_edited_record_is_never_a_redundant_copy(self):
+        first = self._compare().json()["history_id"]
+        self._compare()
+        a, b = self._facts(first)
+        client.put(
+            f"/api/v1/history/{first}/facts", json={"device_a": a, "device_b": b}
+        )
+        stack = client.get("/api/v1/history/stacks").json()["items"][0]
+        assert stack["redundant_ids"] == []
+
+    def test_records_from_before_extractions_were_kept_return_409(self):
+        history_id = self._compare().json()["history_id"]
+        record = history.get_comparison(history_id)
+        old = record.model_copy(update={"devices": []})
+        (history.HISTORY_DIR / f"{history_id}.json").write_text(old.model_dump_json())
+        a = {"device_name": "A", "source_document": "a.md"}
+        response = client.put(
+            f"/api/v1/history/{history_id}/facts", json={"device_a": a, "device_b": a}
+        )
+        assert response.status_code == 409
+        assert "Rerun it" in response.json()["detail"]
+        assert client.delete(f"/api/v1/history/{history_id}/facts").status_code == 409
+
+    def test_oversized_facts_are_rejected(self):
+        history_id = self._compare().json()["history_id"]
+        a, b = self._facts(history_id)
+        a["required_tools"] = ["x" * 501]
+        response = client.put(
+            f"/api/v1/history/{history_id}/facts", json={"device_a": a, "device_b": b}
+        )
+        assert response.status_code == 422
+        b["required_tools"] = ["tool"] * 61
+        response = client.put(
+            f"/api/v1/history/{history_id}/facts",
+            json={"device_a": self._facts(history_id)[0], "device_b": b},
+        )
+        assert response.status_code == 422
+
+    def test_unknown_record_returns_404(self):
+        a = {"device_name": "A", "source_document": "a.md"}
+        response = client.put(
+            f"/api/v1/history/{'c' * 32}/facts", json={"device_a": a, "device_b": a}
+        )
+        assert response.status_code == 404
