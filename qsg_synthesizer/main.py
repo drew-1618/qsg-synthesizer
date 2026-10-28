@@ -118,7 +118,7 @@ export_rate_limiter = RateLimiter(max_requests=20, window_seconds=60)
 app = FastAPI(
     title="QSG Synthesizer",
     description="Automated Hardware Spec & Quick Start Guide Comparison Engine",
-    version="0.2.1",
+    version="0.3.0",
 )
 
 # No CORS middleware on purpose: the dashboard is served from this same
