@@ -14,6 +14,7 @@ from typing import List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from qsg_synthesizer.models.schemas import QSGExtraction
 from qsg_synthesizer.tools.led_normalizer import LEDState
 
 __all__ = [
@@ -22,6 +23,7 @@ __all__ = [
     "LEDStatus",
     "ProvisioningMethod",
     "DeviceSpec",
+    "ExtractedDevice",
     "BattlecardResponse",
     "CompareResponse",
     "HistorySummary",
@@ -98,6 +100,17 @@ class DeviceSpec(BaseModel):
     extraction_warnings: List[str] = Field(default_factory=list)
 
 
+class ExtractedDevice(BaseModel):
+    """One document as the extractor read it, before normalization: kept with
+    the history record so the user can correct the facts and the battlecard
+    can be rebuilt from them without reading the document again."""
+
+    extraction: QSGExtraction
+    extraction_source: Optional[str] = None
+    extracted_with: Optional[str] = None
+    warnings: List[str] = Field(default_factory=list)
+
+
 class BattlecardResponse(BaseModel):
     comparison_matrix: dict
     # None when install effort isn't comparable (not both quick start guides,
@@ -122,6 +135,8 @@ class BattlecardResponse(BaseModel):
     # when the documents aren't both guides, and on older records.
     unscored_reason: Optional[str] = None
     warnings: List[str] = Field(default_factory=list)
+    # Built from facts the user corrected rather than as extracted.
+    facts_edited: bool = False
 
 
 class CompareResponse(BattlecardResponse):
@@ -141,6 +156,7 @@ class HistorySummary(BaseModel):
     # Both were guides, but one didn't document provisioning (see
     # BattlecardResponse.unscored_reason), so the scores above are None.
     provisioning_undocumented: bool = False
+    facts_edited: bool = False
     # Hash of both input documents; None on records saved before it was tracked.
     input_fingerprint: Optional[str] = None
 
@@ -162,6 +178,11 @@ class HistoryRecord(BaseModel):
     input_fingerprint: Optional[str] = None
     # [device A, device B]; empty on records saved before sources were kept.
     sources: List[SourceDocument] = Field(default_factory=list)
+    # [device A, device B] as extracted; empty on records saved before facts
+    # could be edited (those can't be).
+    devices: List[ExtractedDevice] = Field(default_factory=list)
+    # [device A, device B] as the user corrected them; None when not edited.
+    edited_extractions: Optional[List[QSGExtraction]] = None
 
 
 class HistoryStack(BaseModel):

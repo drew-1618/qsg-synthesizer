@@ -92,9 +92,17 @@ any other unreferenced text goes after a short grace period) so
    and switchable per browser in Settings (`qsg-keep-documents`, sent as the `keep_documents`
    form field of `POST /api/v1/compare`); `DELETE /api/v1/history/documents`
    (`forget_all_sources`) strips them from every record but keeps the battlecards.
+   Each record also keeps both raw extractions (`HistoryRecord.devices`, `ExtractedDevice`), so
+   Edit facts (`#facts-dialog`, `openFactsEditor()`) can `PUT /api/v1/history/{id}/facts` with
+   corrected `QSGExtraction`s: `_rebuild_facts` in `main.py` runs them through
+   `orchestrator.device_spec()` (the same deterministic normalization) and
+   `synthesize_battlecard`, and `history.update_facts` rewrites the record in place
+   (`edited_extractions`, `BattlecardResponse.facts_edited`; edited records are never
+   `redundant_ids`). `DELETE …/facts` resets to the extracted facts; records saved before
+   extractions were kept get a 409.
    In the UI, a result on screen replaces the form with `#result-bar` (`showResultBar()`):
-   Rerun, Change documents (only after a fresh compare, when the form still holds the files)
-   and New comparison.
+   Rerun, Edit facts, Change documents (only after a fresh compare, when the form still holds
+   the files) and New comparison.
 
 Things that span multiple files:
 - Comparison perspective: `BattlecardResponse.perspective` is `"sales"` (side A is the user's own

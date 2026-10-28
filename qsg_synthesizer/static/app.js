@@ -377,6 +377,9 @@ document.getElementById("settings-forget-documents").addEventListener("click", a
 });
 
 let currentHistoryId = null;
+// When the comparison on screen was saved, kept so editing its facts doesn't
+// change the time the result bar shows.
+let resultBarCreatedAt = null;
 const HISTORY_PAGE_SIZE = 20;
 let historyOffset = 0;
 // Stacks group comparisons of the same device pair and mode (see history.py).
@@ -409,12 +412,20 @@ function hideResults() {
 // form never sits above a result it didn't produce. `fromForm` says whether
 // the form still holds the documents behind the result (a fresh compare) or
 // not (opened from history); only then can "Change documents" reopen it.
-// `canRerun` is false for records whose documents weren't kept.
-function showResultBar(data, { fromForm, createdAt, canRerun = true }) {
+// `canRerun` is false for records whose documents weren't kept, and
+// `canEditFacts` for records saved before their extractions were kept.
+function showResultBar(data, { fromForm, createdAt, canRerun = true, canEditFacts = true }) {
   const names = data.comparison_matrix.model_name;
   document.getElementById("result-bar-title").textContent = `${names.device_a} vs ${names.device_b}`;
   const mode = data.perspective === "sales" ? "Sales battlecard" : "Neutral comparison";
-  document.getElementById("result-bar-meta").textContent = `${mode} \u00b7 ${formatTimestamp(createdAt)}`;
+  const edited = data.facts_edited ? " \u00b7 Facts edited" : "";
+  document.getElementById("result-bar-meta").textContent = `${mode} \u00b7 ${formatTimestamp(createdAt)}${edited}`;
+  resultBarCreatedAt = createdAt;
+  const editBtn = document.getElementById("edit-facts-btn");
+  editBtn.disabled = !canEditFacts;
+  editBtn.title = canEditFacts
+    ? "Correct what was read from the documents and rebuild the battlecard"
+    : "This comparison was saved before facts could be edited. Rerun it to get one that can be.";
   document.getElementById("change-documents-btn").classList.toggle("hidden", !fromForm);
   document.getElementById("rerun-control").classList.toggle("hidden", !canRerun);
   document.getElementById("result-bar-note").classList.toggle("hidden", canRerun);
@@ -437,6 +448,11 @@ function escapeHtml(str) {
   const div = document.createElement("div");
   div.textContent = str ?? "";
   return div.innerHTML;
+}
+
+// For text inside a quoted attribute, where quotes must be escaped too.
+function escapeAttr(str) {
+  return escapeHtml(String(str ?? "")).replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
 // Must match qsg_synthesizer/services/orchestrator.py's NO_RISKS_MESSAGE /
@@ -962,6 +978,259 @@ document.getElementById("change-documents-btn").addEventListener("click", () => 
   scrollToForm();
 });
 
+// ---- Edit facts ----
+// Edits the raw extraction of each device (the same shape the extractor
+// fills in); the server normalizes it with the same deterministic tools and
+// rebuilds the battlecard in place. Fields not shown here (the AI's setup
+// assessment) are kept as extracted.
+const factsDialog = document.getElementById("facts-dialog");
+const PROVISIONING_CHOICES = ["TR-069", "DHCP", "Web GUI", "Console", "QR/Mobile App", "Other"];
+const DOCUMENT_TYPE_CHOICES = [
+  ["", "Not specified"],
+  ["quick_start_guide", "Quick start guide"],
+  ["datasheet", "Datasheet"],
+  ["other", "Other document"],
+];
+const factsState = { record: null, drafts: [], side: 0 };
+const INPUT_CLASS = "w-full min-w-0 text-sm bg-panel border border-line rounded-control px-3 py-2";
+const LABEL_CLASS = "block text-sm font-medium mb-1";
+
+function factsField(id, label, value, { mono = false, type = "text" } = {}) {
+  return `<div><label for="${id}" class="${LABEL_CLASS}">${label}</label>
+    <input id="${id}" type="${type}" ${type === "number" ? 'min="0" max="200"' : 'maxlength="500"'} autocomplete="off"
+           value="${escapeAttr(value)}" class="${INPUT_CLASS}${mono ? " font-mono" : ""}" /></div>`;
+}
+
+function factsList(id, label, items, hint) {
+  return `<div><label for="${id}" class="${LABEL_CLASS}">${label}</label>
+    <textarea id="${id}" rows="3" class="${INPUT_CLASS}">${escapeHtml((items || []).join("\n"))}</textarea>
+    <p class="mt-1 text-xs text-ink-muted">${hint}</p></div>`;
+}
+
+// A list of rows with a few text columns each (ports, LEDs, specs), with
+// add and remove buttons. `columns` are [key, label, mono?].
+function factsRows(id, label, rows, columns) {
+  const row = (values) => `
+    <div class="facts-row flex flex-col sm:flex-row gap-2 sm:items-center max-sm:pb-2 max-sm:border-b max-sm:border-line">
+      ${columns
+        .map(
+          ([key, colLabel, mono]) =>
+            `<input data-key="${key}" aria-label="${colLabel}" placeholder="${colLabel}" maxlength="500" autocomplete="off"
+                    value="${escapeAttr(values[key])}" class="${INPUT_CLASS} sm:flex-1${mono ? " font-mono" : ""}" />`
+        )
+        .join("")}
+      <button type="button" data-remove-row aria-label="Remove row"
+              class="self-end sm:self-auto shrink-0 text-sm text-ink-muted hover:text-ink px-2 py-2 rounded-control">Remove</button>
+    </div>`;
+  return `<fieldset id="${id}" data-row-template="${escapeAttr(JSON.stringify(columns))}">
+    <legend class="${LABEL_CLASS}">${label}</legend>
+    <div data-rows class="space-y-2">${rows.map(row).join("")}</div>
+    <button type="button" data-add-row class="mt-2 text-sm font-medium text-action hover:underline">Add row</button>
+  </fieldset>`;
+}
+
+function factsRowTemplate(fieldset) {
+  const columns = JSON.parse(fieldset.dataset.rowTemplate);
+  const wrapper = document.createElement("div");
+  wrapper.innerHTML = factsRows("tmp", "", [{}], columns);
+  return wrapper.querySelector(".facts-row");
+}
+
+function readFactsRows(id) {
+  return [...document.querySelectorAll(`#${id} .facts-row`)]
+    .map((row) =>
+      Object.fromEntries([...row.querySelectorAll("input")].map((input) => [input.dataset.key, input.value.trim()]))
+    )
+    .filter((values) => Object.values(values).some(Boolean));
+}
+
+function renderFactsTabs() {
+  const perspective = factsState.record.battlecard.perspective;
+  const labels =
+    perspective === "sales" ? ["Our device", "Competitor"] : ["Device A", "Device B"];
+  document.getElementById("facts-tabs").innerHTML = factsState.drafts
+    .map((draft, i) => {
+      const selected = i === factsState.side;
+      return `<button type="button" role="tab" data-side="${i}" aria-selected="${selected}"
+                class="-mb-px px-3 py-2 text-sm font-medium border-b-2 ${selected ? "border-action text-ink" : "border-transparent text-ink-muted hover:text-ink"}">
+                ${labels[i]}<span class="sr-only">: </span><span class="block text-xs font-normal text-ink-muted truncate max-w-40">${escapeHtml(draft.device_name)}</span>
+              </button>`;
+    })
+    .join("");
+}
+
+function renderFactsFields() {
+  const d = factsState.drafts[factsState.side];
+  const methods = new Set(d.provisioning_methods || []);
+  document.getElementById("facts-fields").innerHTML = `
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      ${factsField("facts-name", "Device name", d.device_name)}
+      <div><label for="facts-type" class="${LABEL_CLASS}">Document type</label>
+        <select id="facts-type" class="${INPUT_CLASS}">
+          ${DOCUMENT_TYPE_CHOICES.map(
+            ([value, label]) => `<option value="${value}" ${(d.document_type || "") === value ? "selected" : ""}>${label}</option>`
+          ).join("")}
+        </select></div>
+      ${factsField("facts-ip", "Default IP", d.default_ip, { mono: true })}
+      ${factsField("facts-steps", "Setup steps", d.step_count, { type: "number" })}
+    </div>
+    <fieldset>
+      <legend class="${LABEL_CLASS}">Provisioning methods</legend>
+      <div class="flex flex-wrap gap-x-4 gap-y-2">
+        ${PROVISIONING_CHOICES.map(
+          (method) => `<label class="inline-flex items-center gap-2 text-sm">
+            <input type="checkbox" name="facts-method" value="${method}" ${methods.has(method) ? "checked" : ""} class="accent-action" />
+            ${method}</label>`
+        ).join("")}
+      </div>
+      <p class="mt-1 text-xs text-ink-muted">Install effort is only scored when both guides list at least one.</p>
+    </fieldset>
+    ${factsList("facts-tools", "Required tools", d.required_tools, "One per line.")}
+    ${factsRows("facts-ports", "Ports", (d.cabling_ports || []), [["port_name", "Name", true], ["port_type", "Type"], ["notes", "Notes"]])}
+    ${factsRows("facts-leds", "LED states", (d.led_indicators || []), [["led_name", "LED"], ["raw_description", "State and meaning, e.g. solid green: online"]])}
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      ${factsField("facts-wifi", "Wi-Fi standard", d.wifi_standard)}
+      ${factsField("facts-wan", "WAN speed", d.wan_speed)}
+      ${factsField("facts-form-factor", "Form factor", d.form_factor)}
+    </div>
+    ${factsList("facts-capabilities", "Capabilities", d.capabilities, "One per line.")}
+    ${factsRows("facts-specs", "Other specs", (d.specs || []), [["name", "Spec"], ["value", "Value"]])}`;
+}
+
+// Reads the form back into the open side's draft.
+function saveFactsSide() {
+  const d = factsState.drafts[factsState.side];
+  const value = (id) => document.getElementById(id).value.trim();
+  const lines = (id) => value(id).split("\n").map((line) => line.trim()).filter(Boolean);
+  const steps = value("facts-steps");
+  Object.assign(d, {
+    device_name: value("facts-name") || d.device_name,
+    document_type: value("facts-type") || null,
+    default_ip: value("facts-ip") || null,
+    step_count: steps === "" ? null : Math.max(0, Math.min(200, Math.round(Number(steps)))),
+    provisioning_methods: [...document.querySelectorAll('input[name="facts-method"]:checked')].map((box) => box.value),
+    required_tools: lines("facts-tools"),
+    cabling_ports: readFactsRows("facts-ports")
+      .filter((port) => port.port_name)
+      .map((port) => ({ ...port, port_type: port.port_type || "Port", notes: port.notes || null })),
+    led_indicators: readFactsRows("facts-leds").filter((led) => led.led_name && led.raw_description),
+    wifi_standard: value("facts-wifi") || null,
+    wan_speed: value("facts-wan") || null,
+    form_factor: value("facts-form-factor") || null,
+    capabilities: lines("facts-capabilities"),
+    specs: readFactsRows("facts-specs").filter((spec) => spec.name && spec.value),
+  });
+}
+
+function showFactsSide(side) {
+  factsState.side = side;
+  renderFactsTabs();
+  renderFactsFields();
+}
+
+function setFactsError(message) {
+  const el = document.getElementById("facts-error");
+  el.textContent = message || "";
+  el.classList.toggle("hidden", !message);
+}
+
+async function openFactsEditor() {
+  if (state.busy || !currentHistoryId) return;
+  clearError();
+  try {
+    const res = await fetch(`/api/v1/history/${currentHistoryId}`);
+    const record = await readJson(res);
+    if (!res.ok) throw new Error(describeFailure(res, record, "Could not load that comparison's facts."));
+    if ((record.devices || []).length !== 2) {
+      throw new Error("This comparison was saved before facts could be edited. Rerun it to get one that can be.");
+    }
+    const facts = record.edited_extractions || record.devices.map((device) => device.extraction);
+    factsState.record = record;
+    factsState.drafts = facts.map((extraction) => structuredClone(extraction));
+    setFactsError("");
+    document.getElementById("facts-reset-control").classList.toggle("hidden", !record.edited_extractions);
+    showFactsSide(0);
+    factsDialog.showModal();
+    document.getElementById("facts-name").focus();
+  } catch (err) {
+    showError(describeException(err, "Could not load that comparison's facts."));
+  }
+}
+
+function showRebuilt(data) {
+  showResultBar(data, {
+    fromForm: !document.getElementById("change-documents-btn").classList.contains("hidden"),
+    createdAt: resultBarCreatedAt,
+    canRerun: !document.getElementById("rerun-control").classList.contains("hidden"),
+  });
+  renderResults(data);
+  loadHistory();
+}
+
+async function submitFacts(request, fallback) {
+  const saveBtn = document.getElementById("facts-save-btn");
+  saveBtn.disabled = true;
+  setFactsError("");
+  try {
+    const res = await request();
+    const data = await readJson(res);
+    if (!res.ok) throw new Error(describeFailure(res, data, fallback));
+    factsDialog.close();
+    showRebuilt(data);
+  } catch (err) {
+    setFactsError(describeException(err, fallback));
+  } finally {
+    saveBtn.disabled = false;
+  }
+}
+
+document.getElementById("edit-facts-btn").addEventListener("click", openFactsEditor);
+document.getElementById("facts-cancel-btn").addEventListener("click", () => factsDialog.close());
+document.getElementById("facts-tabs").addEventListener("click", (event) => {
+  const tab = event.target.closest("[data-side]");
+  if (!tab) return;
+  saveFactsSide();
+  showFactsSide(Number(tab.dataset.side));
+});
+document.getElementById("facts-fields").addEventListener("click", (event) => {
+  if (event.target.closest("[data-remove-row]")) {
+    event.target.closest(".facts-row").remove();
+    return;
+  }
+  const add = event.target.closest("[data-add-row]");
+  if (add) {
+    const fieldset = add.closest("fieldset");
+    const row = factsRowTemplate(fieldset);
+    fieldset.querySelector("[data-rows]").append(row);
+    row.querySelector("input").focus();
+  }
+});
+document.getElementById("facts-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  saveFactsSide();
+  const [deviceA, deviceB] = factsState.drafts;
+  submitFacts(
+    () =>
+      fetch(`/api/v1/history/${factsState.record.id}/facts`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ device_a: deviceA, device_b: deviceB }),
+      }),
+    "The corrected facts couldn't be saved."
+  );
+});
+document.getElementById("facts-reset-btn").addEventListener("click", async () => {
+  const ok = await confirmDialog("Your corrections to both devices are discarded and the battlecard is rebuilt from the facts as they were read.", {
+    title: "Reset to extracted facts?",
+    confirmLabel: "Reset",
+  });
+  if (!ok) return;
+  submitFacts(
+    () => fetch(`/api/v1/history/${factsState.record.id}/facts`, { method: "DELETE" }),
+    "The facts couldn't be reset."
+  );
+});
+
 // ---- History drawer ----
 const HISTORY_ID_PATTERN = /^[0-9a-f]{32}$/;
 const historyDrawer = document.getElementById("history-drawer");
@@ -976,6 +1245,11 @@ function formatTimestamp(iso) {
 }
 
 function easierLabel(item) {
+  const label = installLabel(item);
+  return item.facts_edited ? `${label} \u00b7 facts edited` : label;
+}
+
+function installLabel(item) {
   const a = item.installation_friction_score_device_a;
   const b = item.installation_friction_score_device_b;
   if (item.provisioning_undocumented) return "No install scores, setup not documented";
@@ -1163,6 +1437,7 @@ async function loadHistoryItem(id) {
       fromForm: false,
       createdAt: record.created_at,
       canRerun: (record.sources || []).length === 2,
+      canEditFacts: (record.devices || []).length === 2,
     });
     renderResults(record.battlecard);
     return true;

@@ -32,9 +32,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional, Sequence
 
+from qsg_synthesizer.models.schemas import QSGExtraction
 from qsg_synthesizer.paths import default_data_dir
 from qsg_synthesizer.schemas import (
     BattlecardResponse,
+    ExtractedDevice,
     HistoryRecord,
     HistoryStack,
     HistorySummary,
@@ -80,8 +82,10 @@ def save_comparison(
     battlecard: BattlecardResponse,
     input_fingerprint: Optional[str] = None,
     sources: Sequence[tuple[str, str]] = (),
+    devices: Sequence[ExtractedDevice] = (),
 ) -> HistoryRecord:
-    """Save a battlecard; `sources` are its (name, text) inputs, A then B."""
+    """Save a battlecard; `sources` are its (name, text) inputs and `devices`
+    its extractions, A then B."""
     HISTORY_DIR.mkdir(parents=True, exist_ok=True)
     model_names = battlecard.comparison_matrix.get("model_name", {})
     with _sources_lock:
@@ -97,9 +101,34 @@ def save_comparison(
             battlecard=battlecard,
             input_fingerprint=input_fingerprint,
             sources=stored,
+            devices=list(devices),
         )
         _write_atomic(HISTORY_DIR / f"{record.id}.json", record.model_dump_json())
     _prune_oldest()
+    return record
+
+
+def update_facts(
+    history_id: str,
+    battlecard: BattlecardResponse,
+    edited_extractions: Optional[list[QSGExtraction]],
+) -> Optional[HistoryRecord]:
+    """Replace a record's battlecard after its facts were corrected (or reset,
+    with `edited_extractions` None). Returns None if the record is gone."""
+    model_names = battlecard.comparison_matrix.get("model_name", {})
+    with _sources_lock:
+        record = get_comparison(history_id)
+        if record is None:
+            return None
+        record = record.model_copy(
+            update={
+                "battlecard": battlecard,
+                "edited_extractions": edited_extractions,
+                "device_a_name": model_names.get("device_a", record.device_a_name),
+                "device_b_name": model_names.get("device_b", record.device_b_name),
+            }
+        )
+        _write_atomic(HISTORY_DIR / f"{record.id}.json", record.model_dump_json())
     return record
 
 
@@ -197,6 +226,7 @@ def _load_all_summaries() -> List[HistorySummary]:
                     provisioning_undocumented=bool(
                         data["battlecard"].get("unscored_reason")
                     ),
+                    facts_edited=bool(data["battlecard"].get("facts_edited")),
                     input_fingerprint=data.get("input_fingerprint"),
                 )
             )
@@ -254,7 +284,9 @@ def _build_stacks(summaries: List[HistorySummary]) -> List[HistoryStack]:
         redundant = []
         for member in members:
             fingerprint = member.input_fingerprint
-            if fingerprint is None:
+            # An edited record holds the user's corrections, so it's never
+            # just a copy of another run of the same documents.
+            if fingerprint is None or member.facts_edited:
                 continue
             if fingerprint in seen:
                 redundant.append(member.id)

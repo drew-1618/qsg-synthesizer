@@ -551,12 +551,16 @@ class TestLlmHardening:
         assert card.extraction_source_device_a == "heuristic"
         assert card.extraction_source_device_b == "heuristic"
 
-    def test_extract_device_specs_keeps_order(self):
-        a, b = orchestrator.extract_device_specs(
+    def test_extract_devices_keeps_order(self):
+        a, b = orchestrator.extract_devices(
             _DEVICE_A_TEXT, "a.md", _DEVICE_B_TEXT, "b.md"
         )
-        assert a == extract_device_spec(_DEVICE_A_TEXT, "a.md")
-        assert b == extract_device_spec(_DEVICE_B_TEXT, "b.md")
+        assert orchestrator.device_spec(a) == extract_device_spec(
+            _DEVICE_A_TEXT, "a.md"
+        )
+        assert orchestrator.device_spec(b) == extract_device_spec(
+            _DEVICE_B_TEXT, "b.md"
+        )
 
 
 class TestCarriedThroughFields:

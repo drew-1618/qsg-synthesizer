@@ -40,13 +40,14 @@ from fastapi import (
 )
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from qsg_synthesizer.logging_config import configure_logging
+from qsg_synthesizer.models.schemas import QSGExtraction
 from qsg_synthesizer.paths import APP_NAME, PACKAGE_DIR, resource_dir
 from qsg_synthesizer.schemas import (
     CompareResponse,
-    DeviceSpec,
+    ExtractedDevice,
     HistoryPage,
     HistoryRecord,
     HistoryStackPage,
@@ -64,7 +65,8 @@ from qsg_synthesizer.services.orchestrator import (
     LLM_MODEL_CHOICES,
     LLMOverride,
     default_model,
-    extract_device_specs,
+    device_spec,
+    extract_devices,
     server_llm_provider,
     synthesize_battlecard,
 )
@@ -240,7 +242,7 @@ class CompareTextRequest(BaseModel):
 def compare_text(payload: CompareTextRequest) -> CompareResponse:
     _require_text(payload.device_a_text, payload.device_a_name)
     _require_text(payload.device_b_text, payload.device_b_name)
-    device_a, device_b = extract_device_specs(
+    device_a, device_b = extract_devices(
         payload.device_a_text,
         payload.device_a_name,
         payload.device_b_text,
@@ -259,20 +261,24 @@ def _input_fingerprint(text_a: str, text_b: str) -> str:
 
 
 def _synthesize_and_save(
-    device_a: DeviceSpec,
-    device_b: DeviceSpec,
+    device_a: ExtractedDevice,
+    device_b: ExtractedDevice,
     sources: list[tuple[str, str]],
     perspective: Optional[Perspective] = None,
     keep_documents: bool = True,
 ) -> CompareResponse:
     """`sources` are the (name, text) inputs, A then B, kept for reruns
-    unless `keep_documents` is off."""
-    battlecard = synthesize_battlecard(device_a, device_b, perspective)
+    unless `keep_documents` is off. The extractions are always kept, so the
+    facts can be corrected later."""
+    battlecard = synthesize_battlecard(
+        device_spec(device_a), device_spec(device_b), perspective
+    )
     (_, text_a), (_, text_b) = sources
     record = history.save_comparison(
         battlecard,
         input_fingerprint=_input_fingerprint(text_a, text_b),
         sources=sources if keep_documents else (),
+        devices=(device_a, device_b),
     )
     return CompareResponse(**battlecard.model_dump(), history_id=record.id)
 
@@ -339,9 +345,7 @@ def compare_pdfs(
     name_a = device_a_pdf.filename or "device_a.pdf"
     name_b = device_b_pdf.filename or "device_b.pdf"
 
-    device_a, device_b = extract_device_specs(
-        device_a_text, name_a, device_b_text, name_b
-    )
+    device_a, device_b = extract_devices(device_a_text, name_a, device_b_text, name_b)
     return _synthesize_and_save(
         device_a, device_b, [(name_a, device_a_text), (name_b, device_b_text)]
     )
@@ -450,7 +454,7 @@ def compare_documents(
     text_b, source_b = _resolve_document(
         "Device B", device_b_file, device_b_text, device_b_name
     )
-    device_a, device_b = extract_device_specs(text_a, source_a, text_b, source_b, llm)
+    device_a, device_b = extract_devices(text_a, source_a, text_b, source_b, llm)
     return _synthesize_and_save(
         device_a,
         device_b,
@@ -604,10 +608,96 @@ def rerun_history_item(
             ),
         )
     (name_a, text_a), (name_b, text_b) = sources
-    device_a, device_b = extract_device_specs(text_a, name_a, text_b, name_b, llm)
+    device_a, device_b = extract_devices(text_a, name_a, text_b, name_b, llm)
     return _synthesize_and_save(
         device_a, device_b, sources, record.battlecard.perspective
     )
+
+
+# Corrected facts are typed in by hand, so these are generous; they only keep
+# a runaway request from producing an enormous record.
+MAX_FACT_CHARS = 500
+MAX_FACT_ITEMS = 60
+
+
+def _check_fact_sizes(value: object) -> None:
+    if isinstance(value, str) and len(value) > MAX_FACT_CHARS:
+        raise ValueError(f"Each fact can be at most {MAX_FACT_CHARS} characters.")
+    if isinstance(value, list):
+        if len(value) > MAX_FACT_ITEMS:
+            raise ValueError(f"Each list can have at most {MAX_FACT_ITEMS} entries.")
+        for item in value:
+            _check_fact_sizes(item)
+    if isinstance(value, dict):
+        for item in value.values():
+            _check_fact_sizes(item)
+
+
+class EditFactsRequest(BaseModel):
+    """Both devices' facts as the user corrected them."""
+
+    device_a: QSGExtraction
+    device_b: QSGExtraction
+
+    @model_validator(mode="after")
+    def _within_limits(self) -> "EditFactsRequest":
+        _check_fact_sizes(self.model_dump())
+        return self
+
+
+def _require_extractions(record: HistoryRecord) -> None:
+    if len(record.devices) != 2:
+        hint = (
+            " Rerun it to get a copy whose facts can be edited."
+            if len(record.sources) == 2
+            else ""
+        )
+        raise HTTPException(
+            status_code=409,
+            detail=("This comparison was saved before facts could be edited." + hint),
+        )
+
+
+def _rebuild_facts(
+    record: HistoryRecord, edited: Optional[list[QSGExtraction]]
+) -> CompareResponse:
+    """Rebuild a record's battlecard from its extractions (or the user's
+    corrections of them) and save it in place. No document is read again."""
+    device_a, device_b = record.devices
+    edited_a, edited_b = edited or (None, None)
+    battlecard = synthesize_battlecard(
+        device_spec(device_a, edited_a),
+        device_spec(device_b, edited_b),
+        record.battlecard.perspective,
+    )
+    battlecard.facts_edited = edited is not None
+    if history.update_facts(record.id, battlecard, edited) is None:
+        raise HTTPException(
+            status_code=404, detail=f"History item '{record.id}' not found."
+        )
+    return CompareResponse(**battlecard.model_dump(), history_id=record.id)
+
+
+@router.put("/api/v1/history/{history_id}/facts", response_model=CompareResponse)
+def edit_history_facts(history_id: str, payload: EditFactsRequest) -> CompareResponse:
+    """Replace a saved comparison's facts with the user's corrections and
+    rebuild its battlecard in place."""
+    record = _get_history_record_or_404(history_id)
+    _require_extractions(record)
+    edited = [
+        facts.model_copy(update={"source_document": device.extraction.source_document})
+        for facts, device in zip((payload.device_a, payload.device_b), record.devices)
+    ]
+    return _rebuild_facts(record, edited)
+
+
+@router.delete("/api/v1/history/{history_id}/facts", response_model=CompareResponse)
+def reset_history_facts(history_id: str) -> CompareResponse:
+    """Undo the user's corrections: rebuild the battlecard from the facts as
+    they were extracted."""
+    record = _get_history_record_or_404(history_id)
+    _require_extractions(record)
+    return _rebuild_facts(record, None)
 
 
 @router.delete("/api/v1/history/{history_id}/copies")
