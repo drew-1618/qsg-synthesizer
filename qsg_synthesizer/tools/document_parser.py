@@ -18,7 +18,11 @@ from docx import Document
 from docx.table import Table
 from docx.text.paragraph import Paragraph
 
-from qsg_synthesizer.tools.pdf_parser import PdfRejectedError, extract_text_from_pdf
+from qsg_synthesizer.tools.pdf_parser import (
+    PdfRejectedError,
+    ScannedPdfError,
+    extract_text_from_pdf,
+)
 from qsg_synthesizer.tools.text_cleaning import clean_text
 
 SUPPORTED_EXTENSIONS = frozenset({".pdf", ".docx", ".md", ".markdown", ".txt"})
@@ -69,7 +73,7 @@ def extract_text(filename: str, contents: bytes) -> str:
             return clean_text(_docx_to_markdown(contents))
         if ext in _TEXT_EXTENSIONS:
             return clean_text(_decode_text(contents))
-    except DocumentParseError:
+    except (DocumentParseError, ScannedPdfError):
         raise
     except PdfRejectedError as exc:
         raise DocumentRejectedError(str(exc)) from exc

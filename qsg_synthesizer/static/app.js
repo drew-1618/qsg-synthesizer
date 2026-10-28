@@ -534,6 +534,8 @@ function describeFailure(res, data, fallback) {
     const wait = Number(res.headers.get("Retry-After")) || 60;
     return `Too many requests. Wait ${wait} seconds and try again.`;
   }
+  // A 502 is an AI provider failing on a scanned PDF; its detail says why.
+  if (res.status === 502 && detail) return detail;
   if (res.status >= 500) return "The server hit an error. Try again in a moment.";
   if (res.status === 413) return `${detail || "That file is too large."} Choose a smaller file.`;
   if (res.status === 422) return `${detail || "That document could not be read."} Use a document with selectable text.`;
@@ -541,6 +543,8 @@ function describeFailure(res, data, fallback) {
   if (res.status === 400 && /exceeded maximum size/.test(detail)) {
     return "That pasted text is too long. Paste a shorter excerpt or upload it as a file.";
   }
+  // A scanned PDF's message already says what to do instead.
+  if (res.status === 400 && /scanned PDF/.test(detail)) return detail;
   if (res.status === 400) return `${detail || fallback} Choose a different file.`;
   return detail || fallback;
 }

@@ -20,9 +20,28 @@ from qsg_synthesizer.tools.text_cleaning import clean_text
 MAX_PDF_PAGES = 200
 
 
+# A PDF with less text than this across its pages, but with images, is a scan
+# (or photos of pages): there's nothing for the text pipeline to read.
+_SCANNED_MAX_TEXT_CHARS = 40
+# Scanned pages sent to an AI model for transcription, at most, and the size
+# they're rendered at: about what vision models downscale to anyway.
+MAX_SCANNED_PAGES = 20
+_PAGE_IMAGE_LONG_EDGE_PX = 1568
+_PAGE_IMAGE_JPEG_QUALITY = 80
+
+
 class PdfRejectedError(ValueError):
     """A readable PDF the app won't process; the message is user-facing and
     completes a sentence starting with the file name."""
+
+
+class ScannedPdfError(ValueError):
+    """A PDF whose pages are images with no text layer; its pages can be
+    rendered with `render_pdf_pages` for an AI model to read."""
+
+    def __init__(self, page_count: int):
+        super().__init__(f"Scanned PDF with {page_count} page(s) and no text layer")
+        self.page_count = page_count
 
 
 def extract_text_from_pdf(pdf_bytes: bytes) -> str:
@@ -46,8 +65,39 @@ def extract_text_from_pdf(pdf_bytes: bytes) -> str:
                 f"has {document.page_count} pages; the limit is {MAX_PDF_PAGES}. "
                 "Upload just the setup or specifications section."
             )
+        if _is_scanned(document):
+            raise ScannedPdfError(document.page_count)
         text = pymupdf4llm.to_markdown(document)
     finally:
         document.close()
 
     return clean_text(text)
+
+
+def _is_scanned(document: pymupdf.Document) -> bool:
+    text_chars = 0
+    has_images = False
+    for page in document:
+        text_chars += len("".join(page.get_text().split()))
+        if text_chars >= _SCANNED_MAX_TEXT_CHARS:
+            return False
+        has_images = has_images or bool(page.get_images())
+    return has_images
+
+
+def render_pdf_pages(
+    pdf_bytes: bytes, max_pages: int = MAX_SCANNED_PAGES
+) -> list[bytes]:
+    """The first `max_pages` pages as JPEG images, scaled so the longer edge
+    is about what vision models read at (larger costs more and reads no
+    better)."""
+    document = pymupdf.open(stream=pdf_bytes, filetype="pdf")
+    try:
+        images = []
+        for page in document.pages(0, min(max_pages, document.page_count)):
+            scale = _PAGE_IMAGE_LONG_EDGE_PX / max(page.rect.width, page.rect.height)
+            pixmap = page.get_pixmap(matrix=pymupdf.Matrix(scale, scale), alpha=False)
+            images.append(pixmap.tobytes("jpg", jpg_quality=_PAGE_IMAGE_JPEG_QUALITY))
+        return images
+    finally:
+        document.close()

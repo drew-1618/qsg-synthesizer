@@ -38,6 +38,7 @@ packages = ["qsg_synthesizer"]
 # qsg_synthesizer/paths.py); an installed package gets these copies instead.
 [tool.hatch.build.targets.wheel.force-include]
 ".claude/agents/qsg_extractor.md" = "qsg_synthesizer/_bundled/agents/qsg_extractor.md"
+".claude/agents/page_transcriber.md" = "qsg_synthesizer/_bundled/agents/page_transcriber.md"
 "sample_docs/device_a_qsg.pdf" = "qsg_synthesizer/_bundled/sample_docs/device_a_qsg.pdf"
 "sample_docs/device_b_qsg.pdf" = "qsg_synthesizer/_bundled/sample_docs/device_b_qsg.pdf"
 

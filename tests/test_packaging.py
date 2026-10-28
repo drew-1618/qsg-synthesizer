@@ -42,6 +42,7 @@ def test_runtime_files_are_bundled_into_the_wheel():
         assert target.startswith("qsg_synthesizer/_bundled/")
     targets = set(bundled.values())
     assert "qsg_synthesizer/_bundled/agents/qsg_extractor.md" in targets
+    assert "qsg_synthesizer/_bundled/agents/page_transcriber.md" in targets
     assert "qsg_synthesizer/_bundled/sample_docs/device_a_qsg.pdf" in targets
     assert "qsg_synthesizer/_bundled/sample_docs/device_b_qsg.pdf" in targets
 

@@ -64,11 +64,14 @@ from qsg_synthesizer.services.auth import (
 from qsg_synthesizer.services.orchestrator import (
     LLM_MODEL_CHOICES,
     LLMOverride,
+    TranscriptionError,
     default_model,
     device_spec,
     extract_devices,
     server_llm_provider,
     synthesize_battlecard,
+    transcribe_pages,
+    transcription_provider,
 )
 from qsg_synthesizer.services.rate_limiter import RateLimiter
 from qsg_synthesizer.tools.document_parser import (
@@ -78,6 +81,12 @@ from qsg_synthesizer.tools.document_parser import (
     file_kind,
     is_supported,
 )
+from qsg_synthesizer.tools.pdf_parser import (
+    MAX_SCANNED_PAGES,
+    ScannedPdfError,
+    render_pdf_pages,
+)
+from qsg_synthesizer.tools.text_cleaning import clean_text
 
 configure_logging()
 logger = logging.getLogger(__name__)
@@ -299,7 +308,10 @@ def _require_text(text: str, name: str) -> str:
 SUPPORTED_TYPES_HINT = "Use a PDF, Word (.docx), Markdown or text file."
 
 
-def _read_document_upload(upload: UploadFile, pdf_only: bool = False) -> str:
+def _read_document_upload(
+    upload: UploadFile, pdf_only: bool = False, llm: Optional[LLMOverride] = None
+) -> tuple[str, list[str]]:
+    """The upload's text, and notes for the user on how it was read."""
     filename = upload.filename or ""
     if pdf_only:
         if not filename.lower().endswith(".pdf"):
@@ -320,6 +332,8 @@ def _read_document_upload(upload: UploadFile, pdf_only: bool = False) -> str:
         )
     try:
         text = extract_text(filename, contents)
+    except ScannedPdfError as exc:
+        return _transcribe_scanned_pdf(filename, contents, exc.page_count, llm)
     except DocumentRejectedError as exc:
         raise HTTPException(status_code=400, detail=f"'{filename}' {exc}")
     except DocumentParseError:
@@ -328,7 +342,31 @@ def _read_document_upload(upload: UploadFile, pdf_only: bool = False) -> str:
             status_code=400,
             detail=f"'{filename}' could not be read as a {file_kind(filename)}.",
         )
-    return _require_text(text, filename or "upload")
+    return _require_text(text, filename or "upload"), []
+
+
+def _transcribe_scanned_pdf(
+    filename: str, contents: bytes, page_count: int, llm: Optional[LLMOverride]
+) -> tuple[str, list[str]]:
+    """Have the AI provider read a scanned PDF's page images as text; the
+    built-in parser can't, so with no provider the upload is refused."""
+    status = 502 if transcription_provider(llm) else 400
+    try:
+        text, read_with = transcribe_pages(
+            render_pdf_pages(contents, MAX_SCANNED_PAGES), filename, llm
+        )
+    except TranscriptionError as exc:
+        raise HTTPException(status_code=status, detail=f"'{filename}' {exc}")
+    # Like every other format's text (see document_parser).
+    text = clean_text(text)
+    notes = [f"This is a scanned PDF; {read_with} read its pages as images."]
+    if page_count > MAX_SCANNED_PAGES:
+        notes.append(
+            f"Only the first {MAX_SCANNED_PAGES} of its {page_count} scanned pages "
+            "were read. Upload just the setup or specifications pages to read the "
+            "rest."
+        )
+    return _require_text(text, filename), notes
 
 
 @router.post(
@@ -340,15 +378,22 @@ def compare_pdfs(
     device_a_pdf: UploadFile = File(...),
     device_b_pdf: UploadFile = File(...),
 ) -> CompareResponse:
-    device_a_text = _read_document_upload(device_a_pdf, pdf_only=True)
-    device_b_text = _read_document_upload(device_b_pdf, pdf_only=True)
+    device_a_text, notes_a = _read_document_upload(device_a_pdf, pdf_only=True)
+    device_b_text, notes_b = _read_document_upload(device_b_pdf, pdf_only=True)
     name_a = device_a_pdf.filename or "device_a.pdf"
     name_b = device_b_pdf.filename or "device_b.pdf"
 
     device_a, device_b = extract_devices(device_a_text, name_a, device_b_text, name_b)
     return _synthesize_and_save(
-        device_a, device_b, [(name_a, device_a_text), (name_b, device_b_text)]
+        _with_notes(device_a, notes_a),
+        _with_notes(device_b, notes_b),
+        [(name_a, device_a_text), (name_b, device_b_text)],
     )
+
+
+def _with_notes(device: ExtractedDevice, notes: list[str]) -> ExtractedDevice:
+    """Put notes on how the document was read ahead of the extraction's own."""
+    return device.model_copy(update={"warnings": [*notes, *device.warnings]})
 
 
 def _resolve_document(
@@ -356,8 +401,10 @@ def _resolve_document(
     file: Optional[UploadFile],
     text: Optional[str],
     name: Optional[str],
-) -> tuple[str, str]:
-    """Return (document text, source name) from exactly one of a file or pasted text."""
+    llm: Optional[LLMOverride] = None,
+) -> tuple[str, str, list[str]]:
+    """Return (document text, source name, notes on how it was read) from
+    exactly one of a file or pasted text."""
     has_file = file is not None and bool(file.filename)
     has_text = bool(text and text.strip())
     if has_file == has_text:
@@ -366,9 +413,10 @@ def _resolve_document(
             detail=f"Add either a file or pasted text for {label}, not both.",
         )
     if file is not None and has_file:
-        return _read_document_upload(file), file.filename or "upload"
+        file_text, notes = _read_document_upload(file, llm=llm)
+        return file_text, file.filename or "upload", notes
     source_name = (name or "").strip() or "Pasted text"
-    return _require_text(text or "", source_name), source_name
+    return _require_text(text or "", source_name), source_name, []
 
 
 def _llm_override(
@@ -448,16 +496,16 @@ def compare_documents(
     llm_model: Optional[str] = Header(None, alias="X-LLM-Model", max_length=100),
 ) -> CompareResponse:
     llm = _llm_override(llm_provider, llm_api_key, llm_model)
-    text_a, source_a = _resolve_document(
-        "Device A", device_a_file, device_a_text, device_a_name
+    text_a, source_a, notes_a = _resolve_document(
+        "Device A", device_a_file, device_a_text, device_a_name, llm
     )
-    text_b, source_b = _resolve_document(
-        "Device B", device_b_file, device_b_text, device_b_name
+    text_b, source_b, notes_b = _resolve_document(
+        "Device B", device_b_file, device_b_text, device_b_name, llm
     )
     device_a, device_b = extract_devices(text_a, source_a, text_b, source_b, llm)
     return _synthesize_and_save(
-        device_a,
-        device_b,
+        _with_notes(device_a, notes_a),
+        _with_notes(device_b, notes_b),
         [(source_a, text_a), (source_b, text_b)],
         mode,
         keep_documents,

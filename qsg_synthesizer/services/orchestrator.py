@@ -24,6 +24,7 @@ normalization always goes through `qsg_synthesizer/tools/net_validator.py` and
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import os
@@ -31,7 +32,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from functools import partial
-from typing import Callable, Hashable, Iterable, Literal, Optional, TypeVar
+from typing import Any, Callable, Hashable, Iterable, Literal, Optional, TypeVar
 
 from pydantic import ValidationError
 
@@ -1406,6 +1407,186 @@ def _extract_via_gemini(
     if not response.text:
         raise ValueError("Gemini response contained no text")
     return _validate_extraction(_parse_json_payload(response.text))
+
+
+# ---------------------------------------------------------------------------
+# Scanned PDFs: an AI model transcribes the page images to Markdown, which
+# then goes through the same extraction as any other document.
+# ---------------------------------------------------------------------------
+
+_TRANSCRIBE_PAGES_PER_CALL = 4
+_TRANSCRIBE_MAX_OUTPUT_TOKENS = 8192
+_TRANSCRIBE_TIMEOUT_SECONDS = 120.0
+
+
+class TranscriptionError(Exception):
+    """Scanned pages couldn't be transcribed; the message is user-facing and
+    completes a sentence starting with the file name."""
+
+
+def _transcription_prompt(source_document: str, first_page: int) -> str:
+    return (
+        f"Source document: {source_document}\n"
+        f"These are its pages starting at page {first_page}. Transcribe them."
+    )
+
+
+def _transcribe_via_anthropic(
+    images: list[bytes],
+    source_document: str,
+    first_page: int,
+    api_key: Optional[str] = None,
+    model: Optional[str] = None,
+) -> str:
+    client = anthropic.Anthropic(
+        api_key=api_key, timeout=_TRANSCRIBE_TIMEOUT_SECONDS, max_retries=1
+    )
+    content: list[Any] = [
+        {
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": "image/jpeg",
+                "data": base64.b64encode(image).decode("ascii"),
+            },
+        }
+        for image in images
+    ]
+    content.append(
+        {"type": "text", "text": _transcription_prompt(source_document, first_page)}
+    )
+    response = client.messages.create(
+        model=model or _ANTHROPIC_EXTRACTOR_MODEL,
+        max_tokens=_TRANSCRIBE_MAX_OUTPUT_TOKENS,
+        system=_load_agent_system_prompt("page_transcriber.md"),
+        messages=[{"role": "user", "content": content}],
+    )
+    if getattr(response, "stop_reason", None) == "max_tokens":
+        raise ValueError("Transcription truncated at max_tokens")
+    return "".join(
+        getattr(block, "text", "")
+        for block in response.content
+        if getattr(block, "type", None) == "text"
+    )
+
+
+def _transcribe_via_gemini(
+    images: list[bytes],
+    source_document: str,
+    first_page: int,
+    api_key: Optional[str] = None,
+    model: Optional[str] = None,
+) -> str:
+    client = genai.Client(
+        api_key=api_key or os.environ["GEMINI_API_KEY"],
+        http_options=gemini_types.HttpOptions(
+            timeout=int(_TRANSCRIBE_TIMEOUT_SECONDS * 1000),
+            retry_options=gemini_types.HttpRetryOptions(
+                attempts=_GEMINI_RETRY_ATTEMPTS,
+                initial_delay=2.0,
+                max_delay=20.0,
+                http_status_codes=_GEMINI_RETRY_STATUS_CODES,
+            ),
+        ),
+    )
+    contents: list = [
+        gemini_types.Part.from_bytes(data=image, mime_type="image/jpeg")
+        for image in images
+    ]
+    contents.append(_transcription_prompt(source_document, first_page))
+    response = client.models.generate_content(
+        model=model or _gemini_model(),
+        contents=contents,
+        config=gemini_types.GenerateContentConfig(
+            system_instruction=_load_agent_system_prompt("page_transcriber.md"),
+            max_output_tokens=_TRANSCRIBE_MAX_OUTPUT_TOKENS,
+        ),
+    )
+    candidates = getattr(response, "candidates", None) or []
+    if (
+        candidates
+        and getattr(candidates[0], "finish_reason", None)
+        == gemini_types.FinishReason.MAX_TOKENS
+    ):
+        raise ValueError("Transcription truncated at max_output_tokens")
+    return response.text or ""
+
+
+_PROVIDER_TRANSCRIBERS: dict[str, Callable[..., str]] = {
+    _PROVIDER_ANTHROPIC: _transcribe_via_anthropic,
+    _PROVIDER_GEMINI: _transcribe_via_gemini,
+}
+
+
+def transcription_provider(llm: Optional[LLMOverride] = None) -> Optional[str]:
+    """The AI provider that would read a scanned PDF for this request, or None
+    when there's none (the built-in parser can't read images)."""
+    return _resolve_llm(llm)[0]
+
+
+def transcribe_pages(
+    images: list[bytes], source_document: str, llm: Optional[LLMOverride] = None
+) -> tuple[str, str]:
+    """Markdown text of scanned pages, read by the request's (or the server's)
+    AI provider a few pages per call, and who read it (e.g. "Gemini
+    (gemini-2.5-flash-lite)"). Raises TranscriptionError when there is no
+    provider or a call fails: unlike extraction, there's nothing to fall back
+    to."""
+    provider, api_key = _resolve_llm(llm)
+    if provider is None:
+        raise TranscriptionError(
+            "is a scanned PDF (its pages are images, with no text to read). "
+            "Choose an AI provider in Settings to read scanned pages, or paste "
+            "the document's text instead."
+        )
+    model = _requested_model(provider, llm) or default_model(provider)
+    transcribe = partial(_PROVIDER_TRANSCRIBERS[provider], api_key=api_key, model=model)
+    starts = range(0, len(images), _TRANSCRIBE_PAGES_PER_CALL)
+    workers = _GEMINI_CHUNK_WORKERS if provider == _PROVIDER_GEMINI else _CHUNK_WORKERS
+    try:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            parts = list(
+                pool.map(
+                    lambda start: transcribe(
+                        images[start : start + _TRANSCRIBE_PAGES_PER_CALL],
+                        source_document,
+                        start + 1,
+                    ),
+                    starts,
+                )
+            )
+    except Exception as exc:
+        logger.warning(
+            "%s transcription of scanned PDF %r failed",
+            _PROVIDER_NAMES[provider],
+            source_document,
+            exc_info=True,
+        )
+        raise TranscriptionError(
+            _transcription_failure(provider, exc, user_key=bool(api_key))
+        ) from exc
+    return "\n\n".join(part.strip() for part in parts), (
+        f"{_PROVIDER_NAMES[provider]} ({model})"
+    )
+
+
+def _transcription_failure(provider: str, exc: Exception, user_key: bool) -> str:
+    name = _PROVIDER_NAMES[provider]
+    key = "the key in your settings" if user_key else f"the server's {name} key"
+    if _is_rate_limited(exc):
+        return (
+            f"is a scanned PDF, and {key} hit its rate limit while reading its "
+            "pages. Wait a minute and try again."
+        )
+    if user_key and _is_auth_error(exc):
+        return (
+            f"is a scanned PDF, and the {name} key in your settings was rejected "
+            "while reading its pages. Check the key in Settings."
+        )
+    return (
+        f"is a scanned PDF, and the {name} request reading its pages failed. "
+        "Try again, or paste the document's text instead."
+    )
 
 
 _PROVIDER_EXTRACTORS: dict[str, Callable[..., QSGExtraction]] = {
