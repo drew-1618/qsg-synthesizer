@@ -20,6 +20,7 @@ ENV/
 .pytest_cache/
 .coverage
 data/
+evals/results/
 
 # Docker
 .docker/

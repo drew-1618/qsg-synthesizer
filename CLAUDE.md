@@ -159,6 +159,11 @@ Things that span multiple files:
 - `sample_docs/device_c_datasheet.md` (bullet specs) and `device_d_datasheet.md` (table specs)
   are the datasheet fixtures; `tests/test_datasheets.py` covers document types, spec rows,
   unscored comparisons and long-document chunking with a fake LLM.
+- `evals/` (`python -m evals.run_eval --provider heuristic|anthropic|gemini`) scores
+  extractions against hand-written readings in `evals/expected.json` (keywords; see
+  `evals/scoring.py`). `tests/test_eval_harness.py` pins the built-in parser's per-field
+  floors (`HEURISTIC_FLOORS`): raise them when the parser improves, never lower them to pass.
+  A new fixture in `tests/fixtures/realistic/` should get an expected reading there too.
 - Running the app or a script outside pytest loads `.env` and makes real LLM calls. For manual
   checks start uvicorn with `GEMINI_API_KEY= ANTHROPIC_API_KEY= LLM_PROVIDER=` (empty values win
   over `.env`) unless you mean to use a real provider.

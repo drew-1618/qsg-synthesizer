@@ -190,6 +190,26 @@ set `APP_USERNAME`/`APP_PASSWORD` and change the mapping in
 Runs fully offline — no `ANTHROPIC_API_KEY` required (the Anthropic-backed
 extraction path is covered separately with mocks in `tests/test_orchestrator.py`).
 
+## Measuring extraction quality
+
+`evals/` scores how well an extractor reads the sample documents and the
+vendor-style fixtures in `tests/fixtures/realistic/` against readings written
+down by hand in `evals/expected.json`:
+
+```bash
+.venv/bin/python -m evals.run_eval --provider heuristic           # offline
+.venv/bin/python -m evals.run_eval --provider gemini              # real API calls
+.venv/bin/python -m evals.run_eval --provider anthropic --model claude-haiku-5-5 --only router
+```
+
+It prints a per-document, per-field table (1.00 is a perfect reading) and saves
+the run to `evals/results/` (not committed) for comparing models or prompt
+changes. AI providers use `ANTHROPIC_API_KEY` / `GEMINI_API_KEY` from the
+environment or `./.env`, and are only called when named with `--provider`.
+The built-in parser was developed against these same documents, so its scores
+are optimistic; add a new fixture and its expected reading to measure it on
+something it hasn't seen.
+
 ## Lint & format
 
 ```bash

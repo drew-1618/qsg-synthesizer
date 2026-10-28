@@ -1,0 +1,137 @@
+{
+  "_comment": "The correct reading of each document, written from the document itself (not from what any extractor returns). Name, tool, port, LED and spec entries are keywords: a reading matches when its text contains the keyword, ignoring case and punctuation. A field left out isn't scored for that document; null means the document doesn't give one. See evals/scoring.py.",
+  "documents": {
+    "sample_docs/device_a_qsg.md": {
+      "device_name": "GX400",
+      "document_type": "quick_start_guide",
+      "default_ip": "192.168.10.1",
+      "provisioning_methods": ["TR-069", "QR/Mobile App", "Web GUI"],
+      "required_tools": [],
+      "ports": ["PON", "LAN", "Power"],
+      "leds": ["Power", "PON", "Alert"],
+      "wifi_standard": "802.11ax",
+      "wan_speed": "2.5 Gbps"
+    },
+    "sample_docs/device_a_qsg.pdf": {
+      "device_name": "GX400",
+      "document_type": "quick_start_guide",
+      "default_ip": "192.168.10.1",
+      "provisioning_methods": ["TR-069", "QR/Mobile App", "Web GUI"],
+      "required_tools": [],
+      "ports": ["PON", "LAN", "Power"],
+      "leds": ["Power", "PON", "Alert"],
+      "wifi_standard": "802.11ax",
+      "wan_speed": "2.5 Gbps"
+    },
+    "sample_docs/device_b_qsg.md": {
+      "device_name": "RG-210",
+      "document_type": "quick_start_guide",
+      "default_ip": "192.168.1.1",
+      "provisioning_methods": ["Console", "Web GUI", "Other"],
+      "required_tools": ["Phillips", "console cable", "laptop", "flathead"],
+      "ports": ["DSL", "LAN", "Console", "Power"],
+      "leds": ["Power", "DSL", "Status"],
+      "wifi_standard": "802.11ac",
+      "wan_speed": "100 Mbps"
+    },
+    "sample_docs/device_b_qsg.pdf": {
+      "device_name": "RG-210",
+      "document_type": "quick_start_guide",
+      "default_ip": "192.168.1.1",
+      "provisioning_methods": ["Console", "Web GUI", "Other"],
+      "required_tools": ["Phillips", "console cable", "laptop", "flathead"],
+      "ports": ["DSL", "LAN", "Console", "Power"],
+      "leds": ["Power", "DSL", "Status"],
+      "wifi_standard": "802.11ac",
+      "wan_speed": "100 Mbps"
+    },
+    "sample_docs/device_c_datasheet.md": {
+      "device_name": "AX9000",
+      "document_type": "datasheet",
+      "default_ip": null,
+      "wifi_standard": "802.11be",
+      "wan_speed": "10 Gbps",
+      "specs": ["throughput", "power", "temperature", "dimensions", "weight", "certifications"]
+    },
+    "sample_docs/device_d_datasheet.md": {
+      "device_name": "FX-600",
+      "document_type": "datasheet",
+      "default_ip": null,
+      "wifi_standard": "802.11ax",
+      "wan_speed": "2.5 Gbps",
+      "specs": ["throughput", "power", "temperature", "battery"]
+    },
+    "tests/fixtures/realistic/ap_qsg.md": {
+      "device_name": "AP-630",
+      "document_type": "quick_start_guide",
+      "default_ip": "192.168.0.1",
+      "provisioning_methods": ["DHCP", "Web GUI", "Other"],
+      "required_tools": ["screwdriver", "drill", "PoE", "cable"],
+      "ports": ["ETH0", "ETH1", "Console"],
+      "leds": ["Status"],
+      "wifi_standard": "802.11be",
+      "wan_speed": null,
+      "specs": ["power", "dimensions"]
+    },
+    "tests/fixtures/realistic/gateway_datasheet.md": {
+      "device_name": "HG-7200",
+      "document_type": "datasheet",
+      "default_ip": null,
+      "wifi_standard": "802.11be",
+      "wan_speed": "10 Gbps",
+      "specs": ["bands", "rate", "LAN", "USB", "dimensions", "weight", "power", "temperature"]
+    },
+    "tests/fixtures/realistic/gateway_plain_tables.txt": {
+      "device_name": "BG-5",
+      "document_type": "quick_start_guide",
+      "default_ip": "192.168.8.1",
+      "provisioning_methods": ["Web GUI"],
+      "required_tools": ["Ethernet", "laptop"],
+      "ports": ["PON", "LAN", "Phone", "Power"],
+      "leds": ["Power", "PON", "Internet", "Alarm"],
+      "wifi_standard": null,
+      "wan_speed": null
+    },
+    "tests/fixtures/realistic/modem_qsg.txt": {
+      "device_name": "ZX-110",
+      "document_type": "quick_start_guide",
+      "default_ip": "192.168.100.1",
+      "provisioning_methods": ["Other"],
+      "required_tools": ["coaxial", "computer"],
+      "ports": ["Cable", "Ethernet"],
+      "leds": ["Online"],
+      "wifi_standard": null,
+      "wan_speed": null
+    },
+    "tests/fixtures/realistic/ont_qsg_pdf.md": {
+      "device_name": "ONT-2410",
+      "document_type": "quick_start_guide",
+      "default_ip": "192.168.100.1",
+      "provisioning_methods": ["TR-069", "Web GUI"],
+      "required_tools": ["cleaning", "power meter", "screwdriver"],
+      "ports": ["PON", "GE", "POTS", "DC"],
+      "leds": ["PWR", "PON", "LOS", "ALARM"],
+      "wifi_standard": null,
+      "wan_speed": null
+    },
+    "tests/fixtures/realistic/router_qsg.md": {
+      "device_name": "RT-AX58",
+      "document_type": "quick_start_guide",
+      "default_ip": "192.168.50.1",
+      "provisioning_methods": ["Web GUI", "QR/Mobile App"],
+      "required_tools": ["computer"],
+      "ports": ["WAN", "LAN", "Power"],
+      "leds": ["Power", "WAN", "LAN"],
+      "wifi_standard": "802.11ax",
+      "wan_speed": null,
+      "specs": ["dimensions", "power"]
+    },
+    "tests/fixtures/realistic/switch_datasheet.md": {
+      "device_name": "EdgeLink 5400",
+      "document_type": "datasheet",
+      "default_ip": "192.168.1.254",
+      "wifi_standard": null,
+      "specs": ["ports", "uplinks", "PoE", "switching", "forwarding", "dimensions", "weight", "temperature"]
+    }
+  }
+}
