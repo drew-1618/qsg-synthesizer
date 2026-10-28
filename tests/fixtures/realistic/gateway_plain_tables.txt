@@ -1,0 +1,30 @@
+Brisa BG-5 Fiber Gateway
+Quick Start Guide
+
+WHAT YOU NEED
+- Ethernet cable (included)
+- Laptop or phone with a web browser
+
+PORTS
+Port            Type       Notes
+PON             SC/APC     Connect the fiber cable from the wall outlet
+LAN 1-2         RJ-45      Gigabit Ethernet to computers or switches
+Phone 1         RJ-11      Analog phone line
+Power           DC-IN      12 V adapter only
+
+STATUS LIGHTS
+Light      Status       Meaning
+Power      On           Device is powered
+           Off          No power
+PON        Blinking     Registering with the network
+           On           Fiber link is up
+           Off          No fiber signal
+Internet   On           Connected to the internet
+           Blinking     Traffic
+Alarm      On           Hardware failure, contact support
+
+INSTALLATION
+1. Connect the fiber cable to the PON port.
+2. Connect a computer to LAN 1 with the Ethernet cable.
+3. Plug in the power adapter. Wait until the PON light stays on.
+4. Open http://192.168.8.1 in a browser and sign in with the password on the label.

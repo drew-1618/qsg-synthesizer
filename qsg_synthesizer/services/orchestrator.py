@@ -282,6 +282,22 @@ _TABLE_SEPARATOR_CELL_RE = re.compile(r":?-+:?")
 # Header rows the sample docs' tables use, recognized even without a separator.
 _KNOWN_HEADER_ROWS = (["port", "type", "notes"], ["led", "meaning"])
 _NUMBER_COLUMN_HEADERS = {"", "no", "item", "number", "callout", "ref"}
+# Plain-text tables: columns split by a tab or a run of spaces (pasted text
+# keeps its spaces; uploads arrive with tabs, see `text_cleaning`).
+_ALIGNED_GAP_RE = re.compile(r"\t+| {2,}")
+_SENTENCE_END_RE = re.compile(r"[.!?]$")
+_STEP_NUMBER_CELL_RE = re.compile(r"(?:step\s+)?\d{1,2}[.):]?", re.IGNORECASE)
+# Words a plain-text table's header row is made of, since without a "---"
+# separator nothing else marks it as one.
+_PLAIN_HEADER_WORDS = {
+    "port", "ports", "interface", "interfaces", "connector", "connectors", "type",
+    "notes", "note", "description", "led", "leds", "indicator", "indicators",
+    "light", "lights", "status", "state", "color", "colour", "behavior",
+    "behaviour", "meaning", "function", "purpose", "item", "name", "spec",
+    "specification", "specifications", "parameter", "feature", "value", "values",
+    "model", "label", "callout", "no", "number", "details", "media", "cable",
+    "speed", "use", "remarks", "pattern", "condition",
+}  # fmt: skip
 _ITEM_NUMBER_RE = re.compile(r"\d{1,2}[.)]?|[A-Za-z]")
 _LED_NAME_RE = re.compile(r"\b(?:leds?|indicators?|lights?)\b", re.IGNORECASE)
 _LED_SUFFIX_RE = re.compile(r"\s*\b(?:leds?|indicators?|lights?)\s*$", re.IGNORECASE)
@@ -489,6 +505,8 @@ def _is_plain_heading(line: str) -> bool:
     of the known section names (as plain text pasted from a PDF has them)."""
     if len(line) > _PLAIN_HEADING_MAX_CHARS or line[0] in "-*|>" or line[0].isdigit():
         return False
+    if _ALIGNED_GAP_RE.search(line):  # a plain-text table's header row
+        return False
     if line.endswith((".", ",", ";")):
         return False
     letters = [c for c in line if c.isalpha()]
@@ -566,11 +584,19 @@ def _is_separator_row(cells: list[str]) -> bool:
 
 
 def _parse_tables(lines: list[str]) -> list[_Table]:
-    """Each run of "|" lines as one table. A leading column of item numbers
-    ("No." / 1, 2, 3, as hardware callout tables have) is dropped."""
+    """Each run of "|" lines as one table, and each run of plain-text rows
+    (see `_aligned_cells`). A leading column of item numbers ("No." / 1, 2,
+    3, as hardware callout tables have) is dropped."""
     tables = []
     block: list[list[str]] = []
+    aligned: list[list[str]] = []
     for line in [*lines, ""]:
+        cells = None if "|" in line else _aligned_cells(line)
+        if cells:
+            aligned.append(cells)
+        else:
+            tables.extend(_aligned_table(aligned))
+            aligned = []
         if "|" in line:
             block.append(_table_cells(line))
             continue
@@ -585,6 +611,46 @@ def _parse_tables(lines: list[str]) -> list[_Table]:
         tables.append(_without_number_column(_Table(header, rows)))
         block = []
     return tables
+
+
+def _aligned_cells(line: str) -> Optional[list[str]]:
+    """A plain-text table row's cells, or None for a line that isn't one:
+    fewer than two columns, a numbered step, or prose whose sentences happen
+    to be split by two spaces."""
+    stripped = line.strip()
+    if not stripped:
+        return None
+    cells = [
+        _clean_markdown_emphasis(cell)
+        for cell in _ALIGNED_GAP_RE.split(_BULLET_PREFIX_RE.sub("", stripped))
+    ]
+    if _ALIGNED_GAP_RE.match(line):
+        cells.insert(0, "")  # continues the row above, as merged cells do
+    if len(cells) < 2 or any(_SENTENCE_END_RE.search(cell) for cell in cells[:-1]):
+        return None
+    if len(cells) == 2 and _STEP_NUMBER_CELL_RE.fullmatch(cells[0]):
+        return None  # "1)  Connect the cable"
+    return cells
+
+
+def _aligned_table(rows: list[list[str]]) -> list[_Table]:
+    """A run of plain-text rows as a table (none for a single row). The first
+    row is the header when it reads as one, e.g. "Port  Type  Notes"."""
+    if len(rows) < 2:
+        return []
+    header: list[str] = []
+    if _is_plain_header_row(rows[0]):
+        header, rows = rows[0], rows[1:]
+    return [_without_number_column(_Table(header, rows))]
+
+
+def _is_plain_header_row(cells: list[str]) -> bool:
+    def is_header_word(cell: str) -> bool:
+        words = re.findall(r"[a-z]+", cell.lower())
+        return bool(words) and all(word in _PLAIN_HEADER_WORDS for word in words)
+
+    known = sum(is_header_word(cell) for cell in cells)
+    return is_header_word(cells[0]) and known * 2 >= len(cells)
 
 
 def _without_number_column(table: _Table) -> _Table:

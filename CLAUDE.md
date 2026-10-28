@@ -36,14 +36,15 @@ uv tool install . && qsg-synthesizer             # installed-package path (qsg_s
 `/compare-pdfs` / `/compare-text`, in `qsg_synthesizer/main.py`:
 1. `qsg_synthesizer/tools/document_parser.py` turns a PDF, `.docx`, Markdown or text upload into Markdown
    (PDFs via `pdf_parser.py` / pymupdf4llm; `.docx` is walked in body order with a zip-bomb guard)
-   and every format goes through `text_cleaning.clean_text()` to strip boilerplate.
+   and every format goes through `text_cleaning.clean_text()` to strip boilerplate
+   (it keeps the column gaps of plain-text tables as single tabs and collapses other spacing).
 2. `orchestrator.extract_device_spec()` runs once per device:
    - `extract_qsg_fields` produces a raw `QSGExtraction` (`qsg_synthesizer/models/schemas.py`) via an LLM
      (Anthropic or Gemini, chosen by `_select_llm_provider` / `LLM_PROVIDER`), using
      `.claude/agents/qsg_extractor.md` (frontmatter stripped) as the system prompt. With no
      usable key, or on *any* API/parse error, it falls back to `_heuristic_extract_qsg`,
-     a regex parser: heading wordings map to sections via `_SECTION_PATTERNS`, tables are read
-     by their header row (`_parse_tables`), and `_heuristic_extract` also returns warnings when
+     a regex parser: heading wordings map to sections via `_SECTION_PATTERNS`, tables (Markdown pipes, or
+     plain-text columns split by tabs/runs of spaces) are read by their header row (`_parse_tables`), and `_heuristic_extract` also returns warnings when
      it read only the first model of a multi-model spec table or recognized too little
      (`THIN_INSTALL_WARNING` / `THIN_SPECS_WARNING`).
    - The dashboard's Settings can override the provider per request: `POST /api/v1/compare`

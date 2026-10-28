@@ -22,6 +22,7 @@ from qsg_synthesizer.services.orchestrator import (
     extract_device_spec,
     synthesize_battlecard,
 )
+from qsg_synthesizer.tools.document_parser import extract_text
 from qsg_synthesizer.tools.pdf_parser import extract_text_from_pdf
 
 ROOT = Path(__file__).parent.parent
@@ -287,6 +288,42 @@ class TestTables:
         extraction = _heuristic_extract_qsg(text, "z")
         assert extraction.wifi_standard is None
         assert extraction.specs[0].name == "Wireless"
+
+    @pytest.mark.parametrize("uploaded", [False, True], ids=["pasted", "uploaded"])
+    def test_plain_text_tables_are_read_by_their_columns(self, uploaded):
+        name = "gateway_plain_tables.txt"
+        path = FIXTURES_DIR / name
+        # Pasted text keeps its spaces; an upload's column gaps become tabs.
+        text = extract_text(name, path.read_bytes()) if uploaded else path.read_text()
+        extraction = _heuristic_extract_qsg(text, name)
+        assert [(p.port_name, p.port_type, p.notes) for p in extraction.cabling_ports][
+            :2
+        ] == [
+            ("PON", "SC/APC", "Connect the fiber cable from the wall outlet"),
+            ("LAN 1-2", "RJ-45", "Gigabit Ethernet to computers or switches"),
+        ]
+        leds = [
+            (led.led_name, led.raw_description) for led in extraction.led_indicators
+        ]
+        assert ("PON", "Off: No fiber signal") in leds  # blank name continues PON
+        assert len(leds) == 8
+
+    def test_leds_without_colors_are_classified_by_meaning(self):
+        spec = _normalize_to_device_spec(_fixture("gateway_plain_tables.txt"))
+        states = {(led.name, led.description): led.state for led in spec.led_states}
+        assert states[("PON", "Blinking: Registering with the network")] == "BOOTING"
+        assert states[("Internet", "On: Connected to the internet")] == "ONLINE"
+        assert states[("Alarm", "On: Hardware failure, contact support")] == "FAULT"
+        assert "UNKNOWN" not in states.values()
+        risks = synthesize_battlecard(spec, spec).key_risks_device_a
+        assert not [risk for risk in risks if "misread" in risk]
+
+    def test_prose_with_double_spaces_is_not_a_table(self):
+        text = (
+            "# Z1\n\n## Ports\n\nConnect the cable.  Then wait.\n"
+            "Turn it on.  Check the light.\n1)  Plug in\n2)  Wait\n"
+        )
+        assert _heuristic_extract_qsg(text, "z").cabling_ports == []
 
 
 class TestKeywordsStepsAndNames:
