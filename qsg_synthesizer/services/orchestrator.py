@@ -61,6 +61,11 @@ from qsg_synthesizer.tools.capability_compare import (
 from qsg_synthesizer.tools.led_normalizer import LEDState, led_sort_key, normalize_led
 from qsg_synthesizer.tools.net_validator import InvalidNetworkInput, classify_ip
 from qsg_synthesizer.tools.port_counter import expand_port_range
+from qsg_synthesizer.tools.spec_units import (
+    SPEC_GROUPS,
+    classify_spec,
+    convert_to_unit_of,
+)
 
 try:
     import anthropic
@@ -1887,18 +1892,38 @@ def _build_comparison_matrix(device_a: DeviceSpec, device_b: DeviceSpec) -> dict
 
 
 def _merge_spec_rows(device_a: DeviceSpec, device_b: DeviceSpec) -> list[dict]:
-    """One row per open-ended spec name (matched case-insensitively), A's
-    order first; a side that doesn't list a spec gets None."""
+    """One row per open-ended spec, A's order first within each group (see
+    `spec_units.SPEC_GROUPS`); a side that doesn't list a spec gets None.
+    Specs match by shared name ("Max PHY rate" and "Wireless throughput" are
+    both "Max wireless rate"), else by name case-insensitively. When the two
+    sides measure a spec in different units, `converted_device_b` gives B's
+    value in A's unit."""
     rows: dict[str, dict] = {}
+    families: dict[str, Optional[str]] = {}
     for side, spec in (("device_a", device_a), ("device_b", device_b)):
         for item in spec.specs:
-            row = rows.setdefault(
-                _spec_key(item.name),
-                {"name": item.name, "device_a": None, "device_b": None},
-            )
+            kind = classify_spec(item.name, item.value)
+            key = kind.canonical or _spec_key(item.name)
+            row = rows.get(key)
+            if row is None:
+                row = rows[key] = {
+                    "name": item.name,
+                    "device_a": None,
+                    "device_b": None,
+                    "group": kind.group,
+                }
+                families[key] = kind.family
+            elif row[side] is None and _spec_key(row["name"]) != _spec_key(item.name):
+                row["name"] = kind.canonical or row["name"]
             if row[side] is None:
                 row[side] = item.value
-    return list(rows.values())[:_MAX_SPEC_ROWS]
+    for key, row in rows.items():
+        # A's unit is the reference: in sales mode A is the user's own device.
+        converted = convert_to_unit_of(families[key], row["device_a"], row["device_b"])
+        if converted:
+            row["converted_device_b"] = converted
+    ordered = sorted(rows.values(), key=lambda row: SPEC_GROUPS.index(row["group"]))
+    return ordered[:_MAX_SPEC_ROWS]
 
 
 def _is_install_document(spec: DeviceSpec) -> bool:

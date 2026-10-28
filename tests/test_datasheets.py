@@ -111,10 +111,51 @@ class TestSpecs:
             ],
         )
         rows = synthesize_battlecard(a, b).comparison_matrix["extra_specs"]
+        # Grouped (Power before Physical), A's order first within a group.
         assert rows == [
-            {"name": "Power", "device_a": "10 W", "device_b": "8 W"},
-            {"name": "Weight", "device_a": "1 kg", "device_b": None},
-            {"name": "Battery", "device_a": None, "device_b": "Yes"},
+            {"name": "Power", "device_a": "10 W", "device_b": "8 W", "group": "Power"},
+            {"name": "Battery", "device_a": None, "device_b": "Yes", "group": "Power"},
+            {
+                "name": "Weight",
+                "device_a": "1 kg",
+                "device_b": None,
+                "group": "Physical",
+            },
+        ]
+
+    def test_differently_worded_specs_share_a_row_with_units_aligned(self):
+        a = DeviceSpec(
+            model_name="A",
+            provisioning_method=ProvisioningMethod.WEB_GUI,
+            specs=[
+                SpecValue(name="Max PHY rate", value="18.7 Gbps combined"),
+                SpecValue(name="Weight", value="1.4 kg"),
+            ],
+        )
+        b = DeviceSpec(
+            model_name="B",
+            provisioning_method=ProvisioningMethod.WEB_GUI,
+            specs=[
+                SpecValue(name="Unit weight", value="3.1 lb"),
+                SpecValue(name="Wireless throughput", value="3000 Mbps"),
+            ],
+        )
+        rows = synthesize_battlecard(a, b).comparison_matrix["extra_specs"]
+        assert rows == [
+            {
+                "name": "Max wireless rate",
+                "device_a": "18.7 Gbps combined",
+                "device_b": "3000 Mbps",
+                "group": "Performance",
+                "converted_device_b": "3 Gbps",
+            },
+            {
+                "name": "Weight",
+                "device_a": "1.4 kg",
+                "device_b": "3.1 lb",
+                "group": "Physical",
+                "converted_device_b": "1.41 kg",
+            },
         ]
 
     def test_malformed_optional_fields_from_an_llm_are_dropped(self):

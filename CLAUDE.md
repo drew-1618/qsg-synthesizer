@@ -65,6 +65,10 @@ uv tool install . && qsg-synthesizer             # installed-package path (qsg_s
      parts become `DeviceSpec.extraction_warnings` and then `BattlecardResponse.warnings`.
    - Each extraction carries a `document_type` (`quick_start_guide`/`datasheet`/`other`; the
      heuristic only says datasheet on clear evidence) and open-ended `specs` rows.
+     `_merge_spec_rows` lines those up across devices with `tools/spec_units.py`: names map
+     to a shared name and group (`classify_spec`, `SPEC_GROUPS`), and when B measures a spec
+     in another unit than A the row gets `converted_device_b` (`convert_to_unit_of`). The UI
+     and exports show group headings (when there is more than one) and the conversion.
 3. `synthesize_battlecard()` is fully rule-based (friction score, risks, advantages, talk track).
    Friction is scored only when both documents are quick start guides (`_is_install_document`,
    which treats a missing type as a guide) and both list a provisioning method; otherwise both

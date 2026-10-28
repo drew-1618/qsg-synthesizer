@@ -205,3 +205,29 @@ class TestSetupRows:
         assert "| Setup Steps | 6 | Unknown |" in md
         assert "| Setup Difficulty | Unknown | Hard |" in md
         assert battlecard_to_pdf_bytes(card).startswith(b"%PDF")
+
+
+class TestSpecGroupExports:
+    def test_spec_groups_become_headings_and_conversions_follow_b(self):
+        card = _card()
+        card.comparison_matrix["extra_specs"] = [
+            {"name": "Power", "device_a": "10 W", "device_b": "8 W", "group": "Power"},
+            {
+                "name": "Weight",
+                "device_a": "1.4 kg",
+                "device_b": "3.1 lb",
+                "group": "Physical",
+                "converted_device_b": "1.41 kg",
+            },
+        ]
+        md = battlecard_to_markdown(card)
+        assert "| **Power** | | |\n| Power | 10 W | 8 W |" in md
+        assert "| **Physical** | | |\n| Weight | 1.4 kg | 3.1 lb (≈ 1.41 kg) |" in md
+        assert battlecard_to_pdf_bytes(card).startswith(b"%PDF")
+
+    def test_one_spec_group_gets_no_heading(self):
+        card = _card()
+        card.comparison_matrix["extra_specs"] = [
+            {"name": "Power", "device_a": "10 W", "device_b": None, "group": "Power"}
+        ]
+        assert "| **Power** |" not in battlecard_to_markdown(card)
