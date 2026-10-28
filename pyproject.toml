@@ -61,7 +61,7 @@ pythonpath = ["."]
 
 [tool.mypy]
 python_version = "3.11"
-files = ["qsg_synthesizer"]
+files = ["qsg_synthesizer", "evals"]
 
 # pymupdf/pymupdf4llm ship no stubs/py.typed marker, and following into
 # their transitive deps (pymupdf_layout -> onnxruntime -> numpy) pulls in
