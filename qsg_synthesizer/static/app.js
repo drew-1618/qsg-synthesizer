@@ -1524,10 +1524,23 @@ function renderSpecTable(data, nameA, nameB) {
   });
   // Open-ended specs (power, certifications...) come from the documents
   // themselves, so the names are escaped like any other extracted text.
-  const specCell = (value) =>
-    value ? escapeHtml(value) : `<span class="text-ink-muted">Not listed</span>`;
-  (cm.extra_specs || []).forEach((row) => {
-    rows.push([escapeHtml(row.name), specCell(row.device_a), specCell(row.device_b)]);
+  // Specs are grouped (Performance, Power...) when they span several groups;
+  // records from before groups have none. A competitor value in another
+  // unit also shows in ours, from the server's deterministic conversion.
+  const specCell = (value, converted) => {
+    if (!value) return `<span class="text-ink-muted">Not listed</span>`;
+    const conversion = converted
+      ? ` <span class="text-ink-muted whitespace-nowrap">(≈ ${escapeHtml(converted)})</span>`
+      : "";
+    return escapeHtml(value) + conversion;
+  };
+  const specs = cm.extra_specs || [];
+  const grouped = new Set(specs.map((row) => row.group)).size > 1;
+  let previousGroup = null;
+  specs.forEach((row) => {
+    if (grouped && row.group !== previousGroup) rows.push({ heading: row.group });
+    previousGroup = row.group;
+    rows.push([escapeHtml(row.name), specCell(row.device_a), specCell(row.device_b, row.converted_device_b)]);
   });
   // Below md each spec stacks into a block and the device name is repeated
   // above its value, since a 3-column table is too narrow on a phone.
@@ -1535,15 +1548,24 @@ function renderSpecTable(data, nameA, nameB) {
   const deviceLabel = (name, id) =>
     `<span class="md:hidden block text-xs font-medium text-ink-muted mb-0.5">${escapeHtml(name)}${roles[id]}</span>`;
   document.getElementById("comparison-table-body").innerHTML = rows
-    .map(
-      ([label, a, b]) => `
+    .map((row) =>
+      row.heading
+        ? `
+      <tr class="max-md:block">
+        <th scope="colgroup" colspan="3" class="pt-5 pb-2 border-b border-line text-left font-heading font-semibold text-ink max-md:block">${escapeHtml(row.heading)}</th>
+      </tr>`
+        : specRow(row)
+    )
+    .join("");
+
+  function specRow([label, a, b]) {
+    return `
       <tr class="align-top max-md:block max-md:border-b max-md:border-line max-md:py-3">
         <th scope="row" class="md:border-b md:border-line md:py-3 pr-3 text-left font-medium text-ink-muted max-md:block max-md:pb-2">${label}</th>
         <td class="md:border-b md:border-line md:py-3 pr-3 break-words max-md:block max-md:py-1.5">${deviceLabel(nameA, "a")}${a}</td>
         <td class="md:border-b md:border-line md:py-3 pr-3 break-words max-md:block max-md:py-1.5">${deviceLabel(nameB, "b")}${b}</td>
-      </tr>`
-    )
-    .join("");
+      </tr>`;
+  }
 }
 
 // The "nothing found" fallbacks render as plain muted text; real findings get

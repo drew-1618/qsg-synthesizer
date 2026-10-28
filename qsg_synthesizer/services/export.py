@@ -166,11 +166,26 @@ def _friction_scored(battlecard: BattlecardResponse) -> bool:
     )
 
 
-def _extra_spec_rows(cm: dict) -> list[tuple[str, Optional[str], Optional[str]]]:
-    return [
-        (str(row.get("name", "")), row.get("device_a"), row.get("device_b"))
-        for row in cm.get("extra_specs") or []
-    ]
+def _extra_spec_rows(
+    cm: dict,
+) -> list[tuple[Optional[str], str, Optional[str], Optional[str]]]:
+    """(group heading or None, name, A's value, B's value) per open-ended spec.
+    The heading is set on a group's first row, when the specs span more than
+    one group; B's value carries its conversion to A's unit when there is one.
+    Records from before groups have none."""
+    specs = cm.get("extra_specs") or []
+    grouped = len({row.get("group") for row in specs}) > 1
+    rows = []
+    previous = None
+    for row in specs:
+        group = row.get("group")
+        heading = group if grouped and group != previous else None
+        previous = group
+        value_b = row.get("device_b")
+        if value_b and row.get("converted_device_b"):
+            value_b = f"{value_b} (≈ {row['converted_device_b']})"
+        rows.append((heading, str(row.get("name", "")), row.get("device_a"), value_b))
+    return rows
 
 
 def _spec_cell(value: Optional[str]) -> str:
@@ -235,7 +250,9 @@ def battlecard_to_markdown(battlecard: BattlecardResponse) -> str:
         cell_a = _plain_cell(_matrix_value(cm, key, "device_a"))
         cell_b = _plain_cell(_matrix_value(cm, key, "device_b"))
         lines.append(f"| {label} | {cell_a} | {cell_b} |")
-    for spec_name, value_a, value_b in _extra_spec_rows(cm):
+    for heading, spec_name, value_a, value_b in _extra_spec_rows(cm):
+        if heading:
+            lines.append(f"| **{_md_cell(heading)}** | | |")
         lines.append(
             f"| {_md_cell(spec_name)} | {_spec_cell(value_a)} | {_spec_cell(value_b)} |"
         )
@@ -312,7 +329,9 @@ def battlecard_to_pdf_bytes(battlecard: BattlecardResponse) -> bytes:
         cell_a = _cell_flowable(_matrix_value(cm, key, "device_a"))
         cell_b = _cell_flowable(_matrix_value(cm, key, "device_b"))
         rows.append([label, cell_a, cell_b])
-    for spec_name, value_a, value_b in _extra_spec_rows(cm):
+    for heading, spec_name, value_a, value_b in _extra_spec_rows(cm):
+        if heading:
+            rows.append([Paragraph(f"<b>{_esc(heading)}</b>", _BODY), "", ""])
         rows.append(
             [
                 Paragraph(_esc(spec_name), _BODY),

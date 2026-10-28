@@ -11,6 +11,7 @@ from qsg_synthesizer.tools.net_validator import (
     classify_ip,
 )
 from qsg_synthesizer.tools.port_counter import expand_port_range
+from qsg_synthesizer.tools.spec_units import classify_spec, convert_to_unit_of
 
 
 class TestClassifyIp:
@@ -174,3 +175,62 @@ class TestCapabilityKey:
     def test_different_features_do_not_match(self):
         assert capability_key("USB 3.0 port") != capability_key("USB 2.0 port")
         assert capability_key("Mesh Wi-Fi") != capability_key("Guest Wi-Fi")
+
+
+class TestSpecUnits:
+    @pytest.mark.parametrize(
+        "name, value, canonical, group",
+        [
+            ("Max Wireless Throughput", "", "Max wireless rate", "Performance"),
+            ("Max PHY rate", "", "Max wireless rate", "Performance"),
+            ("Max. Power Consumption", "", "Power consumption", "Power"),
+            ("Power", "15 W typical", "Power consumption", "Power"),
+            ("Power", "12 V DC, 4 A", "Power input", "Power"),
+            ("Dimensions (W x D x H)", "", "Dimensions", "Physical"),
+            ("Operating temp.", "", "Operating temperature", "Environmental"),
+            ("PoE budget", "", "PoE budget", "Power"),
+            ("Regulatory", "", "Certifications", "Compliance"),
+            ("Warranty", "", None, "Other"),
+        ],
+    )
+    def test_names_map_to_a_shared_name_and_group(self, name, value, canonical, group):
+        kind = classify_spec(name, value)
+        assert (kind.canonical, kind.group) == (canonical, group)
+
+    @pytest.mark.parametrize(
+        "family, a, b, converted",
+        [
+            ("weight", "1.4 kg", "3.1 lb", "1.41 kg"),
+            (
+                "length",
+                "240 x 240 x 48 mm",
+                "9.4 x 9.4 x 1.9 in",
+                "239 x 239 x 48.3 mm",
+            ),
+            (
+                "length",
+                "240 x 240 x 48 mm",
+                '9.4" x 9.4" x 1.9"',
+                "239 x 239 x 48.3 mm",
+            ),
+            ("temperature", "0 to 45 °C", "32°F to 104°F", "0 to 40 °C"),
+            ("temperature", "-40 to 65 °C", "-40 - 149 °F", "-40 to 65 °C"),
+            ("rate", "19 Gbps combined", "3000 Mbps", "3 Gbps"),
+            ("power", "28 W", "9 W typical, 12000 mW max", None),  # mixed units
+            ("power", "28 W", "12000 mW", "12 W"),
+        ],
+    )
+    def test_b_is_converted_to_a_unit_when_they_differ(self, family, a, b, converted):
+        assert convert_to_unit_of(family, a, b) == converted
+
+    @pytest.mark.parametrize(
+        "family, a, b",
+        [
+            ("weight", "1 kg", "2 kg"),  # same unit
+            ("weight", "light", "2 kg"),  # A can't be read
+            ("rate", "10 Gbps", None),  # B not listed
+            (None, "FCC", "CE"),  # no unit family
+        ],
+    )
+    def test_nothing_converts_without_two_readable_units(self, family, a, b):
+        assert convert_to_unit_of(family, a, b) is None
