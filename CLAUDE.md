@@ -38,6 +38,13 @@ uv tool install . && qsg-synthesizer             # installed-package path (qsg_s
    (PDFs via `pdf_parser.py` / pymupdf4llm; `.docx` is walked in body order with a zip-bomb guard)
    and every format goes through `text_cleaning.clean_text()` to strip boilerplate
    (it keeps the column gaps of plain-text tables as single tabs and collapses other spacing).
+   A PDF with images but (almost) no text is a scan: `pdf_parser` raises `ScannedPdfError`,
+   and `main._transcribe_scanned_pdf` renders its pages (`render_pdf_pages`, at most
+   `MAX_SCANNED_PAGES`) for `orchestrator.transcribe_pages`, which has the request's or the
+   server's AI provider transcribe them to Markdown (`.claude/agents/page_transcriber.md`, a few
+   pages per call). The transcript is then cleaned, stored and extracted like any text. With no
+   provider that's a 400 (the built-in parser can't read images); a failed call is a 502. Both
+   details are shown as-is by `describeFailure()`.
 2. `orchestrator.extract_device_spec()` runs once per device:
    - `extract_qsg_fields` produces a raw `QSGExtraction` (`qsg_synthesizer/models/schemas.py`) via an LLM
      (Anthropic or Gemini, chosen by `_select_llm_provider` / `LLM_PROVIDER`), using
@@ -130,7 +137,8 @@ Things that span multiple files:
   instructions: localhost and 127.0.0.1 are different sites with separate settings, keys and
   installed app. `autostart.py` writes per-OS login entries (systemd user unit, launchd
   agent, HKCU Run key) that run `python -m qsg_synthesizer --no-browser --log-file …`.
-- `.claude/agents/*.md` are read at runtime, so the Dockerfile copies `.claude/`, and
+- `.claude/agents/*.md` are read at runtime (each also needs a `force-include` line in
+  `pyproject.toml` for the wheel), so the Dockerfile copies `.claude/`, and
   `.dockerignore` must not exclude `*.md` there. `sample_docs/*.pdf` likewise ship in the
   image for `GET /api/v1/samples`, and the tests read `sample_docs/*.md|pdf`.
 - `NO_RISKS_MESSAGE` / `NO_ADVANTAGES_MESSAGE` in `orchestrator.py` are matched by exact
